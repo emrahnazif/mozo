@@ -26,10 +26,13 @@ from __future__ import annotations
 __all__ = ["ModelManager"]
 
 import logging
+from collections.abc import Callable
+from contextlib import nullcontext
 from importlib import import_module
 from threading import Lock
 from typing import Any
 
+from . import weights
 from .registry import get_model_info
 
 
@@ -49,6 +52,22 @@ def _build(family: str, variant: str, **kwargs: Any) -> Any:
     return adapter(variant=variant, **kwargs)
 
 
+def _load_total(family: str, variant: str, device: str | None, kwargs: dict[str, Any]) -> int:
+    """Bytes a build with these adapter arguments will download, for a progress bar's total.
+
+    Zero when there is no plan to make -- a checkpoint of your own downloads nothing, and a
+    variant mozo does not publish has nothing to plan from. The total then grows as files
+    arrive, and the build itself is what says, better, if something is wrong.
+    """
+    if "checkpoint_path" in kwargs:
+        return 0
+    try:
+        return weights.download_size(family, variant, kwargs.get("runtime", "auto"),
+                                     device=device, revision=kwargs.get("revision"))
+    except Exception:  # noqa: BLE001 - see the docstring
+        return 0
+
+
 class ModelManager:
     """A thread-safe cache of loaded models, one entry per distinct request.
 
@@ -61,25 +80,38 @@ class ModelManager:
     def __init__(self) -> None:
         #: model id -> model, in the order they were first asked for.
         self._models: dict[str, Any] = {}
-        #: Held across a build, so two threads cannot load the same model twice. Reads are not
-        #: locked: a single dict lookup needs no help to be atomic, and there is no longer any
-        #: read-modify-write to protect -- the bookkeeping that needed one was the eviction
-        #: order, and nothing is evicted.
-        self._load_lock = Lock()
+        #: model id -> the lock held across that model's build, so two threads cannot build one
+        #: model twice while two different models build at once: SAM 3's 3.4 GB download no
+        #: longer holds up a model that is already on disk. Reads of ``_models`` are not locked;
+        #: a single dict lookup needs no help to be atomic.
+        self._building: dict[str, Lock] = {}
+        #: Guards ``_building`` itself, for the instant it takes to find or add one lock.
+        self._building_lock = Lock()
 
-    def get_model(self, family: str, variant: str, device: str | None = None, **kwargs: Any) -> Any:
+    def get_model(
+        self, family: str, variant: str, device: str | None = None, *,
+        progress: Callable[[int, int], None] | None = None,
+        cancelled: Callable[[], bool] | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Return a loaded model, building it on first use.
 
         Args:
             family: Model family, e.g. ``"rfdetr"``.
             variant: Variant within that family, e.g. ``"nano"``.
             device: Where to run. ``None`` lets the adapter pick the best this machine has.
+            progress: Called as ``progress(done_bytes, total_bytes)`` while the build downloads
+                weights. See :func:`mozo.weights.watching`.
+            cancelled: Checked once per downloaded chunk; true raises
+                :class:`~mozo.weights.DownloadCancelled` and nothing is cached. It stops a
+                download, not a build: torch loading weights cannot be interrupted.
             **kwargs: Passed to the adapter -- ``checkpoint_path``, ``labels``, ``revision``,
                 ``runtime``. Part of the cache key, so two checkpoints under one variant name
                 are two entries rather than one.
 
         Raises:
             ValueError: If the family is not registered, or the adapter rejects the variant.
+            mozo.weights.DownloadCancelled: If *cancelled* said stop.
         """
         # Everything that changes what gets built belongs in the identity. A checkpoint of your
         # own, a pinned revision, a different runtime -- each is a different model wearing the
@@ -93,17 +125,23 @@ class ModelManager:
         if resident is not None:
             return resident
 
-        # The lock is held across the build and nowhere else. A load takes seconds, and a request
-        # for a model already in memory is answered above without waiting for it -- that is the
-        # case that has to stay fast. Distinct models therefore load one at a time, a warm-up
-        # cost paid once.
-        with self._load_lock:
+        # One lock per model, held across its build and nowhere else. A request for a model already
+        # in memory is answered above without any lock; a second request for one being built
+        # waits for that build rather than starting another; a request for a different model
+        # builds alongside it.
+        with self._building_lock:
+            building = self._building.setdefault(model_id, Lock())
+        with building:
             resident = self._models.get(model_id)
             if resident is not None:
                 return resident  # another thread loaded it while this one queued
 
             _log.info("[mozo] loading %s", model_id)
-            model = _build(family, variant, device=device, **kwargs)
+            watched = progress is not None or cancelled is not None
+            with (weights.watching(progress, cancelled,
+                                   total=_load_total(family, variant, device, kwargs))
+                  if watched else nullcontext()):
+                model = _build(family, variant, device=device, **kwargs)
             self._models[model_id] = model
             return model
 

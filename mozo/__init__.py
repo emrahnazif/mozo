@@ -47,13 +47,17 @@ from mozo.weights import configure
 _shared = ModelManager()
 
 
-def get_model(identifier: str, variant: str | None = None, device: str | None = None):
+def get_model(identifier: str, variant: str | None = None, device: str | None = None, *,
+              progress=None, cancelled=None):
     """Load a model from a shared cache.
 
     Args:
         identifier: ``"family/variant"``, or just the family when *variant* is given.
         variant: The variant, if *identifier* did not carry it.
         device: ``"cuda"``, ``"mps"``, ``"cpu"``, or ``None`` to take the best available.
+        progress: ``progress(done_bytes, total_bytes)`` while weights download.
+        cancelled: Checked once per downloaded chunk; true stops the download. See
+            :meth:`~mozo.manager.ModelManager.get_model`.
 
     Returns:
         The family's predictor, with a ``predict()`` method.
@@ -68,4 +72,5 @@ def get_model(identifier: str, variant: str | None = None, device: str | None = 
                 f"Expected 'family/variant' or a separate variant argument, got {identifier!r}")
         identifier, variant = identifier.split("/", 1)
 
-    return _shared.get_model(identifier, variant, device=device)
+    return _shared.get_model(identifier, variant, device=device,
+                             progress=progress, cancelled=cancelled)

@@ -112,6 +112,14 @@ class TestWhatALoadWouldFetch:
             weights.download_size("toy", "gamma", device="cpu")
 
 
+def test_model_size_is_what_the_model_runs_from_cached_or_not(weights, manifest_file):
+    """Every part of the runtime, but not the licence or NOTICE; the same before and after."""
+    expected = _sizes(manifest_file, "toy/split", "onnx-fp32-encoder", "onnx-fp32-decoder")
+    assert weights.model_size("toy", "split", "onnx-fp32") == expected
+    weights.fetch("toy", "split", "onnx-fp32")
+    assert weights.model_size("toy", "split", "onnx-fp32") == expected
+
+
 class TestInventory:
     def test_an_empty_cache_holds_nothing(self, weights):
         assert weights.cached() == []

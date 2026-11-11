@@ -52,6 +52,27 @@ _default_device: str | None = None
 _log = logging.getLogger(__name__)
 
 
+def free_device_memory() -> None:
+    """Collect, then hand the accelerators' cached blocks back to the driver.
+
+    Dropping the last reference to a model frees its tensors into torch's caching allocator, not
+    to the device: another process -- a training run about to start -- sees no more free memory
+    until the cache is emptied. torch is only consulted if something already imported it; a
+    process that never loaded a model has nothing to give back.
+    """
+    import gc
+    import sys
+
+    gc.collect()
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
+
 def get_default_device() -> str:
     """Return the best device this machine has: ``cuda``, else ``mps``, else ``cpu``.
 

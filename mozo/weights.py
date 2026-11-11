@@ -43,6 +43,7 @@ __all__ = [
     "is_cached",
     "license_of",
     "manifest",
+    "model_size",
     "part_of",
     "parts",
     "remove",
@@ -734,6 +735,24 @@ def download_size(
         898465192
     """
     return sum(a["size"] for a in _missing(*_planned(family, variant, runtime, device, revision)))
+
+
+def model_size(
+    family: str, variant: str, runtime: str = "auto", *,
+    device: str | None = None, revision: str | None = None,
+) -> int:
+    """Bytes of the weights a load of this model runs from, cached or not.
+
+    Every part of the runtime and what it brings with it, but not the licence or NOTICE: an
+    estimate of what the model occupies once loaded, which is what a host deciding what to
+    unload weighs. Arguments as for :func:`is_cached`.
+
+    Examples:
+        >>> model_size("rfdetr", "large", "torch-fp32")         # doctest: +SKIP
+        135957704
+    """
+    _, files = _planned(family, variant, runtime, device, revision)
+    return sum(a["size"] for key, a in files.items() if key not in _ACCOMPANYING)
 
 
 def fetch(

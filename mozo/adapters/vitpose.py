@@ -14,6 +14,7 @@ does not find people, it is told where they are. Pair it with anything that prod
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Union
 
@@ -29,6 +30,9 @@ try:
     import pixelflow as pf
 except ImportError:  # pragma: no cover - depends on the install
     raise ImportError("PixelFlow is not installed. Install it with: pip install pixelflow") from None
+
+
+_log = logging.getLogger(__name__)
 
 
 def _joint_names(labels: Any) -> list[str]:
@@ -118,11 +122,11 @@ class ViTPosePredictor:
             published=checkpoint_path is None,
         )
         if self._labels is None:
-            print(
+            _log.warning(
                 "[mozo] no joint names for this checkpoint. Keypoints will carry an id and "
                 "name=None. Pass labels=[...] to name them."
             )
-        print(f"ViTPose {variant} ready on {self.device} via {self.runtime}.")
+        _log.info("ViTPose %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def predict(
         self,

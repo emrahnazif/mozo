@@ -25,6 +25,7 @@ an image, never across two.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Union
 
@@ -34,6 +35,9 @@ from ..image import load_image
 from ..runtimes import get_default_device, select_runtime
 from ..vendors.ben2_deploy import Predictor
 from ..weights import artifacts, resolve
+
+
+_log = logging.getLogger(__name__)
 
 
 class Ben2Predictor:
@@ -86,7 +90,7 @@ class Ben2Predictor:
             weights = Path(checkpoint_path)
 
         self._predictor = Predictor.from_pretrained(weights, device=self.device)
-        print(f"BEN2 {variant} ready on {self.device} via {self.runtime}.")
+        _log.info("BEN2 %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def predict(self, image: Union[str, np.ndarray], *, stretch: bool = True) -> np.ndarray:
         """Matte *image*.

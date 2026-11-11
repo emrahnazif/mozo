@@ -39,6 +39,7 @@ __all__ = [
 
 import hashlib
 import json
+import logging
 import os
 import time
 import urllib.request
@@ -63,6 +64,9 @@ _ACCOMPANYING = (_LICENCE_KEY, _NOTICE_KEY)
 _REQUIRED = frozenset({_LICENCE_KEY})
 
 _manifest: dict[str, Any] | None = None
+
+
+_log = logging.getLogger(__name__)
 
 
 class WeightsError(RuntimeError):
@@ -219,7 +223,9 @@ def _fetch(url: str, target: Path, *, size: int, sha256: str) -> None:
                 written += len(chunk)
                 now = time.monotonic()
                 if size and now - last_report > 1.0:
-                    print(f"  {target.name}  {100 * written / size:5.1f}%", flush=True)
+                    # Temporary: progress moves to a callback (todo item 4), and only the
+                    # command line will turn it back into these lines.
+                    _log.info("  %s  %5.1f%%", target.name, 100 * written / size)
                     last_report = now
     except OSError as error:
         partial.unlink(missing_ok=True)
@@ -259,7 +265,7 @@ def _obtain(artifact: dict[str, Any], revision_dir: Path) -> Path:
             f"  sha256: {artifact['sha256']}"
         )
 
-    print(f"[mozo] downloading {target.name} ({artifact['size'] / 1e6:.1f} MB)", flush=True)
+    _log.info("[mozo] downloading %s (%.1f MB)", target.name, artifact["size"] / 1e6)
     _fetch(url, target, size=artifact["size"], sha256=artifact["sha256"])
     return target
 

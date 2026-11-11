@@ -25,11 +25,15 @@ from __future__ import annotations
 
 __all__ = ["ModelManager"]
 
+import logging
 from importlib import import_module
 from threading import Lock
 from typing import Any
 
 from .registry import get_model_info
+
+
+_log = logging.getLogger(__name__)
 
 
 def _build(family: str, variant: str, **kwargs: Any) -> Any:
@@ -98,7 +102,7 @@ class ModelManager:
             if resident is not None:
                 return resident  # another thread loaded it while this one queued
 
-            print(f"[mozo] loading {model_id}", flush=True)
+            _log.info("[mozo] loading %s", model_id)
             model = _build(family, variant, device=device, **kwargs)
             self._models[model_id] = model
             return model

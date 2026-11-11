@@ -33,6 +33,7 @@ __all__ = [
     "select_runtime",
 ]
 
+import logging
 import shutil
 import zipfile
 from pathlib import Path
@@ -45,6 +46,9 @@ from .weights import _RUNNABLE, framework_of, part_of, runtime_of
 #: Cached: the answer cannot change within a process, and ``torch.cuda.is_available()`` costs
 #: real time the first time it is asked.
 _default_device: str | None = None
+
+
+_log = logging.getLogger(__name__)
 
 
 def get_default_device() -> str:
@@ -376,10 +380,9 @@ class OnnxRunner:
         self.input_shape: tuple = tuple(self._session.get_inputs()[0].shape)
 
         if self.provider != wanted[0]:
-            print(
-                f"[mozo] {Path(path).name}: asked for {wanted[0]}, running on {self.provider}. "
-                f"Latency will not reflect {device}.",
-                flush=True,
+            _log.warning(
+                "[mozo] %s: asked for %s, running on %s. Latency will not reflect %s.",
+                Path(path).name, wanted[0], self.provider, device,
             )
 
     def __call__(self, batch: np.ndarray, **extra: Any) -> tuple[np.ndarray, ...]:

@@ -22,6 +22,7 @@ and never from the library.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
@@ -40,6 +41,9 @@ except ImportError:  # pragma: no cover - depends on the install
     raise ImportError("PixelFlow is not installed. Install it with: pip install pixelflow") from None
 
 __all__ = ["PromptablePredictor"]
+
+
+_log = logging.getLogger(__name__)
 
 
 def bounds(masks: np.ndarray) -> np.ndarray:
@@ -137,7 +141,7 @@ class PromptablePredictor:
         weights = (Path(checkpoint_path) if checkpoint_path
                    else resolve(self.FAMILY, variant, self.runtime, revision=revision))
         self._segmenter = self.VENDOR.Segmenter(weights, device=self.device)
-        print(f"{self.DISPLAY} {variant} ready on {self.device} via {self.runtime}.")
+        _log.info("%s %s ready on %s via %s.", self.DISPLAY, variant, self.device, self.runtime)
 
     def predict(
         self,

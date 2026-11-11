@@ -19,6 +19,7 @@ any method; if one ever needs to, that is the signal the families have actually 
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Union
@@ -35,6 +36,9 @@ try:
     import pixelflow as pf
 except ImportError:  # pragma: no cover - depends on the install
     raise ImportError("PixelFlow is not installed. Install it with: pip install pixelflow") from None
+
+
+_log = logging.getLogger(__name__)
 
 
 class YOLOPredictor:
@@ -117,11 +121,12 @@ class YOLOPredictor:
             revision=revision, published=checkpoint_path is None,
         )
         if self._labels is None:
-            print(
+            _log.warning(
                 "[mozo] no class names for this checkpoint. Detections will carry class_id "
                 "and class_name=None. Pass labels=[...] to name them."
             )
-        print(f"{self.DISPLAY} {variant} ready on {self.device} via {self.runtime} at {self.imgsz}px.")
+        _log.info("%s %s ready on %s via %s at %spx.",
+                  self.DISPLAY, variant, self.device, self.runtime, self.imgsz)
 
     def _forward(self, batch: torch.Tensor) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
         """Run the batch through whichever runtime is loaded, returning the raw head output.

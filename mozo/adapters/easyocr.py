@@ -21,6 +21,7 @@ so each detection carries its four corners in ``segments`` with the axis-aligned
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Union
 
@@ -40,6 +41,9 @@ __all__ = ["EasyOCRPredictor"]
 
 #: The family this adapter serves, as the registry and the manifest name it.
 FAMILY = "easyocr"
+
+
+_log = logging.getLogger(__name__)
 
 
 class EasyOCRPredictor:
@@ -104,7 +108,7 @@ class EasyOCRPredictor:
         weights = (Path(checkpoint_path) if checkpoint_path
                    else resolve(FAMILY, variant, self.runtime, revision=revision))
         self._reader = Reader(weights, SPECS[variant], device=self.device)
-        print(f"EasyOCR {variant} ready on {self.device} via {self.runtime}.")
+        _log.info("EasyOCR %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def predict(
         self,

@@ -17,6 +17,7 @@ beside them.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Union
@@ -44,6 +45,9 @@ FAMILY = "sam3"
 #: ``levels[-1]`` as the grid it attends over and the rest as mask features, so a graph that
 #: returned them the other way round would segment confidently and wrongly.
 LEVELS = ("level0", "level1", "level2")
+
+
+_log = logging.getLogger(__name__)
 
 
 class GraphVision:
@@ -143,7 +147,7 @@ class Sam3Predictor:
             package = resolve(FAMILY, variant, self.runtime, revision=revision)
             vision = GraphVision(CoreMLRunner(package), self.device)
         self._segmenter = Segmenter(weights, device=self.device, vision=vision)
-        print(f"SAM 3 ready on {self.device} via {self.runtime}.")
+        _log.info("SAM 3 ready on %s via %s.", self.device, self.runtime)
 
     def predict(
         self,

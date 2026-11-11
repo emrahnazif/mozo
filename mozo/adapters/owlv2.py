@@ -17,6 +17,7 @@ in as a prompt there.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Union
@@ -38,6 +39,9 @@ __all__ = ["OwlV2Predictor"]
 
 #: The family this adapter serves, as the registry and the manifest name it.
 FAMILY = "owlv2"
+
+
+_log = logging.getLogger(__name__)
 
 
 class OwlV2Predictor:
@@ -106,7 +110,7 @@ class OwlV2Predictor:
         weights = (Path(checkpoint_path) if checkpoint_path
                    else resolve(FAMILY, variant, self.runtime, revision=revision))
         self._detector = Detector(weights, variant, device=self.device)
-        print(f"OWLv2 {variant} ready on {self.device} via {self.runtime}.")
+        _log.info("OWLv2 %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def predict(
         self,

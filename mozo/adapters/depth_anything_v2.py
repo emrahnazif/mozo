@@ -27,6 +27,7 @@ that has them.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Union
 
@@ -37,6 +38,9 @@ from ..runtimes import get_default_device, select_runtime
 from ..image import load_image
 from ..vendors.depth_anything_v2_deploy import MODEL_SPECS, Predictor
 from ..weights import artifacts, resolve
+
+
+_log = logging.getLogger(__name__)
 
 
 class DepthAnythingV2Predictor:
@@ -92,7 +96,7 @@ class DepthAnythingV2Predictor:
             weights = Path(checkpoint_path)
 
         self._predictor = Predictor.from_pretrained(variant, weights=weights, device=self.device)
-        print(f"Depth Anything V2 {variant} ready on {self.device} via {self.runtime}.")
+        _log.info("Depth Anything V2 %s ready on %s via %s.", variant, self.device, self.runtime)
 
     @property
     def unit(self) -> str | None:

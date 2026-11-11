@@ -30,6 +30,14 @@ __version__ = "1.1.2"
 
 __all__ = ["MODEL_REGISTRY", "ModelManager", "__version__", "get_model", "get_model_info"]
 
+import logging as _logging
+
+# A library reports what it is doing and leaves where that goes to whoever embeds it. Every
+# module logs under ``mozo``; this handler keeps Python's last-resort printer from writing those
+# records to stderr when the host has configured nothing. The command line attaches a handler
+# of its own, which is why ``mozo start`` and ``mozo run`` still print.
+_logging.getLogger(__name__).addHandler(_logging.NullHandler())
+
 from mozo.manager import ModelManager
 from mozo.registry import MODEL_REGISTRY, get_model_info
 

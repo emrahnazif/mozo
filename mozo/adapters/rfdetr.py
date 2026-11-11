@@ -17,6 +17,7 @@ of the graph is reimplemented here.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Union
 
@@ -34,6 +35,9 @@ try:
     import pixelflow as pf
 except ImportError:  # pragma: no cover - depends on the install
     raise ImportError("PixelFlow is not installed. Install it with: pip install pixelflow") from None
+
+_log = logging.getLogger(__name__)
+
 
 class _ProcessingOnly(Predictor):
     """The vendor's pre/post-processing without its model, for the graph runtimes.
@@ -123,11 +127,11 @@ class RFDETRPredictor:
             revision=revision, published=checkpoint_path is None,
         )
         if self._labels is None:
-            print(
+            _log.warning(
                 "[mozo] no class names for this checkpoint. Detections will carry class_id "
                 "and class_name=None. Pass labels=[...] to name them."
             )
-        print(f"RF-DETR {variant} ready on {self.device} via {self.runtime}.")
+        _log.info("RF-DETR %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def _build_processing_only(self) -> Predictor:
         """Build the vendor's pre/post-processing without its model.

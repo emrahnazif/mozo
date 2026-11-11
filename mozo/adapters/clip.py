@@ -28,6 +28,7 @@ pipeline and it surprises people, so it is written here.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Union
@@ -48,6 +49,9 @@ __all__ = ["ClipPredictor"]
 
 #: The family this adapter serves, as the registry and the manifest name it.
 FAMILY = "clip"
+
+
+_log = logging.getLogger(__name__)
 
 
 class ClipPredictor:
@@ -119,7 +123,7 @@ class ClipPredictor:
         # Neither tower is built here. The first encode decides which, and a caller that only ever
         # encodes phrases never pays for the image tower at all.
         self._encoder = Encoder(weights, SPECS[variant], device=self.device)
-        print(f"CLIP {variant} ready on {self.device} via {self.runtime}.")
+        _log.info("CLIP %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def predict(
         self,

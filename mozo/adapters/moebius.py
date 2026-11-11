@@ -21,6 +21,7 @@ in -- see ``predict`` for what "feathered" costs you at the border.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Union
 
@@ -30,6 +31,9 @@ from ..image import load_image
 from ..runtimes import get_default_device
 from ..vendors.moebius_deploy import Predictor
 from ..weights import parts
+
+
+_log = logging.getLogger(__name__)
 
 
 def _mask_from(source: Any, shape: tuple[int, int]) -> np.ndarray:
@@ -158,7 +162,7 @@ class MoebiusPredictor:
             unet, vae = Path(checkpoint_path), Path(vae_path)
 
         self._predictor = Predictor(unet, vae, variant, device=self.device)
-        print(f"Moebius {variant} ready on {self.device} via {self.runtime}.")
+        _log.info("Moebius %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def predict(
         self,

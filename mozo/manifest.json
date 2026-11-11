@@ -21,7 +21,8 @@
               "sha256": "8f1e1f0f862f69bebfba53c6f69428791b8443178afdc5eb8657d6a8cc190bb7",
               "size": 380689768
             }
-          }
+          },
+          "license": "MIT"
         }
       }
     },
@@ -45,7 +46,8 @@
               "sha256": "4324b92403f6b35f0c56aab63299b75b234ccf4b44a2fb8a6eaac3e408e1252e",
               "size": 605207298
             }
-          }
+          },
+          "license": "MIT"
         }
       }
     },
@@ -69,7 +71,8 @@
               "sha256": "ab7ac8a455aae9db1078f3bf0df59cc07c9807a86d9969cacb154481d65fe2ed",
               "size": 598580994
             }
-          }
+          },
+          "license": "MIT"
         }
       }
     },
@@ -93,7 +96,8 @@
               "sha256": "b4b5bde8adc03ea4c8010c844dcc4a6bb0b62e7999d2e62b068d489a586ca864",
               "size": 1710611090
             }
-          }
+          },
+          "license": "MIT"
         }
       }
     },
@@ -117,7 +121,8 @@
               "sha256": "2023af7109f939298c626756b37da5dc78b6dd85a80a9e85c636b12f33ac2ba3",
               "size": 1711921810
             }
-          }
+          },
+          "license": "MIT"
         }
       }
     },
@@ -141,7 +146,8 @@
               "sha256": "0d2b7002e62d39d655571c371333340bd88f67ab95050c03591555aa05645328",
               "size": 389961218
             }
-          }
+          },
+          "license": "CC-BY-NC-4.0"
         }
       }
     },
@@ -165,7 +171,8 @@
               "sha256": "9dc9e274c5eff55c6daf27b660c0ced0eca4e8593a6da90cdcb04d2b4d3f3fa2",
               "size": 389965138
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -189,7 +196,8 @@
               "sha256": "6f82ff2bc543ac02ddff4aa31fa363676a8305dd3ccf04e80e2af115a044cb6d",
               "size": 1341401882
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -213,7 +221,8 @@
               "sha256": "b782898d8a3e8be1f639de33837ed85e9b4b73e40f8f5e5cd99067588d722545",
               "size": 99222290
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -237,7 +246,8 @@
               "sha256": "a7ea19fa0ed99244e67b624c72b8580b7e9553043245905be58796a608eb9345",
               "size": 1341395338
             }
-          }
+          },
+          "license": "CC-BY-NC-4.0"
         }
       }
     },
@@ -261,7 +271,8 @@
               "sha256": "4dad67a7cc10b462bca48e6b8569c762b8eb3c1adada170a3851a6d3ba37bb3e",
               "size": 389964656
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -285,7 +296,8 @@
               "sha256": "239b1054a369e66da2576e9a118d6d7c12d90dc8ebe609579a9a09cd8e05fe38",
               "size": 1341401064
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -309,7 +321,8 @@
               "sha256": "9203e538d35255c90dda4b7fedb47ff33fe725497bcca3b1e53b3a65ee63f0cb",
               "size": 99221808
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -333,7 +346,8 @@
               "sha256": "715fade13be8f229f8a70cc02066f656f2423a59effd0579197bbf57860e1378",
               "size": 99218434
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -357,7 +371,8 @@
               "sha256": "aad3c953a08badbda00b5fd2d5dd8e503e9689e8af10cc061cefcc7721b1579b",
               "size": 105125385
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -381,7 +396,8 @@
               "sha256": "6238897ec6c512fbbf9cdb493f1c197961d9275ae8f7bc8fbecf0c1c452fe6c2",
               "size": 98318025
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -405,7 +421,8 @@
               "sha256": "86c7f3311debcbc72e7d1f5aa70b6d9d7da6afc0e83ae62aee0690e0a3ac80d9",
               "size": 100495305
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -429,7 +446,8 @@
               "sha256": "26388a1863fbc236cbf8498d43a2f44d663f8bfcd8cf29987b1f30f1df1eef74",
               "size": 99255561
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -453,7 +471,8 @@
               "sha256": "510b30a0b296f276a16c617d42d1820987bb963240b2841e6b42a7c5d5455bd2",
               "size": 98580169
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -477,7 +496,8 @@
               "sha256": "ed2d4850b8792c239689b043c47046ec239b6e808a3d9b6ae676c803fd8780df",
               "size": 56116523
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -501,7 +521,8 @@
               "sha256": "46270f7a822e6906b655b729c90613e48929d0f2bb8b9b76fd10a856f3ac6ab7",
               "size": 938057991
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -525,7 +546,8 @@
               "sha256": "3b3ca2563c77c69f651d7bd133e97139c186df06231157a64c507099c52bc799",
               "size": 693997677
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -569,7 +591,8 @@
               "sha256": "a59d7ea697f2942d22002dc3469e8c53db807a6b78f7f5ec03bd4c1f70f98efe",
               "size": 167394306
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -603,7 +626,8 @@
               "sha256": "a59d7ea697f2942d22002dc3469e8c53db807a6b78f7f5ec03bd4c1f70f98efe",
               "size": 167394306
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -627,7 +651,8 @@
               "sha256": "56c7c1adff4a422d9ceba3fc744d8595a29a05ac4714497a9472d1ffc2e7332f",
               "size": 620006741
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -651,7 +676,8 @@
               "sha256": "69feda8b53b1c9e2a85ae756bf58c120c3c1b4b4a4d97d4876578c1809a63d76",
               "size": 620006741
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -675,7 +701,8 @@
               "sha256": "3f442c5e2875819ae6173b4f30f399e9c9ae51ed731184dfbed0f09eb85ce23f",
               "size": 1750647637
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -699,7 +726,8 @@
               "sha256": "2934e1f32c68b49f62e9b7a415c22080a8bf197c50c6f4408f4a60e21e0be252",
               "size": 1750647637
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -723,7 +751,8 @@
               "sha256": "2b70ddf51d2b9e026b340030c7d9bd2cdca2532d081ec16fce8d1695b0ce6d98",
               "size": 163696618
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -757,7 +786,8 @@
               "sha256": "0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38",
               "size": 135954129
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -791,7 +821,8 @@
               "sha256": "749ff6071828aaffac63e204c4f4135ed3d6cdae4d702e086c360edc3b5768c8",
               "size": 404992918
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -825,7 +856,8 @@
               "sha256": "d8d6b9ee57d4d0ed2b1f305163624712a0532cb7bce0c747317984fc5457440d",
               "size": 366287238
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -859,7 +891,8 @@
               "sha256": "ca7b7c630ba22496067cc4f034c4e70c8e47fd7adcea04c3a49aa8c1755cbe6b",
               "size": 145055866
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -893,7 +926,8 @@
               "sha256": "3ad325094735f431aee9962a8d204d68eb5bfc393d53e7e836e70998fef5ea58",
               "size": 143024058
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -927,7 +961,8 @@
               "sha256": "a44613a4ecd6b5ba61a62002c600b0b6cb7a9da2936a45317ec4b62c635fb99b",
               "size": 134545398
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -961,7 +996,8 @@
               "sha256": "6de3da31b2572cac214a1c76cce4a92a13966d56390ac2b3a3de9a8dc2b2bca3",
               "size": 135042342
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -995,7 +1031,8 @@
               "sha256": "d81979a9213a2109345158ce9232668df4c1ae52e9b8db3f2ec0a8cbad959b33",
               "size": 386045550
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1029,7 +1066,8 @@
               "sha256": "a2345aede8715ab1d5d31b4a509fb160c5a4af1970f199d9054ccfb746c004c5",
               "size": 323606802
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1078,7 +1116,8 @@
               "sha256": "2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318",
               "size": 898083611
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1127,7 +1166,8 @@
               "sha256": "6d1aa6f30de5c92224f8172114de081d104bbd23dd9dc5c58996f0cad5dc4d38",
               "size": 184416285
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1176,7 +1216,8 @@
               "sha256": "7402e0d864fa82708a20fbd15bc84245c2f26dff0eb43a4b5b93452deb34be69",
               "size": 156008466
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1205,7 +1246,8 @@
               "sha256": "9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e",
               "size": 3450062241
             }
-          }
+          },
+          "license": "SAM License"
         }
       }
     },
@@ -1229,7 +1271,8 @@
               "sha256": "0b5b5161a0034df3e15ee1eef1f1265e02a7c714d75c672cdf8f7dc8e6791a8f",
               "size": 1500885737
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1253,7 +1296,8 @@
               "sha256": "abd115da89ceacdf4aca2208416c466186a2122058c9828282a9c90cec528bfc",
               "size": 1501070057
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1277,7 +1321,8 @@
               "sha256": "132300b12c34b329d816798b31fc57f4de2963fc194da3ef90b4b5942fc8dbb0",
               "size": 7487907557
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1301,7 +1346,8 @@
               "sha256": "956531d95b8f2a9a16636efa0d721faa6a23215a139bc74e0fb557fb11a781fd",
               "size": 4544326429
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1325,7 +1371,8 @@
               "sha256": "d7818dd2b366eff3c34c77559dacb867e50cd3d285b8319dd3c08e1e6bd78afd",
               "size": 4542976261
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1359,7 +1406,8 @@
               "sha256": "1afb018017d80d6af73733c0882366df6ab6915b004d578e671fb1fb60979bdf",
               "size": 501701940
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1388,7 +1436,8 @@
               "sha256": "2a5e840b65e13d562edc0dea34973b98f7a9343c1f0e76c311dbaec4a935f514",
               "size": 3597920164
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1422,7 +1471,8 @@
               "sha256": "28ab288a284f0cedc73ba59ea256cba4da95884bbc6eab243c4f5e1139a89ff6",
               "size": 1737848964
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1456,7 +1506,8 @@
               "sha256": "e49fd3d5c8d0884f842c9752108b9c6353d64c1783e6bdc33f1ae3f1e4efd510",
               "size": 132694836
             }
-          }
+          },
+          "license": "Apache-2.0"
         }
       }
     },
@@ -1490,7 +1541,8 @@
               "sha256": "9ebd0e09d59811db4b1d61e2bc6730649608b1ac47f8dd01e2da6bca7c20023f",
               "size": 51387343
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1524,7 +1576,8 @@
               "sha256": "d5ffc1a674953a08e11a8d21e022781b1b23a19b730afc309290bd9fb5305b95",
               "size": 40684120
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1558,7 +1611,8 @@
               "sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
               "size": 5613764
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1592,7 +1646,8 @@
               "sha256": "cabe90049795dfc9a370b7934d6dec7f6b9e44a20e573b0ff81b7e205512c872",
               "size": 56096965
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1626,7 +1681,8 @@
               "sha256": "eb9a06f63e2206c35d68d839b08c362429ebecf933ad54c1ad68b2fd001c17cf",
               "size": 45400152
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1660,7 +1716,8 @@
               "sha256": "55ed65c56c91713d23e8402371c6c49a6fd84f257f7dce452e8d70e41dcbe152",
               "size": 6182636
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1694,7 +1751,8 @@
               "sha256": "1caa81c0195412efa411b632bcfb8c184939dddb6ae41f6a80c41b211ff257c3",
               "size": 20669228
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1728,7 +1786,8 @@
               "sha256": "4e53a5f5fd3ee2ae3361c62169c6bb3ed4ae251dd0e57606e230955aa52d919c",
               "size": 125090821
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1762,7 +1821,8 @@
               "sha256": "85a76fe86dd8afe384648546b56a7a78580c7cb7b404fc595f97969322d502d5",
               "size": 19313732
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1796,7 +1856,8 @@
               "sha256": "7bc158aa95c0ebfdd87f70f01653c1131b93e92522dbe15c228bcd742e773a24",
               "size": 114636239
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1835,7 +1896,8 @@
               "sha256": "0babd8dc8f775bb64bb052debdff3d8b9e9b57efa9d7bfa11c84bb82c3fec336",
               "size": 53699086
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1874,7 +1936,8 @@
               "sha256": "4c6d179786eddf6134ee469ae2f4ce04cbe4e9d1a47d6b669d9cd6b9c6c513d8",
               "size": 40904955
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1913,7 +1976,8 @@
               "sha256": "419ff3dca37d69bacc93a50fa0c186a1c6f9fe62fae0f108b0872829689e9ca6",
               "size": 5595063
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1952,7 +2016,8 @@
               "sha256": "e915c2c4286e3f6f8610ef106fa3f94a7b8c19b30eccede5887e22c33ef75f58",
               "size": 19006455
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -1991,7 +2056,8 @@
               "sha256": "682ce8dadee004dbe964950f1bf3eda451671815a6ed62db80b398916b9b7c6f",
               "size": 119322638
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2025,7 +2091,8 @@
               "sha256": "9fe3c544f2b19bebad7ea41e76d7ad3d88b7c2f10d11d24430c5311f6b32db26",
               "size": 53211173
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2059,7 +2126,8 @@
               "sha256": "401cea9ab23ad19246ff7744859816bc599f350e93c9dd30367b6f0a0745d0b7",
               "size": 44255705
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2093,7 +2161,8 @@
               "sha256": "9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef",
               "size": 5544453
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2127,7 +2196,8 @@
               "sha256": "636024306410afa1732692322fba57d22ea2b1c2f07613fcee131a93d7dd380c",
               "size": 63700037
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2161,7 +2231,8 @@
               "sha256": "16b636f04e8fb6a325b3370f22dc5e5535ff473e384f4d041fd28d788f6ee9f5",
               "size": 54750385
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2195,7 +2266,8 @@
               "sha256": "361fbfabab285c3237700b6bb91d7ecfa602cd945fffda8dbe1242829b71e73f",
               "size": 6719965
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2229,7 +2301,8 @@
               "sha256": "3da1d83e31caec96f9300eb4064f4f62882c133c7c264d63dfe61a7c197837a4",
               "size": 23467933
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2263,7 +2336,8 @@
               "sha256": "92b3de0065766a17180d6219858717dc9d03cdce8a3ca9576c97fd75aabb64f3",
               "size": 142129861
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2297,7 +2371,8 @@
               "sha256": "646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b",
               "size": 20422725
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2331,7 +2406,8 @@
               "sha256": "9fdd44a31c504547ffb81d2c6d9e6dac3493c8eaa8b0398d3f43bae6c7003e92",
               "size": 118667365
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2370,7 +2446,8 @@
               "sha256": "64c9115303f6a25575f82200d1b22ec409fa6bd7d08d0313884fc20d919478cd",
               "size": 87792836
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2409,7 +2486,8 @@
               "sha256": "5d4a90cdc7a21786cc59cd19778e9eafff836df9e2da32524737c7ee6efe4fe5",
               "size": 52136884
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2448,7 +2526,8 @@
               "sha256": "f59b3d833e2ff32e194b5bb8e08d211dc7c5bdf144b90d2c8412c47ccfc83b36",
               "size": 6549796
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2487,7 +2566,8 @@
               "sha256": "1f47a78bf100391c2a140b7ac73a1caae18c32779be7d310658112f7ac9aa78a",
               "size": 22588772
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     },
@@ -2526,10 +2606,11 @@
               "sha256": "3df4ada6b4dad6d657868f2fdf7faecfb34dcfccf3a25c4b82079064718524c8",
               "size": 136890692
             }
-          }
+          },
+          "license": "AGPL-3.0"
         }
       }
     }
   },
-  "schema": 1
+  "schema": 2
 }

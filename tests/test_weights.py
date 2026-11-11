@@ -12,11 +12,13 @@ import json
 
 import pytest
 
+from conftest import APACHE, APACHE_TOO, fresh_interpreter
+
 
 class TestManifest:
     def test_derives_everything_from_the_tree(self, manifest_file):
         manifest = json.loads(manifest_file.read_text())
-        assert manifest["schema"] == 1
+        assert manifest["schema"] == 2
         assert sorted(manifest["models"]) == ["toy/alpha", "toy/beta", "toy/split"]
 
         alpha = manifest["models"]["toy/alpha"]
@@ -34,9 +36,10 @@ class TestManifest:
         assert record["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
 
     def test_carries_no_hand_typed_field(self, manifest_file):
-        """Everything in a revision is read off the disk. Nothing is asserted by a human."""
+        """Everything in a revision is read off the disk. Nothing is asserted by a human --
+        including which licence it is, which is read off the LICENSE file beside the weights."""
         revision = json.loads(manifest_file.read_text())["models"]["toy/beta"]["revisions"]["2026-01-01"]
-        assert set(revision) == {"artifacts"}
+        assert set(revision) == {"artifacts", "license"}
 
     def test_is_idempotent(self, run_generator, tmp_path):
         """A stale manifest is the realistic failure, so regeneration has to be a no-op."""
@@ -71,7 +74,7 @@ class TestResolve:
 
     def test_licence_travels_with_the_weights(self, weights):
         path = weights.resolve("toy", "alpha")
-        assert (path.parent / "LICENSE").read_bytes() == b"Apache-2.0"
+        assert (path.parent / "LICENSE").read_bytes() == APACHE
 
     def test_revision_is_in_the_path_so_pinning_survives_a_cache_hit(self, weights):
         latest = weights.resolve("toy", "alpha")
@@ -130,6 +133,50 @@ class TestArtifacts:
 
     def test_reads_the_revision_asked_for(self, weights):
         assert weights.artifacts("toy", "alpha", revision="2026-01-01") == ["torch-fp32"]
+
+
+class TestLicences:
+    """Which licence a revision is under, named in the manifest and read off its LICENSE file."""
+
+    def test_two_copies_of_one_licence_are_the_same_licence(self, manifest_file):
+        """Upstream copies differ in a copyright line; the terms, and the identifier, do not."""
+        models = json.loads(manifest_file.read_text())["models"]
+        assert models["toy/alpha"]["revisions"]["2026-02-01"]["license"] == "Apache-2.0"
+        assert models["toy/split"]["revisions"]["2026-01-01"]["license"] == "Apache-2.0"
+
+    @pytest.mark.parametrize("text, complaint", [
+        (b"Do whatever you like with these weights.\n", "matches no known licence"),
+        (b"MIT License\nApache License, Version 2.0\n"
+         b"Permission is hereby granted, free of charge\n", "matches Apache-2.0, MIT"),
+    ])
+    def test_a_licence_it_cannot_name_stops_the_build(self, zoo, run_generator, tmp_path,
+                                                      text, complaint):
+        """Publishing a guess would be worse than publishing nothing."""
+        (zoo / "toy" / "beta" / "2026-01-01" / "LICENSE").write_bytes(text)
+        result = run_generator(tmp_path / "out.json", check=False)
+        assert result.returncode != 0
+        assert complaint in result.stderr
+
+    def test_license_of_follows_latest_and_honours_a_pin(self, weights):
+        assert weights.license_of("toy", "alpha") == "Apache-2.0"
+        assert weights.license_of("toy", "beta", revision="2026-01-01") == "MIT"
+
+    def test_license_of_an_unpublished_model_says_so(self, weights):
+        with pytest.raises(weights.WeightsError, match="publishes no weights"):
+            weights.license_of("toy", "gamma")
+
+    def test_the_real_manifest_answers_without_a_download_or_torch(self, tmp_path):
+        """The question an embedding app asks before offering a model at all."""
+        finished = fresh_interpreter(
+            "import os, sys\n"
+            f"os.environ['MOZO_CACHE'] = {str(tmp_path)!r}\n"
+            "os.environ['MOZO_OFFLINE'] = '1'\n"
+            "from mozo.weights import license_of\n"
+            "print(license_of('yolov8', 'nano'), license_of('sam3', 'sam3'),"
+            " license_of('depth_anything_v2', 'base'), 'torch' in sys.modules, sep='|')\n"
+        )
+        assert finished.stdout.strip().split("|") == ["AGPL-3.0", "SAM License", "CC-BY-NC-4.0", "False"]
+        assert not any(tmp_path.iterdir()), "answering wrote to the cache"
 
 
 class TestManifestRejectsHalfARuntime:
@@ -246,7 +293,7 @@ class TestSplitRuntimes:
         from mozo.weights import parts
 
         for part in parts("toy", "split", "coreml-fp16").values():
-            assert (part.parent / "LICENSE").read_bytes() == b"Apache-2.0"
+            assert (part.parent / "LICENSE").read_bytes() == APACHE_TOO
             assert (part.parent / "NOTICE").read_bytes() == b"attribution"
 
     def test_one_run_names_every_file_that_has_to_be_placed(self, weights, monkeypatch):

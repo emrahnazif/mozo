@@ -29,6 +29,7 @@ __all__ = [
     "cache_dir",
     "companions",
     "framework_of",
+    "license_of",
     "manifest",
     "part_of",
     "parts",
@@ -287,6 +288,31 @@ def revision_of(family: str, variant: str, *, revision: str | None = None) -> st
     """
     name, _ = _lookup(family, variant, revision)
     return name
+
+
+def license_of(family: str, variant: str, *, revision: str | None = None) -> str:
+    """Return the licence a revision's weights are published under, e.g. ``"Apache-2.0"``.
+
+    Answered from the manifest, so it costs no download and no torch import: a caller can show
+    the terms, or filter on them, before deciding to fetch anything. The identifier is derived
+    from the LICENSE file published beside the weights when the manifest is generated, and that
+    file remains the terms themselves; this only names them. It is per revision because terms
+    can change between releases.
+
+    Only weights mozo publishes have one. A checkpoint you supply is under whatever terms you
+    got it under, and mozo cannot know them.
+
+    Raises:
+        WeightsError: If the model or revision is not published.
+
+    Examples:
+        >>> license_of("yolov8", "nano")
+        'AGPL-3.0'
+        >>> license_of("rfdetr", "small")
+        'Apache-2.0'
+    """
+    _, entry = _lookup(family, variant, revision)
+    return entry["license"]
 
 
 def artifacts(family: str, variant: str, *, revision: str | None = None) -> list[str]:

@@ -254,22 +254,29 @@ def clip(tmp_path_factory) -> Path:
     return path
 
 
+#: The opening lines of real licence texts, which is all the manifest generator reads to name
+#: one. Two different Apache-2.0 copies, because upstream copies differ in their copyright line and
+#: are still the same terms.
+APACHE = b"                Apache License\n          Version 2.0, January 2004\n"
+APACHE_TOO = b"Apache License\nVersion 2.0, January 2004\nCopyright 2026 Someone Else\n"
+MIT = b"MIT License\n\nCopyright (c) 2026\n\nPermission is hereby granted, free of charge, to any\n"
+
 #: What a synthetic zoo contains: two variants of one family, one revision apart, with a
 #: different artifact set each so selection and absence are both exercised -- plus one variant
 #: whose graph runtime is split across parts, because SAM 2 publishes an encoder and a decoder
 #: rather than one file and the resolver has to rejoin them without knowing what they are.
 _ZOO = {
     "toy/alpha": {
-        "2026-01-01": {"torch-fp32.pth": b"alpha-torch-v1", "LICENSE": b"Apache-2.0"},
+        "2026-01-01": {"torch-fp32.pth": b"alpha-torch-v1", "LICENSE": APACHE},
         "2026-02-01": {
             "torch-fp32.pth": b"alpha-torch-v2",
             "onnx-fp32.onnx": b"alpha-onnx",
             "labels.json": json.dumps([{"id": 1, "name": "cat"}, {"id": 5, "name": "dog"}]).encode(),
-            "LICENSE": b"Apache-2.0",
+            "LICENSE": APACHE,
         },
     },
     "toy/beta": {
-        "2026-01-01": {"torch-fp32.pth": b"beta-torch", "LICENSE": b"MIT"},
+        "2026-01-01": {"torch-fp32.pth": b"beta-torch", "LICENSE": MIT},
     },
     "toy/split": {
         "2026-01-01": {
@@ -284,7 +291,7 @@ _ZOO = {
             "coreml-fp16-encoder.zip": b"split-coreml-encoder",
             "coreml-fp16-decoder.zip": b"split-coreml-decoder",
             "coreml-fp16-prompt.zip": b"split-coreml-prompt",
-            "LICENSE": b"Apache-2.0",
+            "LICENSE": APACHE_TOO,
         },
     },
 }

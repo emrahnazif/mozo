@@ -4,17 +4,75 @@ Command-line interface for Mozo.
 Provides simple commands for starting the server and checking version.
 """
 
+import logging
 import sys
 import time
+from contextlib import contextmanager
 
 import click
 import uvicorn
 
 
+class _Echo(logging.Handler):
+    """Print mozo's log records the way its ``print`` calls used to: the bare message.
+
+    Through :func:`click.echo` rather than a stream fixed at construction, so a record goes to
+    whatever stdout is current -- which is what :class:`click.testing.CliRunner` swaps out.
+    Warnings and errors go to stderr, where Python put them before mozo had a handler at all.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            click.echo(self.format(record), err=record.levelno >= logging.WARNING)
+        except Exception:  # pragma: no cover - logging must never take the caller down
+            self.handleError(record)
+
+
+#: What the command line shows of mozo's records. The one setting both routes below share.
+_LEVEL = logging.INFO
+
+
+@contextmanager
+def _showing_logs():
+    """Attach :class:`_Echo` to the ``mozo`` logger for the life of one command.
+
+    Removed afterwards, so a command invoked in-process -- by a test, or by a host calling
+    :func:`cli` -- leaves logging the way it found it.
+    """
+    logger = logging.getLogger("mozo")
+    handler, level = _Echo(), logger.level
+    logger.addHandler(handler)
+    logger.setLevel(_LEVEL)
+    try:
+        yield
+    finally:
+        # In ``start``, uvicorn applying :func:`_server_logging` has already swapped this
+        # handler for an identical one; removing an absent handler is a no-op.
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+
+
+def _server_logging() -> dict:
+    """uvicorn's default logging, plus the same handler :func:`_showing_logs` attaches.
+
+    Passed to :func:`uvicorn.run` because with ``--reload`` or ``--workers`` the app runs in
+    child processes, which never see a handler attached in this one; uvicorn applies this in
+    each. Built when asked, so it copies uvicorn's defaults as they are at that moment.
+    """
+    defaults = uvicorn.config.LOGGING_CONFIG
+    return {
+        **defaults,
+        "handlers": {**defaults["handlers"], "mozo": {"()": _Echo}},
+        "loggers": {**defaults["loggers"],
+                    "mozo": {"handlers": ["mozo"], "level": logging.getLevelName(_LEVEL)}},
+    }
+
+
 @click.group()
-def cli():
+@click.pass_context
+def cli(ctx):
     """Mozo - Universal CV Model Server"""
-    pass
+    ctx.with_resource(_showing_logs())
 
 
 @cli.command()
@@ -35,7 +93,8 @@ def start(host, port, reload, workers):
         host=host,
         port=port,
         reload=reload,
-        workers=workers if not reload else 1  # reload only works with 1 worker
+        workers=workers if not reload else 1,  # reload only works with 1 worker
+        log_config=_server_logging(),
     )
 
 

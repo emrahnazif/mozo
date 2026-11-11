@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from conftest import fresh_interpreter
+from conftest import executable_runtimes, fresh_interpreter
 
 
 def _sizes(manifest_file, model_id: str, *keys: str) -> int:
@@ -214,15 +214,11 @@ def test_none_of_it_downloads_or_imports_torch(tmp_path):
 
 def _loads():
     """One published variant per family, with every runtime it can execute on this machine."""
-    from mozo.registry import EXECUTES, MODEL_REGISTRY
-    from mozo.runtimes import executable
-    from mozo.weights import artifacts, framework_of
+    from mozo.registry import MODEL_REGISTRY
 
-    for family, entry in MODEL_REGISTRY.items():
-        variant = entry["variants"][0]
-        for runtime in executable(artifacts(family, variant)):
-            if family not in EXECUTES or framework_of(runtime) in EXECUTES[family]:
-                yield pytest.param(family, variant, runtime, id=f"{family}/{variant}/{runtime}")
+    firsts = [(family, entry["variants"][0]) for family, entry in MODEL_REGISTRY.items()]
+    for family, variant, runtime in executable_runtimes(firsts):
+        yield pytest.param(family, variant, runtime, id=f"{family}/{variant}/{runtime}")
 
 
 @pytest.mark.parametrize("family, variant, runtime", list(_loads()))

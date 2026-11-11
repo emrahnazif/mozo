@@ -210,6 +210,23 @@ def as_pixelflow_classifications(scores, labels):
     return pf.from_scores(scores, labels=list(labels)).top_k(len(labels)).to_dict()
 
 
+def executable_runtimes(models):
+    """Yield ``(family, variant, runtime)`` for every runtime of *models* this machine can run.
+
+    *models* is ``(family, variant)`` pairs. A runtime counts when it is published, its library
+    is installed, and the family's adapter executes its framework -- the same three filters an
+    ``auto`` load applies, so a test parametrised over these covers what a load could pick.
+    """
+    from mozo.registry import EXECUTES
+    from mozo.runtimes import executable
+    from mozo.weights import artifacts, framework_of
+
+    for family, variant in models:
+        for runtime in executable(artifacts(family, variant)):
+            if family not in EXECUTES or framework_of(runtime) in EXECUTES[family]:
+                yield family, variant, runtime
+
+
 @pytest.fixture(scope="session")
 def image():
     """The fixture photograph, decoded to mozo's contract (RGB)."""

@@ -154,15 +154,21 @@ class TestCatalogue:
         assert body["siglip2"]["variants"] == ["base-224"]
 
     def test_the_rest_of_each_entry_is_untouched(self, deploy, client):
-        """Only the variant list narrows. A deployment does not change what a family *is*, so the
-        entry is compared against the same family's entry from an unnarrowed catalogue rather than
-        against a second copy of the field list."""
+        """Only what is per variant narrows. A deployment does not change what a family *is*, so
+        the entry is compared against the same family's entry from an unnarrowed catalogue rather
+        than against a second copy of the field list.
+
+        The licences narrow with the variants they describe: naming terms for a variant this
+        server will not serve would contradict the list beside them.
+        """
+        per_variant = {"variants", "licenses"}
         whole = client.get("/models").json()["siglip2"]
         deploy("siglip2/base-224")
         narrowed = client.get("/models").json()["siglip2"]
         assert narrowed["variants"] == ["base-224"] != whole["variants"]
-        assert {k: v for k, v in narrowed.items() if k != "variants"} == \
-               {k: v for k, v in whole.items() if k != "variants"}
+        assert narrowed["licenses"] == {"base-224": whole["licenses"]["base-224"]}
+        assert {k: v for k, v in narrowed.items() if k not in per_variant} == \
+               {k: v for k, v in whole.items() if k not in per_variant}
 
 
 class TestRefusals:

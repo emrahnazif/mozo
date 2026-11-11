@@ -30,6 +30,7 @@ from .depth import encode as encode_depth
 from .text import comma_separated
 from .image import encode_image, load_image
 from .registry import BOXED, ENCODES, MODEL_REGISTRY, PROMPTED, get_model_info
+from .weights import license_of
 from .workflow.api import router as workflow_router
 
 app = FastAPI(
@@ -634,6 +635,10 @@ def list_models():
             "task_type": entry["task_type"],
             "description": entry["description"],
             "variants": list(deployed[family]),
+            # Each offered variant's weights licence, by name, so the page can show
+            # the terms before anything is fetched. Per variant because a family need not be
+            # uniform: two of Depth Anything's nine are non-commercial.
+            "licenses": {variant: license_of(family, variant) for variant in deployed[family]},
             # The two capability flags a caller cannot infer from the task name alone. Served
             # rather than restated: the browser page needs both and cannot import the registry,
             # and a copy it keeps in step by hand is a copy that drifts.

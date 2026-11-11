@@ -104,6 +104,7 @@ class TestCatalogue:
 
     def test_every_family_carries_what_the_page_reads(self, client):
         from mozo.registry import ENCODES, MODEL_REGISTRY, PROMPTED
+        from mozo.weights import license_of
 
         body = client.get("/models").json()
         assert set(body) == set(MODEL_REGISTRY)
@@ -115,6 +116,8 @@ class TestCatalogue:
             assert info["encodes"] == sorted(ENCODES.get(family, ()))
             # The page switches its text box on this instead of keeping its own task list.
             assert info["prompted"] == (info["task_type"] in PROMPTED)
+            # A licence per offered variant, before any weights are fetched.
+            assert info["licenses"] == {v: license_of(family, v) for v in info["variants"]}
 
     def test_the_catalogue_matches_the_registry(self, client):
         """It is a projection of the registry, so it must not drift from one."""

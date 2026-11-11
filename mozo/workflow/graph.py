@@ -14,15 +14,35 @@ lacked.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from itertools import chain
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from . import registry
-from .node import Connection, Context, NodeSpec, State
+from .node import Connection, Context, Models, NodeSpec, State
 
-__all__ = ["Event", "Workflow"]
+__all__ = ["Event", "Preflight", "Workflow"]
+
+_log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Preflight:
+    """What a workflow needs before it can run, found without running it.
+
+    Attributes:
+        missing: ``(node id, parameter, path)`` for every file or folder the workflow names that
+            is not here. A run refuses to start while this is not empty: each of these would fail
+            on its own, one run at a time, and a workflow shared from another machine usually has
+            several.
+        downloads: ``(node id, family, variant, bytes)`` for every mozo model the run will have
+            to download first. Information, not a problem: it downloads and carries on.
+    """
+
+    missing: tuple = ()
+    downloads: tuple = ()
 
 #: A source that yielded nothing is not a source that yielded None.
 _NOTHING = object()
@@ -289,10 +309,7 @@ class Workflow:
                 would be silent -- nowhere to put the file means it was chosen for nothing, and
                 two places means choosing one of them on the caller's behalf.
         """
-        named = sorted({parameter.name
-                        for step in self.steps.values()
-                        for parameter in step.spec.parameters
-                        if parameter.kind == "source"})
+        named = sorted({parameter.name for _, parameter in self._files()})
         if not named:
             raise ValueError(
                 "no node in this workflow reads a file, so there is nothing for one to be. "
@@ -317,10 +334,14 @@ class Workflow:
 
     # --- Running ---
 
-    def run(self, **overrides) -> dict:
+    def run(self, *, models=None, **overrides) -> dict:
         """Run the workflow and return every node's output, keyed by node id.
 
         Args:
+            models: Where the model nodes get their models: a
+                :class:`~mozo.manager.ModelManager`, or any callable shaped like ``get_model``.
+                ``None`` is the shared cache behind :func:`mozo.get_model`. See
+                :class:`~mozo.workflow.node.Models`. The same for every run method.
             **overrides: Parameter values to use instead of the ones saved in the workflow, by
                 parameter name. A name that more than one node uses is refused rather than guessed
                 at, naming the nodes that have it.
@@ -334,14 +355,14 @@ class Workflow:
             :meth:`stream` where the reason matters: it reports the failure and names the node.
         """
         settings = self._resolve(overrides)
-        states = self._remember(settings)
+        states = self._remember(settings, models)
         try:
             return self._drain(settings)[0]
         finally:
             _forget(states)
 
     def run_many(self, items, *, over: Optional[str] = None, on_error=None, workers: int = 2,
-                 model_workers: int = 1, stats: Optional[dict] = None,
+                 model_workers: int = 1, stats: Optional[dict] = None, models=None,
                  **overrides) -> Iterator[tuple]:
         """Run the workflow once per item, yielding ``(item, results)`` as each finishes.
 
@@ -415,7 +436,7 @@ class Workflow:
                 f"item would run on {overrides[over]!r} rather than on itself. Pass one or "
                 f"the other.")
         settings = self._resolve({over: None, **overrides})
-        states = self._remember(settings)
+        states = self._remember(settings, models)
         try:
             yield from self._many(items, over, settings, on_error, workers, model_workers, stats)
         finally:
@@ -475,7 +496,7 @@ class Workflow:
             yield from deliver(item, results, failure, on_error)
 
     def process(self, *, workers: int = 2, on_error=None, model_workers: int = 1,
-                stats: Optional[dict] = None, **overrides) -> Iterator[tuple]:
+                stats: Optional[dict] = None, models=None, **overrides) -> Iterator[tuple]:
         """Run once per item the source yields, yielding ``(item, results)`` as each finishes.
 
         A run is one pass over whatever the workflow's source produces: one image or every
@@ -505,7 +526,7 @@ class Workflow:
             raise ValueError(NO_SOURCE)
 
         settings = self._resolve(overrides)
-        states = self._remember(settings)
+        states = self._remember(settings, models)
         try:
             step = self.steps[source_id]
             arguments = step.arguments(settings)
@@ -529,7 +550,7 @@ class Workflow:
         finally:
             _forget(states)
 
-    def stream(self, **overrides) -> Iterator[Event]:
+    def stream(self, *, models=None, **overrides) -> Iterator[Event]:
         """Run the workflow, reporting each node as it starts and as it finishes.
 
         Returns:
@@ -543,15 +564,85 @@ class Workflow:
                 -- the same reason construction is what validates the document.
         """
         settings = self._resolve(overrides)
-        states = self._remember(settings)
+        states = self._remember(settings, models)
         # Not a generator function: the overrides are refused here, before the caller has an
         # iterator, and a generator would defer that to the first ``next``. The wrapper is what
         # releases what the nodes opened -- including when the caller stops reading part way,
         # which reaches the generator as GeneratorExit and runs its ``finally`` all the same.
         return _closing(self._steps(settings), states)
 
-    def _remember(self, settings: dict) -> list:
-        """Give every node that keeps something a place to keep it, for this run and no other.
+    def _files(self) -> Iterator[tuple]:
+        """``(node id, parameter)`` for every parameter that names a file, in run order.
+
+        A file parameter is a :data:`~mozo.workflow.node.Source` -- what a person cannot type and
+        the editor offers a picker for -- whatever it is called. One definition, so the input a
+        ``--file`` binds to and the files checked before a run cannot disagree about which they are.
+        """
+        for step_id in self.order:
+            for parameter in self.steps[step_id].spec.parameters:
+                if parameter.kind == "source":
+                    yield step_id, parameter
+
+    def check(self, **overrides) -> Preflight:
+        """What this workflow needs that is not here, without running anything.
+
+        Every file parameter -- the ones the editor offers a file picker for, such as a source to
+        read or a checkpoint of your own -- is checked for its file, after *overrides* are
+        applied. Every model node says whether its weights still have to be downloaded, and how
+        much. Every run does this first: missing files stop it, downloads are logged.
+        """
+        return self._inspect(self._resolve(overrides))
+
+    def _inspect(self, settings: dict, sizes: bool = True) -> Preflight:
+        from mozo import weights
+        from mozo.registry import MODEL_REGISTRY
+
+        missing, downloads = [], []
+        for step_id, parameter in self._files():
+            value = self.steps[step_id].arguments(settings).get(parameter.name)
+            if isinstance(value, (str, Path)) and value and not Path(value).exists():
+                missing.append((step_id, parameter.name, str(value)))
+        for step_id in self.order if sizes else ():
+            step = self.steps[step_id]
+            arguments = step.arguments(settings)
+            # A model node is named after the family it loads and carries its variant. One that
+            # is not -- a checkpoint of your own -- names a file, and is checked as one above.
+            if step.spec.models and step.spec.name in MODEL_REGISTRY and "variant" in arguments:
+                family, variant = step.spec.name, arguments["variant"]
+                try:
+                    size = weights.download_size(family, variant)
+                except Exception:   # noqa: BLE001 -- nothing to plan; the run will say why
+                    continue
+                if size:
+                    downloads.append((step_id, family, variant, size))
+        return Preflight(tuple(missing), tuple(downloads))
+
+    def _preflight(self, settings: dict) -> None:
+        """Refuse to start a run that cannot finish, naming everything it lacks at once.
+
+        Download sizes are worked out only when someone will read them: a library caller who
+        configured no logging pays for none of it on every run.
+        """
+        found = self._inspect(settings, sizes=_log.isEnabledFor(logging.INFO))
+        if found.missing:
+            labels = [f"{node} ({self.steps[node].spec.name})" for node, _, _ in found.missing]
+            width = max(map(len, labels))
+            lines = [f"  {label:<{width}}  {name}: {path}"
+                     for label, (_, name, path) in zip(labels, found.missing)]
+            files = "1 file that is" if len(lines) == 1 else f"{len(lines)} files that are"
+            raise FileNotFoundError(
+                f"this workflow refers to {files} not here:\n" + "\n".join(lines) +
+                "\nFix the paths in the workflow file and run it again.")
+        for node, family, variant, size in found.downloads:
+            _log.info("[mozo] %s will download %s/%s (%.1f MB)", node, family, variant, size / 1e6)
+
+    def _remember(self, settings: dict, models=None) -> list:
+        """Check the run can start, then give every node what it supplies: a place to keep
+        things, and its models. Every run method comes through here before its first node.
+
+        Each node that keeps something gets a place to keep it, for this run and no other. Each
+        node that loads a model gets the run's :class:`~mozo.workflow.node.Models`, one for the
+        whole run, built from *models* as :meth:`run` describes.
 
         Written into *settings* rather than handed to the executor, because that is already the
         one channel by which a node's arguments are settled once and read per item -- both engines
@@ -562,12 +653,15 @@ class Workflow:
         Returns:
             What was made, for the caller to :func:`_forget` when the run ends.
         """
-        states = []
+        self._preflight(settings)
+        states, supplied = [], Models(models)
         for step_id, step in self.steps.items():
             if step.spec.state:
                 state = State()
                 settings.setdefault(step_id, {})[step.spec.state] = state
                 states.append(state)
+            if step.spec.models:
+                settings.setdefault(step_id, {})[step.spec.models] = supplied
         return states
 
     def _fold(self, settings: dict, over: Optional[str] = None) -> tuple:

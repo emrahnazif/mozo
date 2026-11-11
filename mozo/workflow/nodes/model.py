@@ -8,13 +8,15 @@ check a connection against. Refusing a bad wire before anything runs is the poin
 types at all.
 
 Each node is its family's ``predict`` with the arguments the editor can offer. Nothing here knows
-how a model works; :func:`mozo.get_model` does, and it caches, so a node that runs over fifty
+how a model works, or where it comes from: each node asks the run's
+:class:`~mozo.workflow.node.Models`, which is the cache behind :func:`mozo.get_model` unless the
+host running the workflow supplied its own. Either way it caches, so a node that runs over fifty
 images loads the checkpoint once.
 
 Fourteen of the sixteen families are here. SAM 2 and EdgeTAM are not: they are prompted with points
 and boxes -- pixel coordinates picked on the image -- and there is no widget for that yet. Adding
 one before anything asks for it would be inventing a requirement, so they wait until the editor can
-express a click. Everything else about them already works through :func:`mozo.get_model`.
+express a click. Everything else about them already works through the run's models.
 
 The variants each node offers are read from the registry rather than typed out again -- see
 :func:`variants`. There is one list of what mozo publishes and this is not a second one.
@@ -28,13 +30,12 @@ here so the duplication is a decision rather than a slip.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
-import mozo
 from mozo.registry import get_model_info
 from mozo.text import comma_separated
 
-from ..node import Classifications, Depth, Detections, Image
+from ..node import Classifications, Depth, Detections, Image, Models, Source
 from ..registry import node
 
 
@@ -54,73 +55,89 @@ def variants(family: str) -> Any:
 # --- Detection ---------------------------------------------------------------------------------
 
 @node(category="Detect", exclusive=True)
-def yolov8(image: Image, variant: variants("yolov8") = "nano",
+def yolov8(image: Image, models: Models, variant: variants("yolov8") = "nano",
            threshold: float = 0.5) -> Detections:
     """YOLOv8 by Ultralytics -- real-time object detection."""
-    return mozo.get_model("yolov8", variant).predict(image, threshold=threshold)
+    return models("yolov8", variant).predict(image, threshold=threshold)
 
 
 @node(category="Detect", exclusive=True)
-def yolov11(image: Image, variant: variants("yolov11") = "nano",
+def yolov11(image: Image, models: Models, variant: variants("yolov11") = "nano",
             threshold: float = 0.5) -> Detections:
     """YOLO11 by Ultralytics -- real-time object detection."""
-    return mozo.get_model("yolov11", variant).predict(image, threshold=threshold)
+    return models("yolov11", variant).predict(image, threshold=threshold)
 
 
 @node(category="Detect", exclusive=True)
-def yolov12(image: Image, variant: variants("yolov12") = "nano",
+def yolov12(image: Image, models: Models, variant: variants("yolov12") = "nano",
             threshold: float = 0.5) -> Detections:
     """YOLO12 by Ultralytics -- attention-centric real-time object detection."""
-    return mozo.get_model("yolov12", variant).predict(image, threshold=threshold)
+    return models("yolov12", variant).predict(image, threshold=threshold)
 
 
 @node(category="Detect", exclusive=True)
-def yolov26(image: Image, variant: variants("yolov26") = "nano",
+def yolov26(image: Image, models: Models, variant: variants("yolov26") = "nano",
             threshold: float = 0.5) -> Detections:
     """YOLO26 by Ultralytics -- NMS-free detection, and instance masks on the seg variants."""
-    return mozo.get_model("yolov26", variant).predict(image, threshold=threshold)
+    return models("yolov26", variant).predict(image, threshold=threshold)
 
 
 @node(category="Detect", exclusive=True)
-def rfdetr(image: Image, variant: variants("rfdetr") = "nano",
+def rfdetr(image: Image, models: Models, variant: variants("rfdetr") = "nano",
            threshold: float = 0.5) -> Detections:
     """RF-DETR by Roboflow -- NMS-free transformer detection, under a permissive licence."""
-    return mozo.get_model("rfdetr", variant).predict(image, threshold=threshold)
+    return models("rfdetr", variant).predict(image, threshold=threshold)
+
+
+@node(category="Detect", exclusive=True)
+def rfdetr_checkpoint(image: Image, models: Models, checkpoint: Optional[Source] = None,
+                      architecture: variants("rfdetr") = "nano", labels: str = "",
+                      threshold: float = 0.5) -> Detections:
+    """RF-DETR from a checkpoint of your own -- a model you trained, run like a published one.
+
+    ``architecture`` is the RF-DETR the checkpoint was trained as. ``labels`` names its classes,
+    comma-separated, in class-id order; leave it empty to use the names the checkpoint carries.
+    """
+    if not checkpoint:
+        raise ValueError("choose the checkpoint file to run")
+    own = {"labels": comma_separated(labels)} if labels.strip() else {}
+    return models("rfdetr", architecture, checkpoint_path=checkpoint, **own).predict(
+        image, threshold=threshold)
 
 
 # --- Detection from a description ----------------------------------------------------------------
 
 @node(category="Detect", exclusive=True)
-def owlv2(image: Image, text: str = "a person, a car, a dog",
+def owlv2(image: Image, models: Models, text: str = "a person, a car, a dog",
           variant: variants("owlv2") = "base-ensemble", threshold: float = 0.1) -> Detections:
     """OWLv2 by Google -- find anything you can name, with no training."""
-    return mozo.get_model("owlv2", variant).predict(
+    return models("owlv2", variant).predict(
         image, text=comma_separated(text), threshold=threshold)
 
 
 @node(category="Detect", exclusive=True)
-def grounding_dino(image: Image, text: str = "person, car, dog",
+def grounding_dino(image: Image, models: Models, text: str = "person, car, dog",
                    variant: variants("grounding_dino") = "tiny",
                    threshold: float = 0.3) -> Detections:
     """Grounding DINO by IDEA -- open-vocabulary detection from a phrase."""
-    return mozo.get_model("grounding_dino", variant).predict(
+    return models("grounding_dino", variant).predict(
         image, text=comma_separated(text), threshold=threshold)
 
 
 # --- Segmentation --------------------------------------------------------------------------------
 
 @node(category="Segment", exclusive=True)
-def sam3(image: Image, text: str = "person", variant: variants("sam3") = "sam3",
+def sam3(image: Image, models: Models, text: str = "person", variant: variants("sam3") = "sam3",
          threshold: float = 0.5) -> Detections:
     """SAM 3 by Meta -- masks for every instance of a concept you name."""
-    return mozo.get_model("sam3", variant).predict(
+    return models("sam3", variant).predict(
         image, text=comma_separated(text), threshold=threshold)
 
 
 # --- Edit ------------------------------------------------------------------------------------------
 
 @node(category="Edit", exclusive=True)
-def moebius(image: Image, detections: Detections,
+def moebius(image: Image, detections: Detections, models: Models,
             variant: variants("moebius") = "general",
             seed: int = 0, dilate: int = 0) -> Image:
     """Moebius -- remove what you point it at and repaint the gap. Wire a segmenter into ``detections``.
@@ -130,11 +147,11 @@ def moebius(image: Image, detections: Detections,
     Raise ``dilate`` when the thing is still faintly there -- an object's shadow and its soft edge
     usually sit outside the mask that found it.
     """
-    return mozo.get_model("moebius", variant).predict(image, detections, seed=seed, dilate=dilate)
+    return models("moebius", variant).predict(image, detections, seed=seed, dilate=dilate)
 
 
 @node(category="Edit", exclusive=True)
-def ben2(image: Image, variant: variants("ben2") = "base",
+def ben2(image: Image, models: Models, variant: variants("ben2") = "base",
          stretch: bool = True, refine: bool = False) -> Image:
     """BEN2 -- cut the background away, keeping a soft edge. Takes no prompt and no boxes.
 
@@ -153,45 +170,46 @@ def ben2(image: Image, variant: variants("ben2") = "base",
     ``refine`` re-estimates foreground colour along soft edges so a composite does not carry a
     fringe of the old background; it costs two full-resolution blurs.
     """
-    return mozo.get_model("ben2", variant).cutout(image, stretch=stretch, refine=refine)
+    return models("ben2", variant).cutout(image, stretch=stretch, refine=refine)
 
 
 # --- Pose ------------------------------------------------------------------------------------------
 
 @node(category="Pose", exclusive=True)
-def vitpose(image: Image, detections: Detections,
+def vitpose(image: Image, detections: Detections, models: Models,
             variant: variants("vitpose") = "small") -> Detections:
     """ViTPose++ -- the joints of everyone you point it at. Wire a detector into ``detections``."""
-    return mozo.get_model("vitpose", variant).predict(image, detections)
+    return models("vitpose", variant).predict(image, detections)
 
 
 # --- Classification ------------------------------------------------------------------------------
 
 @node(category="Classify", exclusive=True)
-def clip(image: Image, text: str = "a photo of a cat, a photo of a dog",
+def clip(image: Image, models: Models, text: str = "a photo of a cat, a photo of a dog",
          variant: variants("clip") = "base") -> Classifications:
     """CLIP by OpenAI -- score an image against phrases you make up."""
-    return mozo.get_model("clip", variant).predict(image, text=comma_separated(text))
+    return models("clip", variant).predict(image, text=comma_separated(text))
 
 
 @node(category="Classify", exclusive=True)
-def siglip2(image: Image, text: str = "a photo of a cat, a photo of a dog",
+def siglip2(image: Image, models: Models, text: str = "a photo of a cat, a photo of a dog",
             variant: variants("siglip2") = "base-224") -> Classifications:
     """SigLIP 2 by Google -- zero-shot classification against phrases you make up."""
-    return mozo.get_model("siglip2", variant).predict(image, text=comma_separated(text))
+    return models("siglip2", variant).predict(image, text=comma_separated(text))
 
 
 # --- Reading -------------------------------------------------------------------------------------
 
 @node(category="Read", exclusive=True)
-def easyocr(image: Image, variant: variants("easyocr") = "english") -> Detections:
+def easyocr(image: Image, models: Models, variant: variants("easyocr") = "english") -> Detections:
     """EasyOCR by JaidedAI -- find text in an image and read it."""
-    return mozo.get_model("easyocr", variant).predict(image)
+    return models("easyocr", variant).predict(image)
 
 
 # --- Depth ---------------------------------------------------------------------------------------
 
 @node(category="Depth", exclusive=True)
-def depth_anything_v2(image: Image, variant: variants("depth_anything_v2") = "small") -> Depth:
+def depth_anything_v2(image: Image, models: Models,
+                      variant: variants("depth_anything_v2") = "small") -> Depth:
     """Depth Anything V2 -- how far away everything is, from one photograph."""
-    return mozo.get_model("depth_anything_v2", variant).predict(image)
+    return models("depth_anything_v2", variant).predict(image)

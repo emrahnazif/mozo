@@ -18,7 +18,7 @@ that say what travels along its ports.
 
 from __future__ import annotations
 
-from .graph import Event, Workflow
+from .graph import Event, Preflight, Workflow
 from .node import (Classifications, Color, Depth, Detections, Embedding, Image, NodeSpec,
                    PortType, Source)
 from .registry import catalogue, get, names, node
@@ -34,5 +34,5 @@ from . import nodes  # noqa: E402,F401
 __all__ = [
     "Classifications", "Color", "Depth", "Detections", "Embedding", "Event", "Image", "NodeSpec",
     "Source",
-    "PortType", "Workflow", "catalogue", "get", "names", "node",
+    "PortType", "Preflight", "Workflow", "catalogue", "get", "names", "node",
 ]

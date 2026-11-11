@@ -28,6 +28,39 @@ reports each node as it starts and finishes, which is what the editor draws.
 Overrides address a parameter by name: `run(source=..., threshold=0.6)`. A name more than one node
 uses is refused rather than guessed at, and the message names the nodes that have it.
 
+### Where the models come from
+
+Model nodes load through the shared cache behind `mozo.get_model` unless you say otherwise. An
+application embedding mozo passes its own as `models=` to `run`, `stream`, `process` or
+`run_many`: a `ModelManager` — its device choice, its unloading, its lifetime — or any callable
+shaped like `get_model`, which is how progress and cancel reach a load that happens part way into
+a run:
+
+```python
+from mozo import ModelManager
+
+models = ModelManager()
+workflow.run(source="street.jpg", models=models)
+workflow.run(source="street.jpg", models=lambda family, variant, **kw: models.get_model(
+    family, variant, progress=job.advance, cancelled=job.cancelled, **kw))
+```
+
+It reaches every node through the node's arguments, so a pipeline's worker threads use it too.
+A node asks for it by annotation, as it asks for `State`: `models: Models`, then
+`models("rfdetr", variant)`. The editor never shows it.
+
+`rfdetr_checkpoint` runs an RF-DETR you trained: choose the checkpoint file, the architecture it
+was trained as, and its class names, comma-separated in class-id order — or leave those empty to
+use the names the checkpoint carries.
+
+### Before a run
+
+Every run first checks the files the workflow names — sources, checkpoints of your own — and
+refuses to start if any are missing, listing all of them at once. A workflow shared from another
+machine usually names several; fix the paths in the file and run it again. mozo's own models are
+names, not paths: they come from the cache or are downloaded, and a run says which it will
+download and how much before it starts. `workflow.check()` answers both without running.
+
 ## What a workflow is
 
 ```json

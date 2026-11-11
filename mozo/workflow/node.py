@@ -44,7 +44,7 @@ from ..image import as_rgb, has_alpha
 
 __all__ = [
     "Classifications", "Color", "Connection", "Depth", "Detections", "Embedding", "Image",
-    "Context", "NodeSpec", "Parameter", "Port", "PortType", "Source", "State",
+    "Context", "Models", "NodeSpec", "Parameter", "Port", "PortType", "Source", "State",
 ]
 
 
@@ -268,6 +268,46 @@ class Context:
         return f"Context(index={self._index}, {', '.join(f'{k}={v!r}' for k, v in self._facts.items())})"
 
 
+class Models:
+    """Where a run's model nodes get their models from.
+
+    Asked for by annotation, as :class:`State` and :class:`Context` are, and supplied by the run::
+
+        @node(category="Detect", exclusive=True)
+        def rfdetr(image: Image, models: Models, variant: str = "nano") -> Detections:
+            return models("rfdetr", variant).predict(image)
+
+    By default a run uses the shared cache behind :func:`mozo.get_model`, so a workflow that says
+    nothing runs as it always has. A host passes its own to :meth:`~mozo.workflow.Workflow.run`
+    and the other run methods as ``models=``: a :class:`~mozo.manager.ModelManager`, for its own
+    device choice, unloading and lifetime, or any callable shaped like ``get_model`` --
+    ``(family, variant, **adapter_arguments) -> model`` -- which is also how a host passes
+    progress and cancel through to a load that happens part way into a run::
+
+        workflow.run(models=lambda family, variant, **kw: manager.get_model(
+            family, variant, progress=job.advance, cancelled=job.cancelled, **kw))
+
+    It reaches every node through its arguments, like the rest of what a run supplies, so it is
+    the same object on a pipeline's worker threads as on the caller's. The editor never shows it.
+    """
+
+    __slots__ = ("_get",)
+
+    def __init__(self, source: Any = None) -> None:
+        get = getattr(source, "get_model", source)
+        self._get = get if get is not None else _shared_model
+
+    def __call__(self, family: str, variant: str, **kwargs: Any) -> Any:
+        return self._get(family, variant, **kwargs)
+
+
+def _shared_model(family: str, variant: str, **kwargs: Any) -> Any:
+    """The default: the cache behind :func:`mozo.get_model`, imported when first asked."""
+    import mozo
+
+    return mozo._shared.get_model(family, variant, **kwargs)
+
+
 class State(dict):
     """What one node remembers for as long as one run lasts.
 
@@ -472,6 +512,8 @@ class NodeSpec:
     #: what it is called. Read at import with everything else, so a node that remembers something
     #: is not a kind of node the executor has to recognise -- it is a node with one more argument.
     state: Optional[str] = None
+    #: The argument this node is handed the run's :class:`Models` on, or None where it loads none.
+    models: Optional[str] = None
 
     @classmethod
     def from_function(cls, function: Callable, category: str,
@@ -503,7 +545,7 @@ class NodeSpec:
         hints = typing.get_type_hints(function)
         signature = inspect.signature(function)
 
-        inputs, parameters, state, context = [], [], None, None
+        inputs, parameters, state, context, models = [], [], None, None, None
         for name, argument in signature.parameters.items():
             if name not in hints:
                 raise TypeError(f"{function.__name__}: argument {name!r} has no annotation")
@@ -514,6 +556,12 @@ class NodeSpec:
                         f"{function.__name__}: {name!r} is what the run tells this node about "
                         f"itself, which the run supplies, so a default would never be read.")
                 context = name
+            elif annotation is Models:
+                if argument.default is not inspect.Parameter.empty:
+                    raise TypeError(
+                        f"{function.__name__}: {name!r} is where this node gets its models, which "
+                        f"the run supplies, so a default would never be read.")
+                models = name
             elif annotation is State:
                 if argument.default is not inspect.Parameter.empty:
                     raise TypeError(
@@ -571,6 +619,7 @@ class NodeSpec:
             exclusive=exclusive or ordered or state is not None,
             state=state,
             context=context,
+            models=models,
             produces_many=produces_many,
             alpha=alpha,
             _input_names=frozenset(port.name for port in inputs),

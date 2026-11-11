@@ -314,6 +314,10 @@ curl -X POST "http://localhost:8000/predict/edgetam/edgetam?point=820,640&label=
 # A box, one mask, named by you
 curl -X POST "http://localhost:8000/predict/sam2/tiny?box=40,60,300,480&multimask=false&name=cat" \
   -F "file=@street.jpg"
+
+# Encode once when the image opens, then click by its sha256 -- no upload per click
+curl -X POST "http://localhost:8000/prepare/sam2/large" -F "file=@street.jpg"   # {"sha256": "3f9a..."}
+curl -X POST "http://localhost:8000/predict/sam2/large?sha256=3f9a...&point=820,640&label=1"
 ```
 
 Depth answers with an image rather than JSON:
@@ -345,6 +349,11 @@ curl -X POST "http://localhost:8000/encode/clip/base?text=a%20forklift&text=a%20
 
 The response carries `model` and `revision` alongside the embeddings, and those are not decoration:
 a vector is only comparable against others from the same weights, so a stored index is tied to them.
+
+`/prepare` works for SAM 2, EdgeTAM, SAM 3 and OWLv2. It is for a client on the same machine or
+network clicking interactively; code running mozo in-process calls `model.prepare(image)` and sends
+nothing. A client that never sends `?sha256=` is answered exactly as before —
+[details](docs/models.md#sam-2-and-edgetam).
 
 The other endpoints: `GET /` for health and residency, `GET /models` for the catalogue,
 `GET /models/loaded` for what is in memory, `GET /test-ui` for the browser page, and `GET /docs`
@@ -436,6 +445,7 @@ download, and its licence and a NOTICE naming the exact upstream release are pub
 | `MOZO_CACHE` | Where downloads live. Default `~/.cache/mozo`. |
 | `MOZO_BASE_URL` | Serve artifacts from a mirror instead of the manifest's. A `file://` URL pointing at a `weights/` tree works, which is how an air-gapped host can be fed from removable media. |
 | `MOZO_OFFLINE` | Set to `1` to refuse downloads. A missing file raises an error naming the exact path, URL and hash, so it can be placed by hand. |
+| `MOZO_PREPARED_MB` | How much memory the server may use for images kept by `/prepare`, so clicks can name them by `?sha256=`. Default 512; the least recently used image goes first. |
 | `PYTORCH_ENABLE_MPS_FALLBACK` | Set to `1` on Apple silicon so unimplemented ops fall back to CPU rather than failing. |
 
 An application embedding mozo can set the last three in code instead, and ask what the cache

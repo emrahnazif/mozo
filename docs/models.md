@@ -223,6 +223,31 @@ The image encoder is the cost and it depends only on the image, so it is cached 
 and a second prompt on the same photograph pays only for the decoder. On CPU at 2 MP: EdgeTAM
 encodes in 272 ms and decodes in 33 ms; SAM 2 tiny encodes in 439 ms.
 
+**`prepare(image)` runs that encode before the first prompt.** Call it when an image is opened —
+on a background thread, if you have one — and the first click costs what every later click does:
+on Apple silicon, SAM 2 large's first click falls from 522 ms to 16 ms, the encode having moved to
+when the picture appeared. A click that arrives while `prepare` is still running waits for that
+encode rather than starting a second one. It warms the cache rather than reserving a place in it:
+the cache holds five images per model, so preparing more drops the oldest — slower, never wrong.
+SAM 3 and OWLv2 have it too; `GET /models` says which families do.
+
+```python
+model.prepare(image)                                    # when the image opens
+found = model.predict(image, points=[[820, 640]], labels=[1])
+```
+
+Over HTTP, `POST /prepare/{family}/{variant}` with the file encodes it and keeps the image, and
+answers with the sha256 of the file's bytes. Clicks then send `?sha256=` and no file — a few
+hundred bytes rather than the picture. A server that does not hold the image (another worker, a
+restart, or it was dropped) answers 404; send the file again with the same `?sha256=` and it is
+kept for the clicks after. Only those two requests keep an image: an ordinary upload is not kept.
+
+**Who `?sha256=` is for:** a client on the same machine or network as the server, clicking
+interactively — an annotation tool talking to a GPU box down the hall. Every click otherwise
+uploads the picture again: a fifth of a megabyte as JPEG, several as PNG, far more for a scan.
+Code that runs mozo in-process sends nothing at all; `prepare(image)` is the whole of it there.
+And nothing changes for a client that never sends `?sha256=`: it is answered exactly as before.
+
 EdgeTAM is SAM 2 distilled for phones — a 9.1M-parameter image path against SAM 2 tiny's 31.4M —
 and its masks agree with SAM 2 tiny's at 0.94 IoU on box prompts.
 

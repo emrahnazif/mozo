@@ -413,8 +413,8 @@ obvious deployment — detection, segmentation and depth from one instance, 0.60
 into a 762 ms eviction on every request. **Memory is yours to manage, and the lever is which
 models you ask for.**
 
-**A model is built once** however many requests arrive for it at the same moment, and a request
-for a model already in memory never waits behind an unrelated load.
+**A model is built once** however many requests arrive for it at the same moment, and no request
+waits behind a different model's load — not even one whose weights are still downloading.
 
 **Weights resolve from a manifest that ships inside the package**, so working out which bytes a
 model refers to needs no network and no configuration. Every artifact is verified by sha256 after
@@ -442,6 +442,10 @@ weights.download_size("sam2", "large", device="mps")      # bytes a load would s
 weights.is_cached("sam2", "large", device="mps")          # would a load need the network?
 weights.cached()                                          # every file, its key, size and state
 weights.remove("sam3", "sam3")                            # delete it; returns the bytes freed
+
+# Download now, load later; progress(done_bytes, total_bytes) and cancelled() see every chunk.
+weights.fetch("sam2", "large", device="mps", progress=bar.update, cancelled=job.cancelled)
+mozo.get_model("sam2/large", progress=bar.update, cancelled=job.cancelled)
 ```
 
 ## Deploying

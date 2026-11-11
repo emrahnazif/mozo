@@ -28,7 +28,8 @@ from __future__ import annotations
 # pyproject.toml reads this via [tool.setuptools.dynamic] version.attr
 __version__ = "1.1.2"
 
-__all__ = ["MODEL_REGISTRY", "ModelManager", "__version__", "get_model", "get_model_info"]
+__all__ = ["MODEL_REGISTRY", "ModelManager", "__version__", "configure", "get_model",
+           "get_model_info"]
 
 import logging as _logging
 
@@ -40,6 +41,7 @@ _logging.getLogger(__name__).addHandler(_logging.NullHandler())
 
 from mozo.manager import ModelManager
 from mozo.registry import MODEL_REGISTRY, get_model_info
+from mozo.weights import configure
 
 #: The cache behind :func:`get_model`. A dict and a lock; it loads nothing until asked.
 _shared = ModelManager()

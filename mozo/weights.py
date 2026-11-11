@@ -19,6 +19,12 @@ Environment:
                        air-gapped host can be fed from removable media.
     ``MOZO_OFFLINE``   Set to ``1`` to refuse downloads. Missing files raise an error naming the
                        exact path, URL and hash, so they can be placed by hand.
+
+Each of the three can also be set in code with :func:`configure`, which wins over the
+environment -- for an application that keeps weights inside its own folder.
+
+What is in the cache is answerable without the network or torch: :func:`is_cached`,
+:func:`download_size`, :func:`cached`, and :func:`remove` to give the space back.
 """
 
 from __future__ import annotations
@@ -27,12 +33,17 @@ __all__ = [
     "WeightsError",
     "artifacts",
     "cache_dir",
+    "cached",
     "companions",
+    "configure",
+    "download_size",
     "framework_of",
+    "is_cached",
     "license_of",
     "manifest",
     "part_of",
     "parts",
+    "remove",
     "resolve",
     "revision_of",
     "runtime_of",
@@ -42,6 +53,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import time
 import urllib.request
 from pathlib import Path
@@ -64,7 +76,21 @@ _ACCOMPANYING = (_LICENCE_KEY, _NOTICE_KEY)
 #: always has terms.
 _REQUIRED = frozenset({_LICENCE_KEY})
 
+#: How the cache names what is not a finished entry yet, and what a CoreML archive unpacks to.
+#: Stated here because this module owns the cache's layout; :func:`_fetch`,
+#: :func:`mozo.runtimes._unpacked` and :func:`cached` all read them from here.
+_PARTIAL_SUFFIX = ".part"
+_UNPACKED_SUFFIX = ".mlpackage"
+_STAGING_SUFFIX = ".unpacking"
+
 _manifest: dict[str, Any] | None = None
+
+#: What :func:`configure` set. A key that is absent falls through to the environment, then to
+#: the default, so clearing a setting is removing it rather than writing a second default here.
+_settings: dict[str, Any] = {}
+
+#: "Not passed" for :func:`configure`, where ``None`` already means "clear this setting".
+_UNSET: Any = object()
 
 
 _log = logging.getLogger(__name__)
@@ -128,16 +154,46 @@ def manifest() -> dict[str, Any]:
     return _manifest
 
 
+def configure(
+    *, cache: str | Path | None = _UNSET, offline: bool | None = _UNSET,
+    base_url: str | None = _UNSET,
+) -> None:
+    """Set where weights live, whether they may be fetched, and from where -- in code.
+
+    Each wins over its environment variable (``MOZO_CACHE``, ``MOZO_OFFLINE``,
+    ``MOZO_BASE_URL``), which stays the default when nothing is set here. An argument left out is
+    left as it is; ``None`` clears it back to the environment. The settings are process-wide, as
+    the environment is, and are read on every call, so a change applies to the next download.
+
+    Args:
+        cache: The cache root, e.g. a folder inside an application's own workspace.
+        offline: ``True`` refuses downloads; a missing file raises with its path, URL and hash.
+        base_url: A mirror to fetch from instead of the manifest's ``base_url``. A ``file://``
+            URL pointing at a ``weights/`` tree works.
+
+    Examples:
+        >>> configure(cache="/tmp/my-app/weights")           # doctest: +SKIP
+        >>> configure(cache=None)                           # doctest: +SKIP
+    """
+    for name, value in (("cache", cache), ("offline", offline), ("base_url", base_url)):
+        if value is None:
+            _settings.pop(name, None)
+        elif value is not _UNSET:
+            _settings[name] = value
+
+
 def cache_dir() -> Path:
-    """Return the download cache root: ``$MOZO_CACHE`` if set, else ``~/.cache/mozo``."""
-    override = os.environ.get("MOZO_CACHE", "").strip()
+    """Return the download cache root: what :func:`configure` set, else ``$MOZO_CACHE``, else
+    ``~/.cache/mozo``."""
+    override = str(_settings.get("cache") or os.environ.get("MOZO_CACHE", "")).strip()
     base = Path(override) if override else Path.home() / ".cache" / "mozo"
     return base.expanduser()
 
 
 def _base_url() -> str:
-    """Return the URL artifacts are served from, honouring a ``MOZO_BASE_URL`` mirror."""
-    override = os.environ.get("MOZO_BASE_URL", "").strip()
+    """Return the URL artifacts are served from, honouring a mirror set in code or in
+    ``MOZO_BASE_URL``."""
+    override = (_settings.get("base_url") or os.environ.get("MOZO_BASE_URL", "")).strip()
     return (override or manifest()["base_url"]).rstrip("/")
 
 
@@ -211,7 +267,7 @@ def _fetch(url: str, target: Path, *, size: int, sha256: str) -> None:
         WeightsError: If the transfer fails, or the bytes do not match the manifest.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_name(target.name + ".part")
+    partial = target.with_name(target.name + _PARTIAL_SUFFIX)
     digest = hashlib.sha256()
     written = 0
     last_report = time.monotonic()
@@ -243,24 +299,38 @@ def _fetch(url: str, target: Path, *, size: int, sha256: str) -> None:
 
 
 def _offline() -> bool:
-    """Is fetching forbidden? ``MOZO_OFFLINE`` unset, empty or ``0`` all mean no."""
+    """Is fetching forbidden? What :func:`configure` set wins; otherwise ``MOZO_OFFLINE`` unset,
+    empty or ``0`` all mean no."""
+    if "offline" in _settings:
+        return bool(_settings["offline"])
     return os.environ.get("MOZO_OFFLINE", "").strip() not in ("", "0")
+
+
+def _model_dir(family: str, variant: str) -> Path:
+    """Where one model's revisions live in the cache. Every path into the cache starts here."""
+    return cache_dir() / family / variant
+
+
+def _target(artifact: dict[str, Any], revision_dir: Path) -> Path:
+    """Where *artifact* lives in the cache: its file name, inside its revision's directory."""
+    return revision_dir / Path(artifact["path"]).name
 
 
 def _obtain(artifact: dict[str, Any], revision_dir: Path) -> Path:
     """Return the local path for *artifact*, downloading it if the cache does not already hold it.
 
     Raises:
-        WeightsError: If the file is absent and ``MOZO_OFFLINE`` forbids fetching it.
+        WeightsError: If the file is absent and offline mode forbids fetching it.
     """
-    target = revision_dir / Path(artifact["path"]).name
+    target = _target(artifact, revision_dir)
     if target.is_file():
         return target
 
     url = f"{_base_url()}/{artifact['path']}"
     if _offline():
         raise WeightsError(
-            f"MOZO_OFFLINE is set and {target} is not cached.\n"
+            f"mozo is offline (MOZO_OFFLINE, or configure(offline=True)) and {target} is not "
+            f"cached.\n"
             f"  fetch:  {url}\n"
             f"  place:  {target}\n"
             f"  sha256: {artifact['sha256']}"
@@ -459,8 +529,7 @@ def resolve(
 
     Raises:
         WeightsError: If the model, revision, or artifact is not published; if the download
-            fails or does not match the manifest; or if it is absent while ``MOZO_OFFLINE``
-            is set.
+            fails or does not match the manifest; or if it is absent while mozo is offline.
 
     Examples:
         >>> resolve("rfdetr", "small")                            # doctest: +SKIP
@@ -472,7 +541,7 @@ def resolve(
 
     artifact = _artifact(entry, model_id, revision_name, key)
 
-    revision_dir = cache_dir() / family / variant / revision_name
+    revision_dir = _model_dir(family, variant) / revision_name
     path = _obtain(artifact, revision_dir)
     for companion in _ACCOMPANYING:
         # The licence is required of every revision and _artifact says so if it is missing; a
@@ -482,3 +551,193 @@ def resolve(
             continue
         _obtain(_artifact(entry, model_id, revision_name, companion), revision_dir)
     return path
+
+
+# -- The cache, as an inventory ---------------------------------------------------------------
+#
+# Everything below answers from the manifest and the disk. None of it touches the network, and
+# none of it imports torch as long as a device or an explicit runtime is given: ``auto`` with
+# neither has to ask torch which device this machine has, exactly as a load would.
+
+
+def _planned(
+    family: str, variant: str, runtime: str, device: str | None, revision: str | None,
+) -> tuple[Path, dict[str, dict[str, Any]]]:
+    """Return where a load of this model would cache its files, and which files those are.
+
+    The runtime is chosen as the adapter chooses it -- the same :func:`select_runtime`, the same
+    frameworks from :data:`mozo.registry.EXECUTES` -- then expanded to every part it is made of,
+    plus what :data:`mozo.registry.NEEDS` says that runtime brings with it, plus the licence and
+    NOTICE every download carries. A key the revision does not publish is skipped, as the adapter
+    skips it.
+
+    Raises:
+        WeightsError: If the model or revision is not published.
+        mozo.runtimes.RuntimeError_: If *runtime* is not published, or not one this family runs.
+    """
+    from .registry import EXECUTES, NEEDS
+    from .runtimes import get_default_device, select_runtime
+
+    name, entry = _lookup(family, variant, revision)
+    published = entry["artifacts"]
+    if runtime == "auto" and device is None:
+        device = get_default_device()  # the one path here that imports torch
+    chosen = select_runtime(device or "cpu", sorted(published), runtime,
+                            executes=EXECUTES.get(family))
+
+    brings = NEEDS.get(family, {})
+    keys = [*_composing(entry, chosen),
+            *brings.get(framework_of(chosen), ()), *brings.get("*", ()), *_ACCOMPANYING]
+    files = {key: published[key] for key in dict.fromkeys(keys) if key in published}
+    return _model_dir(family, variant) / name, files
+
+
+def _missing(
+    family: str, variant: str, runtime: str, device: str | None, revision: str | None,
+) -> list[dict[str, Any]]:
+    """The files a load of this model needs that the cache does not hold yet."""
+    directory, files = _planned(family, variant, runtime, device, revision)
+    return [artifact for artifact in files.values() if not _target(artifact, directory).is_file()]
+
+
+def is_cached(
+    family: str, variant: str, runtime: str = "auto", *,
+    device: str | None = None, revision: str | None = None,
+) -> bool:
+    """Would loading this model need nothing from the network?
+
+    Args:
+        family: Model family, e.g. ``"sam2"``.
+        variant: Variant within it, e.g. ``"large"``.
+        runtime: ``"auto"`` for whatever a load on *device* would pick, or a runtime by name.
+        device: The device a load would run on. With ``"auto"`` it decides the runtime; leaving
+            it out asks torch for this machine's best, as a load would.
+        revision: Published revision to pin. Defaults to the manifest's ``latest``.
+
+    Raises:
+        WeightsError: If the model or revision is not published.
+        mozo.runtimes.RuntimeError_: If *runtime* is not one this model can run.
+
+    Examples:
+        >>> is_cached("sam2", "large", device="mps")            # doctest: +SKIP
+        False
+    """
+    return not _missing(family, variant, runtime, device, revision)
+
+
+def download_size(
+    family: str, variant: str, runtime: str = "auto", *,
+    device: str | None = None, revision: str | None = None,
+) -> int:
+    """Bytes a load of this model would still have to fetch, from the manifest's sizes.
+
+    Zero once :func:`is_cached` is true. Counts every file the load needs that the cache does not
+    already hold -- each part of a split runtime, a labels file, the licence and NOTICE -- so a
+    host can say "this will download 852 MB" before starting. Arguments as for :func:`is_cached`.
+
+    Examples:
+        >>> download_size("sam2", "large", device="mps")        # doctest: +SKIP
+        898465192
+    """
+    return sum(artifact["size"] for artifact in _missing(family, variant, runtime, device, revision))
+
+
+def _size(path: Path) -> int:
+    """Bytes on disk under *path*: a file's size, or everything inside a directory."""
+    if path.is_file():
+        return path.stat().st_size
+    return sum(child.stat().st_size for child in path.rglob("*") if child.is_file())
+
+
+def cached() -> list[dict[str, Any]]:
+    """Everything in the cache, one record per file or unpacked directory, in path order.
+
+    Each record is ``{family, variant, revision, key, runtime, size, path, state}``:
+
+    - ``key`` is the manifest's artifact key (``"torch-fp32"``, ``"LICENSE"``), or ``None`` for
+      something the manifest does not list.
+    - ``runtime`` is the runtime that key belongs to, or ``None`` for a licence, NOTICE or labels.
+    - ``state`` is ``"complete"`` for a verified file the manifest lists -- a file only takes its
+      final name after its size and hash match; ``"unpacked"`` for the ``.mlpackage`` a CoreML
+      archive was extracted to; ``"partial"`` for an interrupted download or extraction; and
+      ``"unlisted"`` for anything this version's manifest does not know, such as a revision an
+      upgrade has moved past.
+
+    Grouping is the caller's: by ``(family, variant, revision)`` for a model, by ``runtime`` for
+    what one load uses, by ``state`` for what can go.
+    """
+    from .runtimes import runnable
+
+    root = cache_dir()
+    records = []
+    for revision_dir in sorted(p for p in root.glob("*/*/*") if p.is_dir()):
+        family, variant, revision = revision_dir.relative_to(root).parts
+        try:
+            _, entry = _lookup(family, variant, revision)
+            by_name = {Path(a["path"]).name: key for key, a in entry["artifacts"].items()}
+        except WeightsError:
+            by_name = {}  # a model or revision this version's manifest does not list
+        # An unpacked or half-unpacked CoreML package shares its archive's stem.
+        by_stem = {Path(name).stem: key for name, key in by_name.items()}
+
+        for path in sorted(revision_dir.iterdir()):
+            if path.name.startswith("."):
+                continue
+            if path.name.endswith(_PARTIAL_SUFFIX):
+                key, state = by_name.get(path.name[: -len(_PARTIAL_SUFFIX)]), "partial"
+            elif path.suffix == _STAGING_SUFFIX:
+                key, state = by_stem.get(path.stem), "partial"
+            elif path.suffix == _UNPACKED_SUFFIX:
+                key = by_stem.get(path.stem)
+                state = "unpacked" if key else "unlisted"
+            else:
+                key = by_name.get(path.name)
+                state = "complete" if key else "unlisted"
+            records.append({
+                "family": family, "variant": variant, "revision": revision, "key": key,
+                "runtime": next(iter(runnable([key])), None) if key else None,
+                "size": _size(path), "path": path, "state": state,
+            })
+    return records
+
+
+def remove(family: str, variant: str, revision: str | None = None) -> int:
+    """Delete a model's cached files, and nothing else. Returns the bytes freed.
+
+    Everything under that model's revision directory goes -- every runtime, its unpacked CoreML
+    package, any partial download, the licence and NOTICE -- and so does the directory, and the
+    variant's and family's once they are empty. Nothing outside them is touched.
+
+    A model already loaded keeps working: its weights are in memory. The next load of it
+    downloads again.
+
+    Args:
+        family: Model family, e.g. ``"sam3"``.
+        variant: Variant within it.
+        revision: One revision to remove. ``None`` removes every cached revision of the variant,
+            including ones the manifest no longer lists.
+
+    Raises:
+        ValueError: If a name is empty or would reach outside the cache.
+
+    Examples:
+        >>> remove("sam3", "sam3")                              # doctest: +SKIP
+        3449283301
+    """
+    names = (family, variant) if revision is None else (family, variant, revision)
+    # Each must be a single path component, so nothing joined from them can leave the cache.
+    if any(n in ("", ".", "..") or Path(n).name != n for n in names):
+        raise ValueError(f"not a model in the cache: {'/'.join(names)!r}")
+
+    variant_dir = _model_dir(family, variant)
+    doomed = [variant_dir / revision] if revision else sorted(variant_dir.glob("*"))
+    freed = 0
+    for directory in doomed:
+        if directory.is_dir():
+            freed += _size(directory)
+            shutil.rmtree(directory)
+    for directory in (variant_dir, variant_dir.parent):
+        # rmdir rather than rmtree: it refuses a directory that still holds anything.
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()
+    return freed

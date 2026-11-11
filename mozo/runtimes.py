@@ -41,7 +41,8 @@ from typing import Any
 
 import numpy as np
 
-from .weights import _RUNNABLE, framework_of, part_of, runtime_of
+from .weights import (_RUNNABLE, _STAGING_SUFFIX, _UNPACKED_SUFFIX, framework_of, part_of,
+                      runtime_of)
 
 #: Cached: the answer cannot change within a process, and ``torch.cuda.is_available()`` costs
 #: real time the first time it is asked.
@@ -274,9 +275,9 @@ def _unpacked(archive: Path) -> Path:
     """
     if archive.is_dir():
         return archive
-    unpacked = archive.with_suffix(".mlpackage")
+    unpacked = archive.with_suffix(_UNPACKED_SUFFIX)
     if not unpacked.is_dir():
-        staging = archive.with_suffix(".unpacking")
+        staging = archive.with_suffix(_STAGING_SUFFIX)
         shutil.rmtree(staging, ignore_errors=True)
         with zipfile.ZipFile(archive) as bundle:
             bundle.extractall(staging)

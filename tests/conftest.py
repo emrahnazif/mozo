@@ -330,6 +330,16 @@ def manifest_file(run_generator, tmp_path: Path) -> Path:
     return destination
 
 
+@pytest.fixture(autouse=True)
+def unconfigured():
+    """Undo :func:`mozo.configure` after every test. It is process-wide, like the environment it
+    overrides, and a setting left behind would silently win over the next test's ``MOZO_CACHE``."""
+    from mozo import weights as module
+
+    yield
+    module._settings.clear()
+
+
 @pytest.fixture
 def weights(monkeypatch, zoo: Path, manifest_file: Path, tmp_path: Path):
     """Point :mod:`mozo.weights` at the synthetic zoo, served from the local filesystem."""

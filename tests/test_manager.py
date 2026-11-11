@@ -162,3 +162,128 @@ class TestConcurrency:
             loading.join(timeout=10)
 
         assert models.loaded() == ["toy/warm", "toy/slow"]
+
+
+class TestUnloading:
+    """Released on request, and only the model asked for. Nothing is released unasked."""
+
+    def test_load_unload_load_gives_a_new_object(self, toy):
+        models = ModelManager()
+        first = models.get_model("toy", "a")
+        assert models.loaded() == ["toy/a"]
+
+        assert models.unload("toy", "a") is True
+        assert models.loaded() == []
+
+        second = models.get_model("toy", "a")
+        assert second is not first
+        assert models.loaded() == ["toy/a"]
+        assert toy.built == ["a", "a"]
+
+    def test_unload_takes_what_get_model_took(self, toy):
+        """The device and the adapter arguments are the identity, for unloading too."""
+        models = ModelManager()
+        models.get_model("toy", "a")
+        models.get_model("toy", "a", device="cpu", labels=["x"])
+
+        assert models.unload("toy", "a", device="cpu") is False  # not the one with labels
+        assert models.unload("toy", "a", device="cpu", labels=["x"]) is True
+        assert models.loaded() == ["toy/a"]
+
+    def test_unloading_what_is_not_loaded_says_so(self, toy):
+        assert ModelManager().unload("toy", "a") is False
+
+    def test_clear_releases_everything_and_says_what(self, toy):
+        models = ModelManager()
+        models.get_model("toy", "a")
+        models.get_model("toy", "b", device="cpu")
+        assert models.clear() == ["toy/a", "toy/b@cpu"]
+        assert models.loaded() == []
+        assert models.clear() == []
+
+    def test_it_gives_the_accelerator_memory_back(self, toy, monkeypatch):
+        freed = []
+        monkeypatch.setattr("mozo.manager._free_accelerator_memory", lambda: freed.append(1))
+        models = ModelManager()
+        models.get_model("toy", "a")
+        models.unload("toy", "a")
+        assert freed == [1]
+        models.unload("toy", "a")  # nothing to release, nothing to free
+        assert freed == [1]
+
+    def test_a_model_still_held_elsewhere_is_named(self, toy, caplog):
+        models = ModelManager()
+        kept = models.get_model("toy", "a")
+        with caplog.at_level("WARNING", logger="mozo.manager"):
+            models.unload("toy", "a")
+        assert "toy/a" in caplog.text and "still holds it" in caplog.text
+        del kept
+
+    def test_a_model_held_by_no_one_else_is_released_quietly(self, toy, caplog):
+        models = ModelManager()
+        models.get_model("toy", "a")
+        with caplog.at_level("WARNING", logger="mozo.manager"):
+            models.unload("toy", "a")
+        assert caplog.text == ""
+
+    def test_unloading_a_model_still_loading_waits_for_it(self, toy):
+        models = ModelManager()
+        toy.gate = Event()
+        loading = Thread(target=models.get_model, args=("toy", "slow"))
+        loading.start()
+        assert toy.entered.wait(timeout=5)
+
+        result = []
+        unloading = Thread(target=lambda: result.append(models.unload("toy", "slow")))
+        unloading.start()
+        unloading.join(timeout=0.2)
+        assert unloading.is_alive(), "unload did not wait for the build"
+
+        toy.gate.set()
+        loading.join(timeout=10)
+        unloading.join(timeout=10)
+        assert result == [True]
+        assert models.loaded() == []
+
+    def test_nothing_is_kept_for_a_build_once_it_ends(self, toy):
+        models = ModelManager()
+        models.get_model("toy", "a")
+        assert models._builds == {}
+
+
+class TestResident:
+    def test_it_reports_device_last_use_and_order(self, toy):
+        models = ModelManager()
+        models.get_model("toy", "a", device="cpu")
+        models.get_model("toy", "b")
+        first = {row["id"]: row for row in models.resident()}
+        assert list(first) == ["toy/a@cpu", "toy/b"]
+        assert first["toy/a@cpu"]["device"] == "cpu"
+        assert (first["toy/a@cpu"]["family"], first["toy/a@cpu"]["variant"]) == ("toy", "a")
+
+        models.get_model("toy", "a", device="cpu")
+        again = {row["id"]: row for row in models.resident()}
+        assert again["toy/a@cpu"]["last_used"] >= first["toy/a@cpu"]["last_used"]
+        assert again["toy/b"]["last_used"] == first["toy/b"]["last_used"]
+
+    def test_a_size_it_cannot_estimate_is_none(self, toy):
+        models = ModelManager()
+        models.get_model("toy", "a")  # no runtime, no manifest entry
+        assert models.resident()[0]["size"] is None
+
+    def test_a_checkpoint_of_your_own_is_its_file_size(self, toy, tmp_path):
+        checkpoint = tmp_path / "mine.pth"
+        checkpoint.write_bytes(b"x" * 123)
+        models = ModelManager()
+        models.get_model("toy", "mine", checkpoint_path=str(checkpoint))
+        assert models.resident()[0]["size"] == 123
+
+
+def test_the_shared_cache_can_be_released_too(toy, monkeypatch):
+    import mozo
+
+    monkeypatch.setattr(mozo, "_shared", ModelManager())
+    first = mozo.get_model("toy/a")
+    assert mozo.unload("toy/a") is True
+    assert mozo.get_model("toy", "a") is not first
+    assert mozo.clear() == ["toy/a"]

@@ -8,6 +8,7 @@ served from ``file://``, with a chunk size small enough that every file takes se
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -193,3 +194,96 @@ class TestThroughGetModel:
         first = manager.get_model("toy", "alpha", device="cpu", progress=lambda *a: None)
         assert manager.get_model("toy", "alpha", device="cpu") is first
         assert manager.loaded() == ["toy/alpha@cpu"]
+
+
+class TestWaitingOnAnotherCallersBuild:
+    """A second caller for a model already loading joins that load rather than starting one."""
+
+    @pytest.fixture
+    def gated(self, chunked, monkeypatch):
+        """A build that waits at a gate, then downloads toy/alpha -- or is cancelled by its caller."""
+        state = {"entered": threading.Event(), "gate": threading.Event(), "builds": 0}
+
+        def build(family, variant, **kwargs):
+            state["builds"] += 1
+            state["entered"].set()
+            assert state["gate"].wait(10)
+            return chunked.resolve(family, variant)
+
+        monkeypatch.setattr("mozo.manager._build", build)
+        return state
+
+    def _start(self, manager, **watch):
+        errors = []
+
+        def run():
+            try:
+                manager.get_model("toy", "alpha", device="cpu", **watch)
+            except Exception as error:
+                errors.append(error)
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        return thread, errors
+
+    def test_a_waiter_hears_the_download_the_first_caller_started(self, gated, chunked):
+        manager = ModelManager()
+        expected = chunked.download_size("toy", "alpha", device="cpu")
+        first_heard, second_heard = [], []
+        first, _ = self._start(manager, progress=lambda *a: first_heard.append(a))
+        assert gated["entered"].wait(5)
+        second, _ = self._start(manager, progress=lambda *a: second_heard.append(a))
+        deadline = time.monotonic() + 5
+        while not manager._builds["toy/alpha@cpu"].followers[1:]:  # until the second has joined
+            assert time.monotonic() < deadline, "the second caller never joined the build"
+            time.sleep(0.001)
+        gated["gate"].set()
+        first.join(5)
+        second.join(5)
+
+        assert gated["builds"] == 1
+        assert first_heard[-1] == second_heard[-1] == (expected, expected)
+
+    def test_a_waiter_that_cancels_stops_waiting_and_leaves_the_build_alone(self, gated):
+        manager = ModelManager()
+        first, first_errors = self._start(manager)
+        assert gated["entered"].wait(5)
+        second, second_errors = self._start(manager, cancelled=lambda: True)
+        second.join(5)
+        assert not second.is_alive()
+        assert [type(e).__name__ for e in second_errors] == ["DownloadCancelled"]
+
+        gated["gate"].set()
+        first.join(5)
+        assert first_errors == []
+        assert manager.loaded() == ["toy/alpha@cpu"]
+
+    def test_when_the_first_caller_cancels_a_waiter_builds_it_instead(self, gated):
+        manager = ModelManager()
+        stop_first = threading.Event()
+        first, first_errors = self._start(manager, cancelled=stop_first.is_set)
+        assert gated["entered"].wait(5)
+        second, second_errors = self._start(manager)
+        stop_first.set()
+        gated["gate"].set()
+        first.join(5)
+        second.join(5)
+
+        assert [type(e).__name__ for e in first_errors] == ["DownloadCancelled"]
+        assert second_errors == []
+        assert gated["builds"] == 2
+        assert manager.loaded() == ["toy/alpha@cpu"]
+
+
+def test_resident_estimates_size_from_the_manifest(chunked, monkeypatch):
+    """The bytes of the weights a model runs from: its runtime's files, not the licence."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("mozo.manager._build", lambda family, variant, **kw: SimpleNamespace(
+        device="cpu", runtime="onnx-fp32", path=chunked.resolve(family, variant, "onnx-fp32")))
+    manager = ModelManager()
+    manager.get_model("toy", "alpha", device="cpu", runtime="onnx-fp32")
+    [row] = manager.resident()
+    assert row["runtime"] == "onnx-fp32"
+    onnx = chunked.cache_dir() / "toy" / "alpha" / "2026-02-01" / "onnx-fp32.onnx"
+    assert row["size"] == onnx.stat().st_size

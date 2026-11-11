@@ -28,8 +28,8 @@ from __future__ import annotations
 # pyproject.toml reads this via [tool.setuptools.dynamic] version.attr
 __version__ = "1.1.2"
 
-__all__ = ["MODEL_REGISTRY", "ModelManager", "__version__", "configure", "get_model",
-           "get_model_info"]
+__all__ = ["MODEL_REGISTRY", "ModelManager", "__version__", "clear", "configure", "get_model",
+           "get_model_info", "unload"]
 
 import logging as _logging
 
@@ -66,11 +66,36 @@ def get_model(identifier: str, variant: str | None = None, device: str | None = 
         >>> get_model("rfdetr/nano")                    # doctest: +SKIP
         >>> get_model("rfdetr", "nano", device="cpu")   # doctest: +SKIP
     """
-    if variant is None:
-        if "/" not in identifier:
-            raise ValueError(
-                f"Expected 'family/variant' or a separate variant argument, got {identifier!r}")
-        identifier, variant = identifier.split("/", 1)
-
-    return _shared.get_model(identifier, variant, device=device,
+    family, variant = _split(identifier, variant)
+    return _shared.get_model(family, variant, device=device,
                              progress=progress, cancelled=cancelled)
+
+
+def unload(identifier: str, variant: str | None = None, device: str | None = None) -> bool:
+    """Release a model :func:`get_model` loaded, and give its accelerator memory back.
+
+    Takes what :func:`get_model` took, because that is the model's identity. Returns whether it
+    was loaded. See :meth:`~mozo.manager.ModelManager.unload`.
+
+    Examples:
+        >>> unload("rfdetr/nano")                       # doctest: +SKIP
+        True
+    """
+    family, variant = _split(identifier, variant)
+    return _shared.unload(family, variant, device=device)
+
+
+def clear() -> list[str]:
+    """Release every model :func:`get_model` loaded. Returns the ids released."""
+    return _shared.clear()
+
+
+def _split(identifier: str, variant: str | None) -> tuple[str, str]:
+    """``("rfdetr/nano", None)`` or ``("rfdetr", "nano")`` to ``("rfdetr", "nano")``."""
+    if variant is not None:
+        return identifier, variant
+    if "/" not in identifier:
+        raise ValueError(
+            f"Expected 'family/variant' or a separate variant argument, got {identifier!r}")
+    family, variant = identifier.split("/", 1)
+    return family, variant

@@ -11,8 +11,7 @@ dynamic = ["version"]
 description = "Run several computer vision models or a graph of them from one pip install, with the original's exact numbers."
 readme = "README.md"
 authors = [
-    { name = "Emrah NAZIF", email = "emrah@datamarkin.com" },
-    {name = "Datamarkin", email = "support@datamarkin.com"}
+    { name = "Emrah NAZIF", email = "emrah@datamarkin.com" }
 ]
 license = { text = "Apache-2.0" }
 classifiers = [
@@ -82,10 +81,10 @@ test = ["httpx"]  # fastapi's TestClient drives the endpoints in tests/test_serv
 mozo = "mozo.cli:cli"
 
 [project.urls]
-"Homepage" = "https://github.com/datamarkin/mozo"
-"Documentation" = "https://github.com/datamarkin/mozo/blob/main/docs/README.md"
-"Release Notes" = "https://github.com/datamarkin/mozo/releases"
-"Bug Tracker" = "https://github.com/datamarkin/mozo/issues"
+"Homepage" = "https://github.com/emrah/mozo"
+"Documentation" = "https://emrah.fr/mozo/"
+"Release Notes" = "https://github.com/emrahnazif/mozo/releases"
+"Bug Tracker" = "https://github.com/emrahnazif/mozo/issues"
 
 [tool.setuptools.packages.find]
 include = ["mozo*"]

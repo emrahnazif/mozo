@@ -19,7 +19,7 @@ Python:
 of the process. Build a :class:`~mozo.manager.ModelManager` of your own for a separate cache and
 a separate lifetime, or import an adapter directly for no cache at all.
 
-See https://github.com/datamarkin/mozo.
+See https://github.com/emrahnazif/mozo.
 """
 
 from __future__ import annotations

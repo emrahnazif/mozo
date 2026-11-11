@@ -1,6 +1,6 @@
 # Mozo
 
-[![CI](https://img.shields.io/github/actions/workflow/status/datamarkin/mozo/ci.yml?branch=main&label=CI)](https://github.com/datamarkin/mozo/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/emrahnazif/mozo/ci.yml?branch=main&label=CI)](https://github.com/emrahnazif/mozo/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/mozo)](https://pypi.org/project/mozo/)
 [![Python](https://img.shields.io/pypi/pyversions/mozo)](https://pypi.org/project/mozo/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -398,7 +398,7 @@ annotated = pf.annotate.label(annotated, filtered)
 json_output = filtered.to_json()
 ```
 
-More: [PixelFlow](https://github.com/datamarkin/pixelflow)
+More: [PixelFlow](https://github.com/emrahnazif/pixelflow)
 
 ## How it works
 
@@ -522,9 +522,9 @@ cd ui && npm install && npm run build   # writes mozo/workflow/static/
 
 ## Links
 
-- [Repository](https://github.com/datamarkin/mozo)
-- [Issues](https://github.com/datamarkin/mozo/issues)
-- [PixelFlow](https://github.com/datamarkin/pixelflow) — the result format
+- [Repository](https://github.com/emrahnazif/mozo)
+- [Issues](https://github.com/emrahnazif/mozo/issues)
+- [PixelFlow](https://github.com/emrahnazif/pixelflow) — the result format
 
 ## License
 

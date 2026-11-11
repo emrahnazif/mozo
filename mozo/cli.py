@@ -6,6 +6,7 @@ Provides simple commands for starting the server and checking version.
 
 import logging
 import sys
+import threading
 import time
 from contextlib import contextmanager
 
@@ -23,6 +24,7 @@ class _Echo(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
+            _end_bar()
             click.echo(self.format(record), err=record.levelno >= logging.WARNING)
         except Exception:  # pragma: no cover - logging must never take the caller down
             self.handleError(record)
@@ -141,18 +143,72 @@ def run(workflow, media, settings, test):
             overrides[built.file_parameter] = media
         except ValueError as error:
             raise click.BadParameter(str(error)) from error
-    if test or built.source is None:
-        # No source means the caller has to bring the items, and this command does not: one pass
-        # over what is wired is the only thing it could mean.
-        for event in built.stream(**overrides):
-            if event.status == "failed":
-                raise click.ClickException(event.error)
-            if event.status == "completed":
-                ends = " (an end)" if event.node in built.terminals else ""
-                click.echo(f"  {event.node}: {_describe(event.output)}{ends}")
-        return
+    try:
+        if test or built.source is None:
+            # No source means the caller has to bring the items, and this command does not: one
+            # pass over what is wired is the only thing it could mean.
+            for event in built.stream(models=_models_with_progress(), **overrides):
+                if event.status == "failed":
+                    raise click.ClickException(event.error)
+                if event.status == "completed":
+                    ends = " (an end)" if event.node in built.terminals else ""
+                    click.echo(f"  {event.node}: {_describe(event.output)}{ends}")
+            return
+        _process(built, overrides)
+    except FileNotFoundError as error:
+        # The run's own check, listing every file the workflow names that is not here. Said as
+        # it is; a traceback would bury the list under frames nobody running a workflow needs.
+        raise click.ClickException(str(error)) from error
 
-    _process(built, overrides)
+
+def _models_with_progress():
+    """The run's models, drawing a progress bar while each one downloads -- on a terminal.
+
+    Handed to the run as its ``models`` rather than set around it, because a run loads its models
+    on worker threads, and what a node is handed reaches them where a thread-local would not.
+    Elsewhere -- piped, or into a log file -- ``None``: downloads report as the log lines they
+    always have, since a bar redrawn in place is unreadable once it is not a terminal.
+    """
+    if not sys.stdout.isatty():
+        return None
+    from mozo import ModelManager
+
+    models = ModelManager()
+
+    def provide(family, variant, **kwargs):
+        label = f"{family}/{variant}"
+        return models.get_model(family, variant,
+                                progress=lambda done, total: _bar(label, done, total), **kwargs)
+    return provide
+
+
+#: Whether a progress bar's line is open -- drawn without a newline, to be redrawn in place --
+#: and the lock around it and every write that has to end it first. Downloads report from
+#: worker threads, so the bar and a log line can arrive at once.
+_bar_open = False
+_drawing = threading.Lock()
+
+
+def _bar(label: str, done: int, total: int) -> None:
+    """One download's progress, redrawn in place, ending its line when the download does."""
+    global _bar_open
+    width = 30
+    filled = width * done // total if total else 0
+    with _drawing:
+        click.echo(f"\r  {label}  [{'#' * filled}{'.' * (width - filled)}]  "
+                   f"{done / 1e6:,.1f} / {total / 1e6:,.1f} MB", nl=False)
+        _bar_open = not (total and done >= total)
+        if not _bar_open:
+            click.echo()
+
+
+def _end_bar() -> None:
+    """Finish an open progress bar's line, so what comes next starts on its own."""
+    global _bar_open
+    with _drawing:
+        if _bar_open:
+            _bar_open = False
+            click.echo()
 
 
 def _process(built, overrides: dict) -> None:
@@ -168,12 +224,13 @@ def _process(built, overrides: dict) -> None:
     began = last = time.monotonic()
     done = 0
     try:
-        for _item, _results in built.process(**overrides):
+        for _item, _results in built.process(models=_models_with_progress(), **overrides):
             done += 1
             now = time.monotonic()
             if now - last >= PREVIEW_EVERY:
                 last = now
                 rate = done / (now - began)
+                _end_bar()
                 click.echo(f"\r  {_items(done)} ({rate:,.0f}/s)", nl=not live)
     except RuntimeError as error:
         # The engine names the item and the node; wrapping it in a traceback would bury both.

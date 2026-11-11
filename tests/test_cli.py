@@ -60,3 +60,40 @@ def test_the_file_is_bound_by_kind_not_by_a_name_written_here(workflow):
     assert Workflow.load(str(workflow)).file_parameter == "source"
     assert CliRunner().invoke(
         cli, ["run", str(workflow), "--file", str(FIXTURE)]).exit_code == 0
+
+
+def test_a_workflow_naming_files_that_are_not_here_says_so_cleanly(tmp_path):
+    """One message listing every missing file, and no traceback."""
+    document_path = tmp_path / "wf.json"
+    document_path.write_text(json.dumps({
+        "nodes": [{"id": "load", "type": "read_media",
+                   "data": {"parameters": {"source": "/nowhere/frames"}}}],
+        "edges": []}))
+    result = CliRunner().invoke(cli, ["run", str(document_path)])
+    assert result.exit_code == 1
+    assert "1 file that is not here" in result.output and "/nowhere/frames" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_downloads_draw_a_bar_only_on_a_terminal():
+    """Piped or logged, a run keeps the plain log lines; a bar redrawn in place is unreadable."""
+    from mozo.cli import _models_with_progress
+
+    with CliRunner().isolation():
+        assert _models_with_progress() is None
+
+
+def test_the_bar_ends_its_line_before_anything_else_prints():
+    import logging
+
+    from mozo.cli import _bar, _showing_logs
+
+    with CliRunner().isolation() as (out, _):
+        with _showing_logs():
+            _bar("rfdetr/nano", 50, 100)
+            logging.getLogger("mozo.weights").info("[mozo] downloading LICENSE (0.0 MB)")
+            _bar("rfdetr/nano", 100, 100)
+        lines = out.getvalue().decode().split("\n")
+    assert "rfdetr/nano" in lines[0] and f"[{'#' * 15}{'.' * 15}]" in lines[0]  # half way
+    assert lines[1] == "[mozo] downloading LICENSE (0.0 MB)"
+    assert lines[2].strip().startswith("rfdetr/nano") and lines[2].endswith("MB")

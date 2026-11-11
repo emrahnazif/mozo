@@ -510,6 +510,10 @@ Apache-2.0**, 30 are **AGPL-3.0** (every YOLO variant), 5 are **MIT** (CLIP and 
 (SAM 3). The full licence and a NOTICE
 naming the exact upstream release are published beside every checkpoint.
 
+Which licence a variant is under can be asked before anything is downloaded:
+`mozo.weights.license_of("yolov8", "nano")` returns `"AGPL-3.0"`, and `GET /models` carries
+the same identifier for every variant it offers.
+
 **YOLO weights are AGPL-3.0**, or covered by a commercial licence from Ultralytics.
 And serving predictions from them over a network places  AGPL-3.0 section 13 obligations on you.
 

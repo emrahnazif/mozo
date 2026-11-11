@@ -105,8 +105,9 @@ class PromptablePredictor:
     VENDOR: ModuleType
     VARIANTS: tuple[str, ...]
 
-    #: Frameworks this adapter has code to run. See the class docstring.
-    EXECUTES: tuple[str, ...] = ("torch",)
+    #: Frameworks this adapter has code to run, from :data:`mozo.registry.EXECUTES`. See the
+    #: class docstring. Set by each family, since the registry keys it by family.
+    EXECUTES: tuple[str, ...]
 
     def __init__(
         self,

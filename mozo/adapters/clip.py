@@ -35,6 +35,7 @@ from typing import Union
 
 import numpy as np
 
+from .. import registry
 from ..image import load_image
 from ..runtimes import get_default_device, select_runtime
 from ..vendors.clip_deploy import SPECS, VARIANTS, Encoder
@@ -86,7 +87,7 @@ class ClipPredictor:
     #: Which runtimes this adapter can execute. Only torch: the vendor builds two torch towers
     #: from a checkpoint and has no graph path. Declared rather than checked afterwards so ``auto``
     #: cannot pick an artifact this would then have to refuse.
-    EXECUTES = ("torch",)
+    EXECUTES = registry.EXECUTES[FAMILY]
 
     def __init__(
         self,

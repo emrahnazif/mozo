@@ -27,6 +27,7 @@ from typing import Any, Union
 
 import numpy as np
 
+from .. import registry
 from ..image import load_image
 from ..runtimes import get_default_device
 from ..vendors.moebius_deploy import Predictor
@@ -132,7 +133,7 @@ class MoebiusPredictor:
     """
 
     VARIANTS = ("general", "places2")
-    EXECUTES = ("torch",)
+    EXECUTES = registry.EXECUTES["moebius"]
 
     def __init__(
         self,

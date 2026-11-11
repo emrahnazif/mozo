@@ -11,6 +11,7 @@ family carries a separate weights licence.
 
 from __future__ import annotations
 
+from .. import registry
 from ..vendors import sam2_deploy
 from ._promptable import PromptablePredictor
 
@@ -29,6 +30,7 @@ class Sam2Predictor(PromptablePredictor):
     """
 
     FAMILY = "sam2"
+    EXECUTES = registry.EXECUTES["sam2"]
     DISPLAY = "SAM 2"
     VENDOR = sam2_deploy
     #: Smallest first: it is the default, and it is the one that fits on an edge device.

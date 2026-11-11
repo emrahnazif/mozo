@@ -29,6 +29,7 @@ from typing import Union
 
 import numpy as np
 
+from .. import registry
 from ..image import load_image
 from ..runtimes import get_default_device, select_runtime
 from ..vendors.grounding_dino_deploy import SPECS, VARIANTS, Predictor
@@ -79,7 +80,7 @@ class GroundingDinoPredictor:
     #: image is resized rather than letterboxed, so its height and width depend on the
     #: photograph -- and a graph exported at one shape cannot take another. Declared rather than
     #: checked afterwards so ``auto`` cannot pick an artifact this would then have to refuse.
-    EXECUTES = ("torch",)
+    EXECUTES = registry.EXECUTES[FAMILY]
 
     def __init__(
         self,

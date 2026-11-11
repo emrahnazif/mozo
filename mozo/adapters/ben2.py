@@ -31,6 +31,7 @@ from typing import Union
 
 import numpy as np
 
+from .. import registry
 from ..image import load_image
 from ..runtimes import get_default_device, select_runtime
 from ..vendors.ben2_deploy import Predictor
@@ -62,7 +63,7 @@ class Ben2Predictor:
     """
 
     VARIANTS = ("base",)
-    EXECUTES = ("torch",)
+    EXECUTES = registry.EXECUTES["ben2"]
     FAMILY = "ben2"
 
     def __init__(
@@ -83,7 +84,8 @@ class Ben2Predictor:
 
         if checkpoint_path is None:
             self.runtime = select_runtime(
-                self.device, artifacts(self.FAMILY, variant, revision=revision), runtime)
+                self.device, artifacts(self.FAMILY, variant, revision=revision), runtime,
+                executes=self.EXECUTES)
             weights = resolve(self.FAMILY, variant, self.runtime, revision=revision)
         else:
             self.runtime = "torch-fp32"

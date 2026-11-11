@@ -15,7 +15,7 @@ To add a family: add an entry below, and give its adapter the same ``VARIANTS``.
 
 from __future__ import annotations
 
-__all__ = ["BOXED", "ENCODES", "MODEL_REGISTRY", "PROMPTED", "get_model_info"]
+__all__ = ["BOXED", "ENCODES", "EXECUTES", "MODEL_REGISTRY", "NEEDS", "PROMPTED", "get_model_info"]
 
 from typing import Any
 
@@ -56,6 +56,38 @@ BOXED = frozenset({"pose_estimation", "image_inpainting"})
 ENCODES: dict[str, frozenset[str]] = {
     "clip": frozenset({"image", "text"}),
     "siglip2": frozenset({"image", "text"}),
+}
+
+#: Which frameworks each family's adapter has code to execute. A family absent from here runs
+#: whatever it publishes. Passed to :func:`mozo.runtimes.select_runtime` as ``executes``.
+#:
+#: Data here rather than an attribute on the adapter, because which runtime ``auto`` lands on
+#: decides which files a load will fetch, and :mod:`mozo.weights` has to answer that -- "is this
+#: downloaded", "how much is left to fetch" -- without importing an adapter and torch with it.
+#: The adapters read it from here, so there is one statement of it.
+EXECUTES: dict[str, tuple[str, ...]] = {
+    family: ("torch",)
+    for family in ("ben2", "clip", "easyocr", "edgetam", "grounding_dino", "moebius", "owlv2",
+                   "sam2", "siglip2")
+}
+
+#: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
+#: for every runtime. A key a revision does not publish is skipped, as the adapter skips it.
+#:
+#: The graphs carry an architecture but no vocabulary, so a YOLO run from one reads its class
+#: names from the published ``labels`` file; run from torch it reads them off the checkpoint.
+#: RF-DETR's and ViTPose's checkpoints carry no names at all, so they read labels on every
+#: runtime. SAM 3's graph covers only the vision encoder, so its checkpoint is fetched whichever
+#: runtime won.
+#:
+#: The same reason as :data:`EXECUTES`: what a load downloads has to be answerable without the
+#: adapter. A test loads each family and holds this to the files it actually fetched.
+NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
+    **{family: {"onnx": ("labels",), "coreml": ("labels",)}
+       for family in ("yolov8", "yolov11", "yolov12", "yolov26")},
+    "rfdetr": {"*": ("labels",)},
+    "vitpose": {"*": ("labels",)},
+    "sam3": {"onnx": ("torch-fp32",), "coreml": ("torch-fp32",)},
 }
 
 #: Family -> where its adapter lives, what it does, and which variants it publishes.

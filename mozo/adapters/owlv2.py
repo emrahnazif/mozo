@@ -24,6 +24,7 @@ from typing import Union
 
 import numpy as np
 
+from .. import registry
 from ..image import load_image
 from ..runtimes import get_default_device, select_runtime
 from ..vendors.owlv2_deploy import Detector
@@ -77,7 +78,7 @@ class OwlV2Predictor:
     #: inert while OWLv2 publishes only torch, and the line that keeps ``auto`` correct if it
     #: ever publishes more. (``PROVENANCE.md`` covers a different question: why no graph is
     #: published, which is that the one that traced ran twice as slow.)
-    EXECUTES = ("torch",)
+    EXECUTES = registry.EXECUTES[FAMILY]
 
     def __init__(
         self,

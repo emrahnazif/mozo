@@ -11,6 +11,7 @@ Both its code and its published weights are Apache-2.0, which is not true of eve
 
 from __future__ import annotations
 
+from .. import registry
 from ..vendors import edgetam_deploy
 from ._promptable import PromptablePredictor
 
@@ -29,6 +30,7 @@ class EdgeTamPredictor(PromptablePredictor):
     """
 
     FAMILY = "edgetam"
+    EXECUTES = registry.EXECUTES["edgetam"]
     DISPLAY = "EdgeTAM"
     VENDOR = edgetam_deploy
     #: Meta publishes a single EdgeTAM rather than a size ladder, so there is one name.

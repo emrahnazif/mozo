@@ -430,6 +430,20 @@ download, and its licence and a NOTICE naming the exact upstream release are pub
 | `MOZO_OFFLINE` | Set to `1` to refuse downloads. A missing file raises an error naming the exact path, URL and hash, so it can be placed by hand. |
 | `PYTORCH_ENABLE_MPS_FALLBACK` | Set to `1` on Apple silicon so unimplemented ops fall back to CPU rather than failing. |
 
+An application embedding mozo can set the last three in code instead, and ask what the cache
+holds — none of it touches the network or imports torch:
+
+```python
+import mozo
+from mozo import weights
+
+mozo.configure(cache="~/MyApp/weights", offline=False)    # wins over MOZO_CACHE, MOZO_OFFLINE
+weights.download_size("sam2", "large", device="mps")      # bytes a load would still fetch
+weights.is_cached("sam2", "large", device="mps")          # would a load need the network?
+weights.cached()                                          # every file, its key, size and state
+weights.remove("sam3", "sam3")                            # delete it; returns the bytes freed
+```
+
 ## Deploying
 
 ```bash

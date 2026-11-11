@@ -29,6 +29,7 @@ from ..image import load_image
 from ..runtimes import CoreMLRunner, get_default_device, select_runtime
 from ..vendors.sam3_deploy import Segmenter
 from ..weights import artifacts, framework_of, resolve
+from ._prepare import Preparing
 
 try:
     import pixelflow as pf
@@ -87,7 +88,7 @@ class GraphVision:
         }
 
 
-class Sam3Predictor:
+class Sam3Predictor(Preparing):
     """Concept segmentation: name a thing, get every instance of it.
 
     Args:
@@ -149,6 +150,9 @@ class Sam3Predictor:
         self._segmenter = Segmenter(weights, device=self.device, vision=vision)
         _log.info("SAM 3 ready on %s via %s.", self.device, self.runtime)
 
+    def _encode(self, pixels: np.ndarray) -> None:
+        self._segmenter.encode_image(pixels)
+
     def predict(
         self,
         image: Union[str, Path, bytes, np.ndarray],
@@ -185,6 +189,7 @@ class Sam3Predictor:
             raise ValueError("SAM 3 needs a concept to look for; text was empty.")
 
         pixels = load_image(image)
+        self._after_prepare(pixels)
 
         # One decode per prompt, because the head takes one prompt's features against one
         # image's -- there is no batched form to reach for. The encode is what they share, and

@@ -30,6 +30,7 @@ from ..runtimes import get_default_device, select_runtime
 from ..vendors.owlv2_deploy import Detector
 from ..vendors.owlv2_deploy.predictor import THRESHOLD
 from ..weights import artifacts, resolve
+from ._prepare import Preparing
 
 try:
     import pixelflow as pf
@@ -45,7 +46,7 @@ FAMILY = "owlv2"
 _log = logging.getLogger(__name__)
 
 
-class OwlV2Predictor:
+class OwlV2Predictor(Preparing):
     """Open-vocabulary detection: name a thing, get boxes for it.
 
     Args:
@@ -113,6 +114,9 @@ class OwlV2Predictor:
         self._detector = Detector(weights, variant, device=self.device)
         _log.info("OWLv2 %s ready on %s via %s.", variant, self.device, self.runtime)
 
+    def _encode(self, pixels: np.ndarray) -> None:
+        self._detector.encode_image(pixels)
+
     def predict(
         self,
         image: Union[str, Path, bytes, np.ndarray],
@@ -148,7 +152,9 @@ class OwlV2Predictor:
         if any(not phrase.strip() for phrase in prompts):
             raise ValueError("OWLv2 needs a phrase to look for; text was empty.")
 
-        found = self._detector.predict(load_image(image), prompts, threshold=threshold)
+        pixels = load_image(image)
+        self._after_prepare(pixels)
+        found = self._detector.predict(pixels, prompts, threshold=threshold)
 
         # Ranked here rather than in the vendor, because the vendor returns candidates in patch
         # order -- which is the model's order and the right one to verify against -- while every

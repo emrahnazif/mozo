@@ -15,7 +15,8 @@ To add a family: add an entry below, and give its adapter the same ``VARIANTS``.
 
 from __future__ import annotations
 
-__all__ = ["BOXED", "ENCODES", "EXECUTES", "MODEL_REGISTRY", "NEEDS", "PROMPTED", "get_model_info"]
+__all__ = ["BOXED", "ENCODES", "EXECUTES", "MODEL_REGISTRY", "NEEDS", "PREPARES", "PROMPTED",
+           "get_model_info"]
 
 from typing import Any
 
@@ -57,6 +58,13 @@ ENCODES: dict[str, frozenset[str]] = {
     "clip": frozenset({"image", "text"}),
     "siglip2": frozenset({"image", "text"}),
 }
+
+#: Families whose model can be prepared: given an image ahead of its prompts, so it runs the
+#: expensive, image-only half now and each prompt afterwards runs only the cheap half. Their
+#: adapters have ``prepare(image)``, and ``/predict`` accepts ``?sha256=`` for an image
+#: ``/prepare`` was given. Read before anything is loaded, for the reason ENCODES is: an endpoint
+#: refuses the rest before decoding an upload, and a page reads it to know when to offer it.
+PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 
 #: Which frameworks each family's adapter has code to execute. A family absent from here runs
 #: whatever it publishes. Passed to :func:`mozo.runtimes.select_runtime` as ``executes``.

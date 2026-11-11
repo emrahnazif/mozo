@@ -32,6 +32,7 @@ import numpy as np
 import torch
 
 from ..image import load_image
+from ._prepare import Preparing
 from ..runtimes import get_default_device, select_runtime
 from ..weights import artifacts, resolve
 
@@ -69,7 +70,7 @@ def bounds(masks: np.ndarray) -> np.ndarray:
     return boxes
 
 
-class PromptablePredictor:
+class PromptablePredictor(Preparing):
     """One loaded variant of one promptable-segmentation family, ready to prompt.
 
     Subclasses set:
@@ -144,6 +145,9 @@ class PromptablePredictor:
         self._segmenter = self.VENDOR.Segmenter(weights, device=self.device)
         _log.info("%s %s ready on %s via %s.", self.DISPLAY, variant, self.device, self.runtime)
 
+    def _encode(self, pixels: np.ndarray) -> None:
+        self._segmenter.encode(pixels)
+
     def predict(
         self,
         image: Union[str, Path, bytes, np.ndarray],
@@ -181,6 +185,7 @@ class PromptablePredictor:
                 sequence whose length is not the number of prompts.
         """
         pixels = load_image(image)
+        self._after_prepare(pixels)
         found = self._segmenter.predict(
             pixels, points=points, labels=labels, boxes=boxes,
             multimask_output=multimask_output,

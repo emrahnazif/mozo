@@ -30,6 +30,7 @@ What is in the cache is answerable without the network or torch: :func:`is_cache
 from __future__ import annotations
 
 __all__ = [
+    "DownloadCancelled",
     "WeightsError",
     "artifacts",
     "cache_dir",
@@ -37,6 +38,7 @@ __all__ = [
     "companions",
     "configure",
     "download_size",
+    "fetch",
     "framework_of",
     "is_cached",
     "license_of",
@@ -47,6 +49,7 @@ __all__ = [
     "resolve",
     "revision_of",
     "runtime_of",
+    "watching",
 ]
 
 import hashlib
@@ -54,8 +57,14 @@ import json
 import logging
 import os
 import shutil
+import threading
 import time
 import urllib.request
+import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +72,9 @@ from typing import Any
 _MANIFEST_PATH = Path(__file__).resolve().parent / "manifest.json"
 
 _DOWNLOAD_CHUNK_BYTES = 1 << 16
+#: How often a watching caller hears about progress, at most. Its callback runs on the
+#: downloading thread, and once per chunk would be some 52,000 calls for SAM 3's 3.4 GB.
+_PROGRESS_SECONDS = 0.1
 _TIMEOUT_SECONDS = 60.0
 
 #: Fetched alongside every artifact, so a cached model is never separated from its terms.
@@ -98,6 +110,64 @@ _log = logging.getLogger(__name__)
 
 class WeightsError(RuntimeError):
     """Raised when a model cannot be resolved, downloaded, or verified."""
+
+
+class DownloadCancelled(WeightsError):
+    """Raised when a caller's ``cancelled()`` said stop. The partial file is already gone."""
+
+
+@dataclass
+class _Watch:
+    """One caller's interest in the downloads made on its behalf: where to report, when to stop.
+
+    ``done`` accumulates across every file fetched under it, so a load that brings an encoder, a
+    decoder and a licence reports one rising count rather than three that each restart at zero.
+    """
+
+    progress: Callable[[int, int], None] | None
+    cancelled: Callable[[], bool] | None
+    total: int
+    done: int = 0
+
+
+#: The watch in effect for this thread or task. A context variable rather than an argument
+#: threaded through thirteen adapters: the download happens far below the call that cares about
+#: it, and everything between them is the same whether anyone is watching or not. Worker threads
+#: start with an empty context, so a pool that loads on someone's behalf has to copy it across.
+_watch: ContextVar[_Watch | None] = ContextVar("mozo_weights_watch", default=None)
+
+#: Files being downloaded by this process right now, so :func:`remove` can refuse rather than
+#: delete a directory out from under a transfer. Another process sharing the cache is not seen.
+_downloading: set[Path] = set()
+_downloading_lock = threading.Lock()
+
+
+@contextmanager
+def watching(
+    progress: Callable[[int, int], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+    *, total: int = 0,
+) -> Iterator[None]:
+    """Report and allow cancelling every download made inside this block, in this thread.
+
+    Args:
+        progress: Called as ``progress(done_bytes, total_bytes)``, with *done* counted across all
+            files fetched in the block: at most every 0.1 s, and once as each file completes, so
+            the last call is ``(total, total)``. It runs on the downloading thread.
+        cancelled: Checked once per chunk. When it returns true the download raises
+            :class:`DownloadCancelled`, its partial file is deleted, and nothing is cached.
+        total: Bytes the block is expected to fetch, e.g. from :func:`download_size`. Grows if
+            more arrives, so *done* never exceeds it.
+
+    Examples:
+        >>> with watching(progress=print):                          # doctest: +SKIP
+        ...     mozo.get_model("sam2/large")
+    """
+    token = _watch.set(_Watch(progress, cancelled, total))
+    try:
+        yield
+    finally:
+        _watch.reset(token)
 
 
 #: Framework prefixes that name an execution path. A revision also publishes data artifacts --
@@ -261,32 +331,59 @@ def _fetch(url: str, target: Path, *, size: int, sha256: str) -> None:
     """Download *url* to *target*, verifying size and hash before it takes its final name.
 
     The transfer lands on a sibling ``.part`` file and is hashed as it streams, so an interrupted
-    or corrupted download can never be mistaken for a complete cache entry.
+    or corrupted download can never be mistaken for a complete cache entry. The partial file's
+    name is this writer's own, because two writers can want one file -- ``rfdetr/nano`` on two
+    devices are two models sharing one checkpoint, and two processes can share one cache. Both
+    produce the same verified bytes, so whichever renames second replaces it with itself.
+
+    Progress goes to the :func:`watching` caller when there is one, and to the log otherwise,
+    which is what the command line prints.
 
     Raises:
+        DownloadCancelled: If the watching caller's ``cancelled()`` returned true.
         WeightsError: If the transfer fails, or the bytes do not match the manifest.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_name(target.name + _PARTIAL_SUFFIX)
+    partial = target.with_name(f"{target.name}.{uuid.uuid4().hex[:8]}{_PARTIAL_SUFFIX}")
+    watch = _watch.get()
+    if watch is not None:
+        # Only ever raised, so *done* -- which a size check below holds to *size* -- stays under it.
+        watch.total = max(watch.total, watch.done + size)
+    report = watch.progress if watch is not None else None
     digest = hashlib.sha256()
     written = 0
     last_report = time.monotonic()
 
+    with _downloading_lock:
+        _downloading.add(target)
     try:
         with urllib.request.urlopen(url, timeout=_TIMEOUT_SECONDS) as response, partial.open("wb") as out:
             for chunk in iter(lambda: response.read(_DOWNLOAD_CHUNK_BYTES), b""):
+                if watch is not None and watch.cancelled is not None and watch.cancelled():
+                    raise DownloadCancelled(f"download of {target.name} was cancelled")
                 out.write(chunk)
                 digest.update(chunk)
                 written += len(chunk)
+                if watch is not None:
+                    watch.done += len(chunk)
                 now = time.monotonic()
-                if size and now - last_report > 1.0:
-                    # Temporary: progress moves to a callback (todo item 4), and only the
-                    # command line will turn it back into these lines.
+                if report is not None and now - last_report >= _PROGRESS_SECONDS:
+                    report(watch.done, watch.total)
+                    last_report = now
+                elif watch is None and size and now - last_report > 1.0:
                     _log.info("  %s  %5.1f%%", target.name, 100 * written / size)
                     last_report = now
-    except OSError as error:
+        if report is not None:
+            report(watch.done, watch.total)  # every file ends on an exact count
+    except BaseException as error:
+        # Failed, cancelled, interrupted, or a callback that raised: nothing half-written stays.
         partial.unlink(missing_ok=True)
-        raise WeightsError(f"failed to download {url}: {error}") from error
+        if isinstance(error, OSError):
+            raise WeightsError(f"failed to download {url}: {error}") from error
+        raise
+    finally:
+        with _downloading_lock:
+            _downloading.discard(target)
 
     if written != size or digest.hexdigest() != sha256:
         partial.unlink(missing_ok=True)
@@ -592,11 +689,8 @@ def _planned(
     return _model_dir(family, variant) / name, files
 
 
-def _missing(
-    family: str, variant: str, runtime: str, device: str | None, revision: str | None,
-) -> list[dict[str, Any]]:
-    """The files a load of this model needs that the cache does not hold yet."""
-    directory, files = _planned(family, variant, runtime, device, revision)
+def _missing(directory: Path, files: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Of a :func:`_planned` load's files, the ones the cache does not hold yet."""
     return [artifact for artifact in files.values() if not _target(artifact, directory).is_file()]
 
 
@@ -622,7 +716,7 @@ def is_cached(
         >>> is_cached("sam2", "large", device="mps")            # doctest: +SKIP
         False
     """
-    return not _missing(family, variant, runtime, device, revision)
+    return not _missing(*_planned(family, variant, runtime, device, revision))
 
 
 def download_size(
@@ -639,7 +733,37 @@ def download_size(
         >>> download_size("sam2", "large", device="mps")        # doctest: +SKIP
         898465192
     """
-    return sum(artifact["size"] for artifact in _missing(family, variant, runtime, device, revision))
+    return sum(a["size"] for a in _missing(*_planned(family, variant, runtime, device, revision)))
+
+
+def fetch(
+    family: str, variant: str, runtime: str = "auto", *,
+    device: str | None = None, revision: str | None = None,
+    progress: Callable[[int, int], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> dict[str, Path]:
+    """Download everything a load of this model needs, without loading it.
+
+    For a host that downloads in one job and loads in another -- the network on an I/O lane, the
+    model on the GPU lane. Afterwards :func:`is_cached` is true and the load fetches nothing.
+    Arguments as for :func:`is_cached`, plus *progress* and *cancelled* as for :func:`watching`;
+    *total* is :func:`download_size`, so *done* ends exactly there.
+
+    Returns:
+        Artifact key to local path, for every file the load will read.
+
+    Raises:
+        DownloadCancelled: If *cancelled* returned true. Files finished before it stay cached;
+            the one in flight leaves nothing.
+        WeightsError: If the model or revision is not published, a download fails, or mozo is
+            offline and something is missing.
+
+    Examples:
+        >>> fetch("sam2", "large", device="mps", progress=print)    # doctest: +SKIP
+    """
+    directory, files = _planned(family, variant, runtime, device, revision)
+    with watching(progress, cancelled, total=sum(a["size"] for a in _missing(directory, files))):
+        return {key: _obtain(artifact, directory) for key, artifact in files.items()}
 
 
 def _size(path: Path) -> int:
@@ -684,7 +808,9 @@ def cached() -> list[dict[str, Any]]:
             if path.name.startswith("."):
                 continue
             if path.name.endswith(_PARTIAL_SUFFIX):
-                key, state = by_name.get(path.name[: -len(_PARTIAL_SUFFIX)]), "partial"
+                # "<file>.<writer>.part"; older releases wrote "<file>.part".
+                stem = path.name[: -len(_PARTIAL_SUFFIX)]
+                key, state = by_name.get(stem) or by_name.get(stem.rsplit(".", 1)[0]), "partial"
             elif path.suffix == _STAGING_SUFFIX:
                 key, state = by_stem.get(path.stem), "partial"
             elif path.suffix == _UNPACKED_SUFFIX:
@@ -719,6 +845,7 @@ def remove(family: str, variant: str, revision: str | None = None) -> int:
 
     Raises:
         ValueError: If a name is empty or would reach outside the cache.
+        WeightsError: If this process is downloading one of its files right now.
 
     Examples:
         >>> remove("sam3", "sam3")                              # doctest: +SKIP
@@ -731,6 +858,13 @@ def remove(family: str, variant: str, revision: str | None = None) -> int:
 
     variant_dir = _model_dir(family, variant)
     doomed = [variant_dir / revision] if revision else sorted(variant_dir.glob("*"))
+    with _downloading_lock:
+        busy = [t for t in _downloading if any(t.is_relative_to(d) for d in doomed)]
+    if busy:
+        raise WeightsError(
+            f"{family}/{variant} is downloading ({', '.join(t.name for t in busy)}). "
+            "Cancel it, or wait for it to finish, before removing it."
+        )
     freed = 0
     for directory in doomed:
         if directory.is_dir():

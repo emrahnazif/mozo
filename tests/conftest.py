@@ -29,6 +29,29 @@ FIXTURE = ROOT / "tests" / "fixtures" / "images" / "example.jpg"
 TEXT_FIXTURES = ROOT / "tests" / "fixtures" / "text"
 
 
+def fresh_interpreter(script: str) -> subprocess.CompletedProcess:
+    """Run *script* in a new Python, from the repo root, and return what it printed.
+
+    For checks about what a *clean* process does: this one has already imported everything, and
+    pytest has put a handler on the root logger.
+    """
+    finished = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, cwd=ROOT)
+    assert finished.returncode == 0, finished.stderr
+    return finished
+
+
+@pytest.fixture
+def workflow(tmp_path):
+    """A one-node workflow on disk, with no file chosen, waiting to be given one."""
+    path = tmp_path / "wf.json"
+    path.write_text(json.dumps({
+        "nodes": [{"id": "load", "type": "read_media", "data": {"parameters": {}}}],
+        "edges": [],
+    }))
+    return path
+
+
 def published(family: str, variant: str) -> list[str]:
     """The artifact keys *variant* publishes, or ``[]`` if it publishes nothing at all.
 

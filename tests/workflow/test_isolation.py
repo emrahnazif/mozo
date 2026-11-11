@@ -15,14 +15,12 @@ one level up, and checked the same way.
 from __future__ import annotations
 
 import ast
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 import mozo
-from conftest import imported
+from conftest import fresh_interpreter, imported
 
 PACKAGE = Path(mozo.__file__).parent
 
@@ -206,7 +204,4 @@ def _run(script: str) -> str:
     A subprocess because both scripts are about what a *clean* import does, and this session has
     already imported everything they are checking for.
     """
-    finished = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, cwd=PACKAGE.parent)
-    assert finished.returncode == 0, finished.stderr
-    return finished.stdout.strip().splitlines()[-1]
+    return fresh_interpreter(script).stdout.strip().splitlines()[-1]

@@ -10,22 +10,11 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from click.testing import CliRunner
 
 from conftest import FIXTURE
 from mozo.cli import cli
 
-
-@pytest.fixture
-def workflow(tmp_path):
-    """A one-node workflow on disk, with no file chosen, waiting to be given one."""
-    path = tmp_path / "wf.json"
-    path.write_text(json.dumps({
-        "nodes": [{"id": "load", "type": "read_media", "data": {"parameters": {}}}],
-        "edges": [],
-    }))
-    return path
 
 
 def test_a_file_given_on_the_command_line_is_what_it_runs_on(workflow):

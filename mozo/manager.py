@@ -193,6 +193,13 @@ class ModelManager:
                 ``runtime``. Part of the cache key, so two checkpoints under one variant name
                 are two entries rather than one.
 
+        Returns:
+            The family's predictor, shared by every caller. Its ``predict`` may be called from
+            several threads at once and is not serialised. That is safe on CPU, CUDA and ONNX
+            Runtime; on Apple silicon (``mps``) and CoreML it is tested but not documented as
+            thread-safe by PyTorch or Apple, so serialise your own calls there if you need a
+            guarantee. The README's "How it works" has the measurements.
+
         Raises:
             ValueError: If the family is not registered, or the adapter rejects the variant.
             mozo.weights.DownloadCancelled: If *cancelled* said stop.

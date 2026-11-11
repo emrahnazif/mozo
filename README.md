@@ -418,6 +418,12 @@ are which models you ask for and which you unload.** `mozo.unload("rfdetr/nano")
 **A model is built once** however many requests arrive for it at the same moment, and no request
 waits behind a different model's load — not even one whose weights are still downloading.
 
+**One model serves concurrent requests in parallel.** `predict` is not serialised, and in
+parallel it runs 1.2–2.7× faster. That is safe on CPU, CUDA and ONNX Runtime. On Apple silicon
+(`mps`) and CoreML it is tested — 6,000 concurrent calls with no error and results identical to
+sequential ones — but not documented as thread-safe by PyTorch or Apple, so serialise your own
+calls there if you need a guarantee.
+
 **Weights resolve from a manifest that ships inside the package**, so working out which bytes a
 model refers to needs no network and no configuration. Every artifact is verified by sha256 after
 download, and its licence and a NOTICE naming the exact upstream release are published beside it.

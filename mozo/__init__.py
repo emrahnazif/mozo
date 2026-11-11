@@ -60,7 +60,9 @@ def get_model(identifier: str, variant: str | None = None, device: str | None = 
             :meth:`~mozo.manager.ModelManager.get_model`.
 
     Returns:
-        The family's predictor, with a ``predict()`` method.
+        The family's predictor, with a ``predict()`` method, shared with every other caller and
+        safe to call from several threads at once -- see
+        :meth:`~mozo.manager.ModelManager.get_model` for the one caveat, on Apple silicon.
 
     Examples:
         >>> get_model("rfdetr/nano")                    # doctest: +SKIP

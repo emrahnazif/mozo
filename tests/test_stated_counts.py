@@ -231,6 +231,18 @@ def test_every_readme_table_states_each_variant_s_manifest_licence():
     assert seen == set(published), f"no licence stated for {sorted(set(published) - seen)}"
 
 
+def test_the_readme_states_how_many_workflow_nodes_there_are():
+    """The workflow section opens with the node count, and a new node is easy to forget there."""
+    from mozo.workflow.registry import get, names
+
+    # Only mozo's own: other tests register nodes of their own into the same registry.
+    shipped = [n for n in names() if get(n).run.__module__.startswith("mozo.workflow.nodes")]
+    readme = (ROOT / "README.md").read_text()
+    stated = re.search(r"^(\d+) nodes: every model family", readme, re.M)
+    assert stated, "the README no longer states the node count -- update this test"
+    assert int(stated.group(1)) == len(shipped)
+
+
 def test_the_readme_states_how_many_families_ship_a_verification_gate():
     """`tools/verify/` is the claim the whole README rests on, so its arithmetic is checked."""
     gates = {

@@ -18,11 +18,15 @@ stale.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 
+import pytest
+
 import mozo
+from conftest import GENERATOR
 from mozo.registry import MODEL_REGISTRY
-from mozo.weights import manifest
+from mozo.weights import license_of, manifest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -161,20 +165,70 @@ def test_each_family_counts_its_own_variants_correctly():
         )
 
 
-def test_the_licence_breakdown_accounts_for_every_variant():
-    """The README splits the published variants by licence. The parts must make the whole.
+#: The licences under which the README's MOZO_ENABLE example may serve weights. Only the README's
+#: claim needs this word; mozo itself reports identifiers and leaves the judgement to its caller.
+PERMISSIVE = frozenset({"Apache-2.0", "MIT"})
 
-    Not derived from the manifest, which records a LICENSE artifact's hash but not its name, so
-    the split stays hand-written. Summing it is what catches a stale one: the numbers were 31 and
-    then 34 and then 36 as families landed, and each time only one of the five moved.
+
+def licences() -> dict[tuple[str, str], str]:
+    """Every published variant's licence, as its latest revision states it."""
+    return {(family, variant): license_of(family, variant)
+            for family, variant in (model_id.split("/", 1) for model_id in manifest()["models"])}
+
+
+def test_the_licence_breakdown_states_the_manifest_s_counts():
+    """The README splits the published variants by licence, and every number in it is checked.
+
+    Summing was all that could be checked while the manifest recorded only a LICENSE file's hash,
+    and a sum misses two numbers moving in opposite directions. Now each count is the manifest's.
     """
     readme = (ROOT / "README.md").read_text()
     sentence = re.search(r"Of the \d+ published variants.*?SAM License", readme, re.S)
     assert sentence, "the README no longer states a licence breakdown -- update this test"
-    parts = [int(n) for n in re.findall(r"\**(\d+) (?:are|carries)\b", sentence.group(0))]
-    assert sum(parts) == published_variants(), (
-        f"the licence breakdown sums to {sum(parts)}, manifest publishes {published_variants()}"
-    )
+    plain = " ".join(sentence.group(0).replace("*", "").split())
+    stated = {name: int(n) for n, name in
+              re.findall(r"(\d+) (?:are|carries) (?:Meta's )?(SAM License|[\w.-]+)", plain)}
+    assert stated == dict(Counter(licences().values()))
+
+
+def _licence_tables(readme: str):
+    """Yield ``(family, variant tokens, stated licence)`` for each row of a "Weights licence" table.
+
+    A blank family cell continues the row above, as Depth Anything's three rows do, and a token
+    ending in a hyphen (``indoor-``) stands for every variant it begins.
+    """
+    column = family = None
+    for line in readme.splitlines():
+        if not line.startswith("|"):
+            column = None
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if "Weights licence" in cells:
+            column = cells.index("Weights licence")
+            continue
+        if column is None or set(line) <= set("|-"):
+            continue
+        family = cells[0].strip("`") or family
+        yield family, re.findall(r"`([^`]+)`", cells[1]), cells[column]
+
+
+def test_every_readme_table_states_each_variant_s_manifest_licence():
+    """The tables are where a reader picks a model, so a wrong licence there is the costly one."""
+    published = licences()
+    seen, wrong = set(), []
+    for family, tokens, stated in _licence_tables((ROOT / "README.md").read_text()):
+        for token in tokens:
+            matched = [variant for fam, variant in published
+                       if fam == family and (variant == token
+                                             or token.endswith("-") and variant.startswith(token))]
+            assert matched, f"the README lists {family}/{token}, which mozo does not publish"
+            for variant in matched:
+                seen.add((family, variant))
+                expected = published[family, variant]
+                if stated != expected:
+                    wrong.append(f"{family}/{variant}: README says {stated}, manifest {expected}")
+    assert not wrong, "\n".join(wrong)
+    assert seen == set(published), f"no licence stated for {sorted(set(published) - seen)}"
 
 
 def test_the_readme_states_how_many_families_ship_a_verification_gate():
@@ -192,34 +246,44 @@ def test_the_readme_states_how_many_families_ship_a_verification_gate():
     )
 
 
-#: The sha256 of every LICENSE file mozo publishes that is not permissive, and what it is.
-#:
-#: The manifest records a licence as the hash of the file published beside the weights, never as a
-#: name, so which licence a hash *is* has to be written down once. This is that once. Everything
-#: downstream is derived: a new YOLO size, a second non-commercial depth variant or another
-#: SAM-licensed checkpoint ships the same LICENSE bytes and is recognised without an edit here.
-#:
-#: Keyed on content rather than on family and variant names deliberately. A hand-written list of
-#: names only notices a non-permissive *family* being added; mozo's actual exposure is per
-#: variant, and Depth Anything already proves the two differ -- seven of its nine are Apache-2.0
-#: and two are not.
-NON_PERMISSIVE = {
-    "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0": "AGPL-3.0",
-    "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0": "CC-BY-NC-4.0",
-    "4dea99bfaa016e21bc860d73f344236bd1e5c4977d1a9a8fd32f822b500ae1be": "Meta SAM License",
-}
-
-
 def non_permissive() -> dict[tuple[str, str], str]:
-    """Every published variant whose weights are not permissively licensed, from the manifest."""
-    found = {}
+    """Every published variant whose weights are not permissively licensed, from the manifest.
+
+    Per variant, not per family: Depth Anything is seven Apache-2.0 variants and two that are not,
+    so a list of family names would only notice a non-permissive *family* being added.
+    """
+    return {model: name for model, name in licences().items() if name not in PERMISSIVE}
+
+
+def test_one_licence_file_is_one_licence():
+    """Revisions that ship the same LICENSE bytes must name the same licence.
+
+    The identifier is derived from the file when the manifest is generated; this holds the
+    published manifest to that without needing the files on disk.
+    """
+    named: dict[str, set[str]] = {}
+    for entry in manifest()["models"].values():
+        for revision in entry["revisions"].values():
+            named.setdefault(revision["artifacts"]["LICENSE"]["sha256"], set()).add(revision["license"])
+    assert all(len(ids) == 1 for ids in named.values()), named
+
+
+def test_the_licence_files_on_this_machine_say_what_the_manifest_says():
+    """Where the weights tree is present, re-read every LICENSE file and compare."""
+    import importlib.util
+
+    weights = ROOT / "weights"
+    if not weights.is_dir():
+        pytest.skip("no weights/ tree here; test_one_licence_file_is_one_licence still holds")
+    spec = importlib.util.spec_from_file_location("generate_manifest", GENERATOR)
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+
     for model_id, entry in manifest()["models"].items():
-        licence = entry["revisions"][entry["latest"]]["artifacts"].get("LICENSE")
-        assert licence, f"{model_id} publishes no LICENSE, so its terms cannot be checked"
-        if licence["sha256"] in NON_PERMISSIVE:
-            family, variant = model_id.split("/", 1)
-            found[(family, variant)] = NON_PERMISSIVE[licence["sha256"]]
-    return found
+        for name, revision in entry["revisions"].items():
+            path = weights / revision["artifacts"]["LICENSE"]["path"]
+            if path.is_file():
+                assert generator.identify_licence(path) == revision["license"], f"{model_id}@{name}"
 
 
 def test_the_readme_s_permissive_deployment_offers_what_it_claims(deploy):

@@ -406,12 +406,14 @@ More: [PixelFlow](https://github.com/datamarkin/pixelflow)
 the first request for a family downloads and loads it. That first request is slow — minutes, for
 a multi-gigabyte family on a cold cache — and every one after it is not.
 
-**Nothing is evicted.** A model stays for the life of the process. This is deliberate: an earlier
-version bounded the cache by model count, and a count cannot tell 0.10 GB from 1.34 GB. The same
-number could not be right for a 6 GB laptop and an 80 GB accelerator, and measured, it broke the
-obvious deployment — detection, segmentation and depth from one instance, 0.60 GB between them —
-into a 762 ms eviction on every request. **Memory is yours to manage, and the lever is which
-models you ask for.**
+**Nothing is evicted automatically.** A model stays until you unload it. This is deliberate: an
+earlier version bounded the cache by model count, and a count cannot tell 0.10 GB from 1.34 GB.
+The same number could not be right for a 6 GB laptop and an 80 GB accelerator, and measured, it
+broke the obvious deployment — detection, segmentation and depth from one instance, 0.60 GB
+between them — into a 762 ms eviction on every request. **Memory is yours to manage: the levers
+are which models you ask for and which you unload.** `mozo.unload("rfdetr/nano")` and
+`mozo.clear()` release models and hand GPU memory back to the driver, and
+`ModelManager.resident()` reports each model's device, last use and estimated size.
 
 **A model is built once** however many requests arrive for it at the same moment, and no request
 waits behind a different model's load — not even one whose weights are still downloading.
@@ -465,8 +467,8 @@ things about it are yours to arrange:
   3.4 GB, not one. Prefer one worker unless you have measured otherwise.
 - **There is no authentication and no rate limiting**, and the default bind is `0.0.0.0`. Put it
   behind something before it faces a network you do not control.
-- **Nothing is evicted**, so a process asked for every family will eventually hold every
-  family. Decide what an instance serves rather than letting callers decide for it —
+- **Nothing is evicted automatically**, so a server asked for every family will eventually hold
+  every family. Decide what an instance serves rather than letting callers decide for it —
   `MOZO_ENABLE` is how, and it is also how the licence question below is answered.
 
 ## What mozo does not do

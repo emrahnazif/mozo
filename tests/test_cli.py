@@ -83,17 +83,16 @@ def test_downloads_draw_a_bar_only_on_a_terminal():
         assert _models_with_progress() is None
 
 
-def test_the_bar_ends_its_line_before_anything_else_prints():
+def test_the_bar_ends_its_line_before_anything_else_prints(capsys):
     import logging
 
     from mozo.cli import _bar, _showing_logs
 
-    with CliRunner().isolation() as (out, _):
-        with _showing_logs():
-            _bar("rfdetr/nano", 50, 100)
-            logging.getLogger("mozo.weights").info("[mozo] downloading LICENSE (0.0 MB)")
-            _bar("rfdetr/nano", 100, 100)
-        lines = out.getvalue().decode().split("\n")
+    with _showing_logs():
+        _bar("rfdetr/nano", 50, 100)
+        logging.getLogger("mozo.weights").info("[mozo] downloading LICENSE (0.0 MB)")
+        _bar("rfdetr/nano", 100, 100)
+    lines = capsys.readouterr().out.split("\n")
     assert "rfdetr/nano" in lines[0] and f"[{'#' * 15}{'.' * 15}]" in lines[0]  # half way
     assert lines[1] == "[mozo] downloading LICENSE (0.0 MB)"
     assert lines[2].strip().startswith("rfdetr/nano") and lines[2].endswith("MB")

@@ -90,16 +90,17 @@ def test_the_command_line_prints_the_bare_message(monkeypatch, workflow):
     assert result.output == "[mozo] loading rfdetr/nano\nRF-DETR nano ready on cpu via torch-fp32.\n"
 
 
-def test_warnings_go_to_stderr_and_the_handler_leaves_with_the_command():
+def test_warnings_go_to_stderr_and_the_handler_leaves_with_the_command(capsys):
+    """Through pytest's capture, not CliRunner's: click.echo writes to whatever sys.stdout and
+    sys.stderr are when it is called, and CliRunner's own streams changed shape in click 8.2."""
     logger = logging.getLogger("mozo")
     before = list(logger.handlers), logger.level
-    with CliRunner(mix_stderr=False).isolation() as (out, err):
-        with _showing_logs():
-            logging.getLogger("mozo.runtimes").warning("asked for cuda, running on cpu")
-            logging.getLogger("mozo.weights").debug("not shown")
-        stdout, stderr = out.getvalue(), err.getvalue()
-    assert stdout == b""
-    assert stderr == b"asked for cuda, running on cpu\n"
+    with _showing_logs():
+        logging.getLogger("mozo.runtimes").warning("asked for cuda, running on cpu")
+        logging.getLogger("mozo.weights").debug("not shown")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "asked for cuda, running on cpu\n"
     assert (list(logger.handlers), logger.level) == before
 
 

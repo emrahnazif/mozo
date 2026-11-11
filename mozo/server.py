@@ -10,6 +10,7 @@ or GPU work, so FastAPI runs each in its threadpool instead of stalling the even
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 
@@ -23,13 +24,15 @@ from typing import Any, List, Optional
 
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from . import __version__, _shared
 from .depth import encode as encode_depth
 from .text import comma_separated
 from .image import encode_image, load_image
-from .registry import BOXED, ENCODES, MODEL_REGISTRY, PROMPTED, get_model_info
+from .prepared import PreparedImages, limit_from_environment
+from .registry import BOXED, ENCODES, MODEL_REGISTRY, PREPARES, PROMPTED, get_model_info
 from .weights import license_of
 from .workflow.api import router as workflow_router
 
@@ -49,6 +52,11 @@ app = FastAPI(
 # asked. There is no startup work to defer, and no window where a request can arrive before it
 # exists.
 app.state.model_manager = _shared
+
+# Images a client asked this server to keep, so its clicks can name one by ``?sha256=`` rather
+# than upload it again. Not the models' own caches -- see :mod:`mozo.prepared`. One per process,
+# shared by every model, so an image prepared for SAM 2 can be clicked with SAM 3 as well.
+app.state.prepared = PreparedImages(limit_from_environment())
 
 # The one place in mozo that reaches into the workflow runtime. Everything else about that
 # subpackage is invisible from here, and `tests/workflow/test_isolation.py` keeps it that way --
@@ -319,11 +327,103 @@ def _depth_response(depth: np.ndarray, unit: Optional[str]) -> Response:
     )
 
 
+def _decode(data: bytes) -> np.ndarray:
+    """Decode an upload through the function the Python API uses, so both agree on channel
+    order. A second decoder here is how the two would drift apart without anyone noticing."""
+    try:
+        return load_image(data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Could not read or decode the image file: {e}")
+
+
+def _preparable(family: str, why: str) -> None:
+    """Refuse a family that cannot be prepared, saying *why* and naming the ones that can."""
+    if family not in PREPARES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{family} {why}. Families that can be prepared: {', '.join(sorted(PREPARES))}.")
+
+
+def _keep(data: bytes, expected: Optional[str] = None) -> tuple[str, np.ndarray]:
+    """Keep an uploaded image under the sha256 of its bytes, returning that key and the pixels.
+
+    Hashed before it is decoded, so a file the server already keeps -- sent again with its
+    ``?sha256=``, or prepared twice -- costs a hash rather than a decode. *expected*, when the
+    request named a key, must be what the file hashes to.
+    """
+    key = hashlib.sha256(data).hexdigest()
+    if expected is not None and key != expected.lower():
+        raise HTTPException(
+            status_code=400, detail=f"the file's sha256 is {key}, not {expected}: send its own.")
+    image = app.state.prepared.get(key)
+    if image is None:
+        image = _decode(data)
+        app.state.prepared.put(key, image)
+    return key, image
+
+
+def _the_image(family: str, file: Optional[UploadFile], sha256: Optional[str]) -> np.ndarray:
+    """The image a request is about: its upload, or the one it names that this server keeps.
+
+    Told apart by which the request carries, never by looking at a value: a file is always an
+    image, ``?sha256=`` is always a name for one.
+    """
+    if sha256 is not None:
+        _preparable(family, "keeps no prepared images, so ?sha256= means nothing to it: send the "
+                            "file")
+    if file is None:
+        image = app.state.prepared.get(sha256.lower())
+        if image is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no image with sha256 {sha256} is kept on this server -- it was never "
+                       f"prepared here, or it has been dropped. Send the file again with "
+                       f"?sha256={sha256} and it is kept for the clicks after.")
+        return image
+
+    data = file.file.read()
+    # An ordinary upload is decoded and not kept; one sent with its ?sha256= is kept.
+    return _decode(data) if sha256 is None else _keep(data, sha256)[1]
+
+
+@app.post("/prepare/{family}/{variant}", summary="Encode an image ahead of its prompts")
+def prepare(family: str, variant: str,
+            file: UploadFile = File(..., description="Image file to prepare.")):
+    """Run a model's expensive, image-only half now, and keep the image for clicks by name.
+
+    For the families in :data:`~mozo.registry.PREPARES` -- SAM 2, EdgeTAM, SAM 3, OWLv2. Call it
+    when an image is opened, and the first click costs what every later click does. The answer
+    is the sha256 of the file's bytes; ``/predict`` takes it as ``?sha256=`` with no file. A
+    client can also hash the file itself: the key is nothing but that.
+
+    Returns:
+        ``{"sha256": "..."}``.
+    """
+    _catalogue_entry(family, variant)
+    _preparable(family, "cannot be prepared: it runs as one pass, so there is nothing to do "
+                        "ahead of a prompt")
+    key, image = _keep(file.file.read())
+    try:
+        model = app.state.model_manager.get_model(family, variant)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load model: {e}")
+    model.prepare(image)
+    return {"sha256": key}
+
+
 @app.post("/predict/{family}/{variant}", summary="Run a model")
 def predict(
     family: str,
     variant: str,
-    file: UploadFile = File(..., description="Image file to process."),
+    file: Optional[UploadFile] = File(
+        None, description="Image file to process. Leave it out to name one by ?sha256= instead."),
+    sha256: Optional[str] = Query(
+        None,
+        description="For a model that can be prepared: the sha256 of an image file this server "
+                    "keeps, from /prepare or an earlier request that sent the file with this. "
+                    "Then send no file. Answered 404 if the server does not hold it -- send the "
+                    "file again with the same ?sha256= and it is kept.",
+    ),
     threshold: Optional[float] = Query(
         None,
         description="Confidence floor. Omitted, the family's own published default applies -- "
@@ -375,7 +475,11 @@ def predict(
     Args:
         family: Model family, e.g. ``rfdetr``.
         variant: Variant within it, e.g. ``nano``.
-        file: The image.
+        file: The image. Optional only where *sha256* names one instead.
+        sha256: The sha256 of an image file this server keeps, for families in
+            :data:`~mozo.registry.PREPARES`. With no file, the kept image is used -- so a click
+            carries a few hundred bytes rather than the picture. With a file, the file must hash
+            to it, and is kept for the clicks after.
         threshold: Confidence floor, for detection models. Omitted, each family's own default
             applies -- these differ, and this endpoint does not have an opinion about which is
             right for a model it is only routing to.
@@ -398,6 +502,14 @@ def predict(
     Returns:
         Detections as JSON, or a depth map as a 16-bit PNG -- see :func:`_depth_response`.
     """
+    # Before anything else, and in FastAPI's own words, because it is what this endpoint answered
+    # before ``?sha256=`` made the file optional: a request with no image was refused by request
+    # validation -- 422, ahead of every other check, unknown model names included. A client
+    # written against that sees exactly that still. Only ``?sha256=`` is new.
+    if file is None and sha256 is None:
+        raise RequestValidationError(
+            [{"type": "missing", "loc": ("body", "file"), "msg": "Field required", "input": None}])
+
     # Whether a model exists, and whether this deployment offers it, are both answerable from the
     # registry alone -- no adapter import, no torch, no weights, no image decode. Answering them
     # first makes an unknown name free, and keeps it from being confused with a model that exists
@@ -464,12 +576,7 @@ def predict(
             )
         marks = list(label) if label else None
 
-    # Decode through the same function the Python API uses, so both entry points agree on
-    # channel order. A second decoder here is how the two drift apart without anyone noticing.
-    try:
-        image = load_image(file.file.read())
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Could not read or decode the image file: {e}")
+    image = _the_image(family, file, sha256)
 
     # Existence was settled above, so anything raised here is a genuine failure to load a
     # model that does exist.
@@ -649,6 +756,8 @@ def list_models():
             # What /encode will accept, if anything. Empty for almost every family, and the only
             # way to discover the second route without calling it and reading a 501 back.
             "encodes": sorted(ENCODES.get(family, ())),
+            # Whether /prepare and ?sha256= apply: an image can be encoded ahead of its prompts.
+            "prepares": family in PREPARES,
         }
         # Registry order, so narrowing removes entries without reshuffling the rest.
         for family, entry in MODEL_REGISTRY.items() if family in deployed

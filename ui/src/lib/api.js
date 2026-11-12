@@ -29,14 +29,37 @@ export async function fetchCatalogue() {
 }
 
 /**
+ * A workflow's name and description, as the document carries them: each only when it says
+ * something, so a workflow left unnamed is saved exactly as one from before names existed.
+ */
+function described(about) {
+    const entries = ['name', 'description']
+        .map(key => [key, (about?.[key] || '').trim()])
+        .filter(([, value]) => value);
+    return Object.fromEntries(entries);
+}
+
+/**
+ * What to call the exported file: the workflow's name, made safe for a file system, or
+ * `workflow.json` for one left unnamed.
+ */
+export function fileNameFor(about) {
+    const stem = (about?.name || '').trim().toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return `${stem || 'workflow'}.json`;
+}
+
+/**
  * The editor's canvas as a workflow document.
  *
  * Svelte Flow carries every node as type `custom` with the real kind in `data.nodeType`, because
  * one component draws them all. mozo's format names the kind at the top level. This is the only
- * place that conversion happens, in each direction.
+ * place that conversion happens, in each direction. *about* is `{name, description}`, the two
+ * things a workflow says about itself; {@link fromDocument} hands them back the same way.
  */
-export function toDocument(nodes, edges) {
+export function toDocument(nodes, edges, about = {}) {
     return {
+        ...described(about),
         nodes: nodes.map(node => ({
             id: node.id,
             type: node.data.nodeType,
@@ -71,7 +94,8 @@ export function fromDocument(document, catalogue) {
         target: edge.target,
         targetHandle: edge.targetHandle,
     }));
-    return { nodes, edges };
+    const about = { name: document.name || '', description: document.description || '' };
+    return { nodes, edges, about };
 }
 
 /** The form body every run endpoint takes: the document, an optional file, optional overrides. */

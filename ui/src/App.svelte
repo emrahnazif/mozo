@@ -10,8 +10,8 @@
     import NodePalettePanel from './lib/NodePalettePanel.svelte';
     import RunProgress from './lib/RunProgress.svelte';
     import { generateNodeClasses } from './lib/utils.js';
-    import { fetchCatalogue, fromDocument, process, stream, toDocument } from './lib/api.js';
-    import { openSidebar, closeSidebar, pendingConnection, clearPendingConnection, chosenFile, running } from './lib/stores.js';
+    import { fetchCatalogue, fileNameFor, fromDocument, process, stream, toDocument } from './lib/api.js';
+    import { openSidebar, closeSidebar, pendingConnection, clearPendingConnection, chosenFile, running, about, noAbout } from './lib/stores.js';
 
     // Every workflow starts here: pixels have to come from somewhere, and this is the node whose
     // path the runner overrides per image.
@@ -66,6 +66,7 @@
     function initializeCanvas() {
         nodes.set([createLoadImageNode()]);
         edges.set([]);
+        about.set(noAbout());
     }
 
     function handleNodeDrop(event) {
@@ -268,7 +269,7 @@
         })));
 
         try {
-            await stream(toDocument($nodes, $edges), $chosenFile, (event) => {
+            await stream(toDocument($nodes, $edges, $about), $chosenFile, (event) => {
                 if (event.done) {
                     isExecuting.set(false);
                 } else if (event.status === 'running') {
@@ -310,7 +311,7 @@
         const began = performance.now();
 
         try {
-            await process(toDocument($nodes, $edges), $chosenFile, { preview: watched, signal: controller.signal },
+            await process(toDocument($nodes, $edges, $about), $chosenFile, { preview: watched, signal: controller.signal },
                           (event) => {
                 if (event.status === 'failed') {
                     say(event.error);
@@ -347,13 +348,13 @@
     }
 
     function exportWorkflow() {
-        const dataStr = JSON.stringify(toDocument($nodes, $edges), null, 2);
+        const dataStr = JSON.stringify(toDocument($nodes, $edges, $about), null, 2);
         const dataBlob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(dataBlob);
 
         const link = document.createElement('a');
         link.href = url;
-        link.download = 'workflow.json';
+        link.download = fileNameFor($about);
         link.click();
 
         URL.revokeObjectURL(url);
@@ -373,6 +374,7 @@
                         node.data.nodeType, $availableNodes[node.data.nodeType]?.category || '')
                 })));
                 edges.set(canvas.edges);
+                about.set(canvas.about);
             } catch (error) {
                 say(`That file is not a workflow: ${error.message}`);
             }

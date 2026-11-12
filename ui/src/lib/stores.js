@@ -66,3 +66,10 @@ export const chosenFile = writable(null);
  * canvas could hold, which is the whole reason it is a different verb from Test.
  */
 export const running = writable(null);
+
+/**
+ * What the workflow on the canvas says about itself: `{name, description}`, both optional. Saved
+ * in the document beside its nodes, read back on import, and emptied with the canvas.
+ */
+export const noAbout = () => ({ name: '', description: '' });
+export const about = writable(noAbout());

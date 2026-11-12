@@ -9,7 +9,12 @@
    * The file a run reads is not here. It belongs to the node that reads it, where the person is
    * already looking when they wonder what it will run on -- see the `source` widget in
    * PropertiesPanel.
+   *
+   * The workflow's name and description sit at the start of the bar: they belong to the whole
+   * workflow, like these verbs, and they are what someone opening the file later sees first.
    */
+  import { about } from './stores.js';
+
   export let testWorkflow;
   export let runWorkflow;
   export let cancelRun;
@@ -23,6 +28,15 @@
 
 <nav class="navbar is-fixed-top border-bottom" aria-label="main navigation">
   <div class="navbar-menu">
+    <div class="navbar-start">
+      <div class="navbar-item workflow-about">
+        <input class="input is-static workflow-name" type="text" placeholder="Untitled workflow"
+               aria-label="Workflow name" bind:value={$about.name} />
+        <input class="input is-static is-small workflow-description" type="text"
+               placeholder="What it does" aria-label="Workflow description"
+               bind:value={$about.description} />
+      </div>
+    </div>
     <div class="navbar-end">
       <div class="navbar-item">
         <div class="buttons">
@@ -56,3 +70,26 @@
     on:change={importWorkflow}
   />
 </nav>
+
+<style>
+  .workflow-about {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    min-width: 18rem;
+  }
+  .workflow-name {
+    font-weight: 600;
+    height: 1.8em;
+    padding: 0 0.25rem;
+  }
+  .workflow-description {
+    height: 1.6em;
+    padding: 0 0.25rem;
+    color: var(--bulma-text-weak, #7a7a7a);
+  }
+  .workflow-about input:hover,
+  .workflow-about input:focus {
+    background: var(--bulma-scheme-main-bis, #fafafa);
+  }
+</style>

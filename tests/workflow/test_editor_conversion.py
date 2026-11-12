@@ -22,7 +22,7 @@ API = ROOT / "ui" / "src" / "lib" / "api.js"
 
 #: A canvas as Svelte Flow holds it: every node typed `custom`, the real kind in `data.nodeType`.
 CANVAS = """
-import { toDocument, fromDocument } from '%s';
+import { toDocument, fromDocument, fileNameFor } from '%s';
 
 const nodes = [
   { id: 'load-1', type: 'custom', position: { x: 10, y: 20 },
@@ -36,7 +36,11 @@ const edges = [
 
 const document = toDocument(nodes, edges);
 const back = fromDocument(document, {});
-const again = toDocument(back.nodes, back.edges);
+const again = toDocument(back.nodes, back.edges, back.about);
+
+const about = { name: '  Blur faces ', description: 'Find faces, blur them.' };
+const named = toDocument(nodes, edges, about);
+const namedBack = fromDocument(named, {});
 
 console.log(JSON.stringify({
   document,
@@ -44,6 +48,10 @@ console.log(JSON.stringify({
   positions: back.nodes[0].position,
   parameters: back.nodes[1].data.parameters,
   edgeIds: back.edges.map(e => e.id),
+  unnamedKeys: Object.keys(document),
+  named,
+  namedAgain: toDocument(namedBack.nodes, namedBack.edges, namedBack.about),
+  fileNames: [fileNameFor(about), fileNameFor({ name: '' }), fileNameFor({ name: 'Ünïcode / ok?' })],
 }));
 """ % API
 
@@ -87,9 +95,26 @@ class TestTheConversion:
         ids = converted["edgeIds"]
         assert len(set(ids)) == len(ids) and all(ids)
 
+    def test_an_unnamed_workflow_is_saved_as_one_from_before_names(self, converted):
+        assert converted["unnamedKeys"] == ["nodes", "edges"]
+
+    def test_a_name_and_a_description_survive_and_lead_the_file(self, converted):
+        named = converted["named"]
+        assert list(named)[:2] == ["name", "description"]
+        assert (named["name"], named["description"]) == ("Blur faces", "Find faces, blur them.")
+        assert converted["namedAgain"] == named
+
+    def test_the_exported_file_is_named_after_the_workflow(self, converted):
+        assert converted["fileNames"] == ["blur-faces.json", "workflow.json", "n-code-ok.json"]
+
 
 class TestTheServerAcceptsIt:
     """The document the editor emits, taken at its word by the server."""
+
+    def test_its_name_reaches_the_server(self, converted):
+        from mozo.workflow import Workflow
+
+        assert Workflow.from_dict(converted["named"]).name == "Blur faces"
 
     def test_it_is_a_valid_workflow(self, converted, client):
         answer = client.post("/workflow/validate",

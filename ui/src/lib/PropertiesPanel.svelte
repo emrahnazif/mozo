@@ -13,7 +13,12 @@
      *
      * `source` is the one kind that is not just a box: the value is a path, and a person at a
      * browser cannot write the server's path to a file sitting on their own machine. So it offers
-     * a file to upload as well, and says which of the two the next run will use.
+     * a file to upload as well, and says which of the two the next run will use. `path` is a file
+     * the workflow keeps as saved -- a checkpoint, annotations to read back -- so a box alone.
+     *
+     * `list` is several strings, one per line, so an entry may hold a comma: a prompt like
+     * "bolt, M8" stays one prompt. A workflow saved before these were lists holds a
+     * comma-separated string; it is shown split into lines, so editing it keeps what it meant.
      */
     import { formatParameterLabel } from './utils.js';
     import { chosenFile } from './stores.js';
@@ -27,6 +32,11 @@
     $: nodeInfo = availableNodes?.[selectedNode?.data?.nodeType] || {};
     $: fields = nodeInfo.parameters || [];
     $: set = selectedNode?.data?.parameters || {};
+
+    /** A value as a box shows it: unset is blank. */
+    function shown(value) {
+        return value === null || value === undefined ? '' : value;
+    }
 
     /** What a field is showing: what the workflow saved, or the node's own default. */
     function valueOf(field) {
@@ -46,6 +56,21 @@
 
     function changeText(field, raw) {
         change(field, raw === '' && field.optional ? null : raw);
+    }
+
+    /**
+     * One entry per line: a list as it is, an old comma string split the way the server splits it
+     * (`comma_separated` in mozo/text.py), so the two cannot read it differently.
+     */
+    function lines(value) {
+        if (Array.isArray(value)) return value.join('\n');
+        if (typeof value === 'string') return value.split(',').map((p) => p.trim()).filter(Boolean).join('\n');
+        return '';
+    }
+
+    /** Each non-empty line is one entry, kept exactly as typed -- a comma included. */
+    function changeLines(field, raw) {
+        change(field, raw.split('\n').map((p) => p.trim()).filter(Boolean));
     }
 
     /** Take the first file from a picker or a drop, whichever it arrived by. */
@@ -107,6 +132,17 @@
                                     </button>
                                 {/if}
                             </div>
+                        {:else if field.kind === 'list'}
+                            <textarea id={field.name} class="textarea is-small" rows="3"
+                                      value={lines(value)}
+                                      placeholder="one per line"
+                                      on:input={(e) => changeLines(field, e.target.value)}></textarea>
+                            <p class="is-size-7 has-text-grey mt-1">One per line.</p>
+                        {:else if field.kind === 'path'}
+                            <input id={field.name} class="input is-small" type="text"
+                                   value={shown(value)}
+                                   placeholder="a path on the server"
+                                   on:input={(e) => changeText(field, e.target.value)} />
                         {:else if field.kind === 'source'}
                             <div class="source" class:dragging
                                  role="button" tabindex="-1"
@@ -131,7 +167,7 @@
                                 </p>
                             {/if}
                             <input id={field.name} class="input is-small mt-1" type="text"
-                                   value={value === null || value === undefined ? '' : value}
+                                   value={shown(value)}
                                    placeholder="or a path on the server -- a file or a folder"
                                    disabled={!!$chosenFile}
                                    on:input={(e) => changeText(field, e.target.value)} />
@@ -144,13 +180,13 @@
                         {:else if field.kind === 'int' || field.kind === 'float'}
                             <input id={field.name} class="input is-small" type="number"
                                    step={field.kind === 'int' ? '1' : '0.05'}
-                                   value={value === null || value === undefined ? '' : value}
+                                   value={shown(value)}
                                    placeholder={field.optional ? 'automatic' : ''}
                                    on:input={(e) => changeNumber(field, e.target.value,
                                                                  field.kind === 'int')} />
                         {:else}
                             <input id={field.name} class="input is-small" type="text"
-                                   value={value === null || value === undefined ? '' : value}
+                                   value={shown(value)}
                                    placeholder={field.optional ? 'unset' : ''}
                                    on:input={(e) => changeText(field, e.target.value)} />
                         {/if}

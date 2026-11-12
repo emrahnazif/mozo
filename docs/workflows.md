@@ -50,8 +50,8 @@ A node asks for it by annotation, as it asks for `State`: `models: Models`, then
 `models("rfdetr", variant)`. The editor never shows it.
 
 `rfdetr_checkpoint` runs an RF-DETR you trained: choose the checkpoint file, the architecture it
-was trained as, and its class names, comma-separated in class-id order — or leave those empty to
-use the names the checkpoint carries.
+was trained as, and its class names, one per line in class-id order — or leave those empty to use
+the names the checkpoint carries.
 
 ### Before a run
 
@@ -60,6 +60,35 @@ refuses to start if any are missing, listing all of them at once. A workflow sha
 machine usually names several; fix the paths in the file and run it again. mozo's own models are
 names, not paths: they come from the cache or are downloaded, and a run says which it will
 download and how much before it starts. `workflow.check()` answers both without running.
+
+### Prompts
+
+The text-prompted nodes — `sam3`, `owlv2`, `grounding_dino`, `clip`, `siglip2` — take a list of
+prompts, one per line in the editor, each exactly as written: `"bolt, M8"` is one prompt. Each
+result's `class_id` is the index of the prompt that found it, and its `class_name` is that prompt.
+A workflow saved before prompts were a list holds a comma-separated string, and it still means
+what it meant.
+
+### Annotating a list of images
+
+Three graphs cover the common jobs:
+
+| Job | Graph |
+|---|---|
+| Find objects by name | `read_media` → `sam3` |
+| Find boxes, then outline them | `read_media` → `grounding_dino` → `edgetam_boxes` (or `sam2_boxes`) |
+| Give existing boxes masks | `read_media` + `read_annotations` → `edgetam_boxes` |
+
+`sam2_boxes` and `edgetam_boxes` add a mask to every box they are given, in one call per image,
+and keep every row as it came: same order, same class, name, score and box. A row whose mask comes
+back empty keeps its box with an empty mask. An image with no boxes never runs the model.
+
+`read_annotations` reads back the file `save_annotations` writes, matching each line to the image
+by its file name and checking the line was written for an image of that size. Feed it files — a
+folder, or `run_many` over paths — not pixels in memory, which have no name to match.
+
+Stop a run by closing its iterator, or leaving the `for` loop: no further item starts, a model
+call already running finishes, and the run's threads exit right after it.
 
 ## What a workflow is
 
@@ -150,6 +179,6 @@ asks for `all`; a batch job over full-resolution frames should not have to.
 ## What is not there
 
 - **Tracking.** Stateful across frames, and mozo has no concept of a video.
-- **Zones**, and **SAM 2** / **EdgeTAM**. All three are prompted with pixel coordinates, and the
-  editor has no way yet to express a click. Everything else about those models already works
-  through `mozo.get_model`.
+- **Zones**, and clicking for **SAM 2** / **EdgeTAM**. Both are pixel coordinates, and the editor
+  has no way yet to express a click. Boxes already work: `sam2_boxes` and `edgetam_boxes` segment
+  the boxes another node found. A tool that clicks calls the model directly.

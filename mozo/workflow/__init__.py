@@ -18,7 +18,7 @@ that say what travels along its ports.
 
 from __future__ import annotations
 
-from .graph import Event, Preflight, Workflow
+from .graph import Event, ModelUse, Preflight, Workflow
 from .node import (Classifications, Color, Depth, Detections, Embedding, Image, NodeSpec,
                    PortType, Source, Weights)
 from .registry import catalogue, get, names, node
@@ -33,7 +33,7 @@ from .nodes.io import annotation_line  # noqa: E402
 #: engine's own records -- reachable from ``mozo.workflow.node`` for anyone introspecting, but not
 #: part of the surface this module documents.
 __all__ = [
-    "Classifications", "Color", "Depth", "Detections", "Embedding", "Event", "Image", "NodeSpec",
-    "Source", "Weights",
+    "Classifications", "Color", "Depth", "Detections", "Embedding", "Event", "Image", "ModelUse",
+    "NodeSpec", "Source", "Weights",
     "PortType", "Preflight", "Workflow", "annotation_line", "catalogue", "get", "names", "node",
 ]

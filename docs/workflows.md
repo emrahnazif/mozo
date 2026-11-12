@@ -61,6 +61,13 @@ machine usually names several; fix the paths in the file and run it again. mozo'
 names, not paths: they come from the cache or are downloaded, and a run says which it will
 download and how much before it starts. `workflow.check()` answers both without running.
 
+`check().models` lists every published model the workflow loads, cached or not — node, family,
+variant, the weights licence and the bytes still to fetch, 0 once cached — so a host can show
+what a workflow needs and under which terms before anything is fetched. `check().downloads` is the
+ones with bytes left. Pass the device the models will run on, `check(device="cuda")`, and nothing
+imports torch; the sizes are for the runtime mozo picks on that device, so a host loading another
+runtime asks `mozo.weights.download_size` with it.
+
 ### Prompts
 
 The text-prompted nodes — `sam3`, `owlv2`, `grounding_dino`, `clip`, `siglip2` — take a list of
@@ -140,8 +147,8 @@ The catalogue the editor reads is generated from these declarations, so it canno
 runs. Adding a node is adding a function.
 
 A node that loads a published model says which on its variant parameter, `variant:
-variants("edgetam") = "edgetam"`: the editor offers the variants as a dropdown, and the family is
-read from it — `edgetam_boxes` declares that it downloads EdgeTAM. A choice of
+variants("edgetam") = "edgetam"`: the editor offers the variants as a dropdown, and `check()` reads
+the family from it — which is how `edgetam_boxes` is known to download EdgeTAM. A choice of
 architecture for a checkpoint of your own is `architectures("rfdetr")` instead: nothing is
 downloaded for it.
 

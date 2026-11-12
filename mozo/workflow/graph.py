@@ -18,14 +18,35 @@ import logging
 from dataclasses import dataclass, field
 from itertools import chain
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, NamedTuple, Optional
 
 from . import registry
 from .node import Connection, Context, Models, NodeSpec, State
 
-__all__ = ["Event", "Preflight", "Workflow"]
+__all__ = ["Event", "ModelUse", "Preflight", "Workflow"]
 
 _log = logging.getLogger(__name__)
+
+
+class ModelUse(NamedTuple):
+    """One published model a workflow's node will load.
+
+    Attributes:
+        node: The node's id.
+        family: The model family, e.g. ``"edgetam"``.
+        variant: The variant, after the run's overrides and the node's own default.
+        license: The weights licence, by name, from the manifest -- ``"Apache-2.0"``, ``"SAM
+            License"``. Shown before anything is fetched, because a workflow shared by someone
+            else can name weights whose terms the person running it has not seen.
+        size: Bytes still to download, 0 once cached; None where the manifest could not say,
+            in which case loading it will say why.
+    """
+
+    node: str
+    family: str
+    variant: str
+    license: Optional[str]
+    size: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -37,12 +58,30 @@ class Preflight:
             is not here. A run refuses to start while this is not empty: each of these would fail
             on its own, one run at a time, and a workflow shared from another machine usually has
             several.
-        downloads: ``(node id, family, variant, bytes)`` for every mozo model the run will have
-            to download first. Information, not a problem: it downloads and carries on.
+        models: A :class:`ModelUse` for every published model the workflow's nodes load, cached
+            or not, in run order -- what a host lists, with licences and what is left to fetch,
+            before offering to download or remove anything.
     """
 
     missing: tuple = ()
-    downloads: tuple = ()
+    models: tuple = ()
+
+    @property
+    def downloads(self) -> tuple:
+        """``(node id, family, variant, bytes)`` for every model the run will have to download
+        first: the :attr:`models` with bytes still to fetch. Information, not a problem -- a run
+        downloads and carries on."""
+        return tuple((use.node, use.family, use.variant, use.size)
+                     for use in self.models if use.size)
+
+def _quietly(call, *args, **kwargs):
+    """``call``'s answer, or None where the manifest cannot give one -- an unpublished variant,
+    a runtime this device cannot run. Planning is information: the load says why, not this."""
+    try:
+        return call(*args, **kwargs)
+    except Exception:   # noqa: BLE001
+        return None
+
 
 #: A source that yielded nothing is not a source that yielded None.
 _NOTHING = object()
@@ -594,39 +633,51 @@ class Workflow:
                 if parameter.kind in ("source", "path"):
                     yield step_id, parameter
 
-    def check(self, **overrides) -> Preflight:
+    def check(self, *, device: Optional[str] = None, **overrides) -> Preflight:
         """What this workflow needs that is not here, without running anything.
 
         Every file parameter -- the ones the editor offers a file picker for, such as a source to
         read or a checkpoint of your own -- is checked for its file, after *overrides* are
-        applied. Every model node says whether its weights still have to be downloaded, and how
-        much. Every run does this first: missing files stop it, downloads are logged.
+        applied. Every node that loads a published model -- the ones whose variant is a
+        :class:`~mozo.workflow.node.Weights` choice -- is listed with its licence and what is
+        still to download. Every run does this first: missing files stop it, downloads are logged.
+
+        Args:
+            device: The device the models will run on, as the host chose it. Sizes are for the
+                runtime mozo picks on it -- what :func:`mozo.get_model` loads -- and naming it
+                keeps this from importing torch to ask which device there is. A host loading a
+                different runtime asks :func:`mozo.weights.download_size` with that runtime.
+            **overrides: Parameter values, as :meth:`run` takes them. ``device`` is therefore
+                not a name a node parameter may have.
         """
-        return self._inspect(self._resolve(overrides))
+        return self._inspect(self._resolve(overrides), device=device)
 
-    def _inspect(self, settings: dict, sizes: bool = True) -> Preflight:
+    def _inspect(self, settings: dict, plan: bool = True,
+                 device: Optional[str] = None) -> Preflight:
         from mozo import weights
-        from mozo.registry import MODEL_REGISTRY
 
-        missing, downloads = [], []
+        missing, models = [], []
         for step_id, parameter in self._files():
             value = self.steps[step_id].arguments(settings).get(parameter.name)
             if isinstance(value, (str, Path)) and value and not Path(value).exists():
                 missing.append((step_id, parameter.name, str(value)))
-        for step_id in self.order if sizes else ():
-            step = self.steps[step_id]
-            arguments = step.arguments(settings)
-            # A model node is named after the family it loads and carries its variant. One that
-            # is not -- a checkpoint of your own -- names a file, and is checked as one above.
-            if step.spec.models and step.spec.name in MODEL_REGISTRY and "variant" in arguments:
-                family, variant = step.spec.name, arguments["variant"]
-                try:
-                    size = weights.download_size(family, variant)
-                except Exception:   # noqa: BLE001 -- nothing to plan; the run will say why
-                    continue
-                if size:
-                    downloads.append((step_id, family, variant, size))
-        return Preflight(tuple(missing), tuple(downloads))
+        # The node says which model it loads, on its variant parameter. One loading only a
+        # checkpoint of your own says nothing here -- it names a file, checked as one above.
+        planned = [self.steps[step_id] for step_id in self.order
+                   if plan and self.steps[step_id].spec.weights is not None]
+        if planned and device is None:
+            # Asked once, as a load would ask it, rather than once per model.
+            from mozo.runtimes import get_default_device
+            device = get_default_device()
+        for step in planned:
+            chosen = step.spec.weights
+            # Left out of the file, a parameter takes the node's own default -- as the run will.
+            variant = step.arguments(settings).get(chosen.name, chosen.default)
+            models.append(ModelUse(
+                step.id, chosen.family, variant,
+                _quietly(weights.license_of, chosen.family, variant),
+                _quietly(weights.download_size, chosen.family, variant, device=device)))
+        return Preflight(tuple(missing), tuple(models))
 
     def _preflight(self, settings: dict) -> None:
         """Refuse to start a run that cannot finish, naming everything it lacks at once.
@@ -634,7 +685,7 @@ class Workflow:
         Download sizes are worked out only when someone will read them: a library caller who
         configured no logging pays for none of it on every run.
         """
-        found = self._inspect(settings, sizes=_log.isEnabledFor(logging.INFO))
+        found = self._inspect(settings, plan=_log.isEnabledFor(logging.INFO))
         if found.missing:
             labels = [f"{node} ({self.steps[node].spec.name})" for node, _, _ in found.missing]
             width = max(map(len, labels))

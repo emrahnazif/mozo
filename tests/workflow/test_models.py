@@ -15,7 +15,7 @@ import pixelflow as pf
 import pytest
 
 import mozo
-from conftest import FIXTURE, document
+from conftest import FIXTURE, document, fresh_interpreter
 from mozo.manager import ModelManager
 from mozo.workflow import Workflow
 from mozo.workflow.node import Models, NodeSpec, Weights
@@ -141,18 +141,20 @@ class TestACheckpointOfYourOwn:
         assert shared.loaded() == []
 
 
+def _shared() -> Workflow:
+    """A workflow from another machine: its source and both checkpoints are not here."""
+    return Workflow.from_dict(document({
+        "load": ("read_media", {"source": "/nowhere/frames"}),
+        "helmets": ("rfdetr_checkpoint", {"checkpoint": "/nowhere/hardhat.pth"}),
+        "vests": ("rfdetr_checkpoint", {"checkpoint": "/nowhere/vest.pth"}),
+    }, [("load", "image", "helmets", "image"), ("load", "image", "vests", "image")]))
+
+
 class TestBeforeARun:
     """A workflow from another machine names files that are not here. Say so once, all of them."""
 
-    def _shared(self):
-        return Workflow.from_dict(document({
-            "load": ("read_media", {"source": "/nowhere/frames"}),
-            "helmets": ("rfdetr_checkpoint", {"checkpoint": "/nowhere/hardhat.pth"}),
-            "vests": ("rfdetr_checkpoint", {"checkpoint": "/nowhere/vest.pth"}),
-        }, [("load", "image", "helmets", "image"), ("load", "image", "vests", "image")]))
-
     def test_check_lists_every_missing_file_without_running(self):
-        found = self._shared().check()
+        found = _shared().check()
         assert found.missing == (("load", "source", "/nowhere/frames"),
                                  ("helmets", "checkpoint", "/nowhere/hardhat.pth"),
                                  ("vests", "checkpoint", "/nowhere/vest.pth"))
@@ -164,7 +166,7 @@ class TestBeforeARun:
     ], ids=["run", "stream", "process"])
     def test_a_run_refuses_to_start_and_names_them_all(self, start):
         with pytest.raises(FileNotFoundError) as error:
-            start(self._shared())
+            start(_shared())
         message = str(error.value)
         assert "3 files that are not here" in message
         for name in ("/nowhere/frames", "/nowhere/hardhat.pth", "/nowhere/vest.pth", "helmets"):
@@ -173,7 +175,7 @@ class TestBeforeARun:
     def test_what_is_checked_is_what_the_run_would_use(self, tmp_path):
         """A value supplied at run time replaces the saved one before anything is checked."""
         (tmp_path / "hardhat.pth").write_bytes(b"w")
-        found = self._shared().check(source=str(FIXTURE))
+        found = _shared().check(source=str(FIXTURE))
         assert [node for node, _, _ in found.missing] == ["helmets", "vests"]
 
     def test_models_still_to_download_are_noted_not_refused(self, tmp_path, caplog):
@@ -192,10 +194,85 @@ class TestBeforeARun:
     def test_a_model_already_downloaded_is_not_noted(self, monkeypatch):
         from mozo import weights
 
-        monkeypatch.setattr(weights, "download_size", lambda family, variant: 0)
-        from mozo.workflow import Preflight
+        monkeypatch.setattr(weights, "download_size", lambda family, variant, **kw: 0)
+        found = _detect().check()
+        assert found.missing == () and found.downloads == ()
+        assert [(use.node, use.size) for use in found.models] == [("detect", 0)]
 
-        assert _detect().check() == Preflight(missing=(), downloads=())
+
+#: Grounding DINO finds boxes and EdgeTAM outlines them: two models, and a node -- edgetam_boxes --
+#: that is not named after the family it loads.
+_ANNOTATOR = [("load", "image", "find", "image"), ("load", "image", "outline", "image"),
+              ("find", "detections", "outline", "detections")]
+
+
+def _annotator(find: str | None = None, outline: str | None = None) -> Workflow:
+    """The annotator graph; each node's variant written out only where given."""
+    def chosen(variant):
+        return {} if variant is None else {"variant": variant}
+
+    return Workflow.from_dict(document({
+        "load": ("read_media", {"source": str(FIXTURE)}),
+        "find": ("grounding_dino", chosen(find)),
+        "outline": ("edgetam_boxes", chosen(outline)),
+    }, _ANNOTATOR))
+
+
+class TestWhichModelsAWorkflowUses:
+    """Every node that loads a published model says which, on its variant parameter, and the
+    preflight lists them all -- named after their family or not, cached or not."""
+
+    @pytest.mark.parametrize("written", [{}, {"find": "tiny", "outline": "edgetam"}],
+                             ids=["defaults", "written-out"])
+    def test_both_models_are_planned_on_an_empty_cache(self, tmp_path, written):
+        """``edgetam_boxes`` was missed for not being named after its family, and a node left
+        at its default variant was missed for having no variant in the file."""
+        from mozo import weights
+
+        weights.configure(cache=tmp_path / "empty")
+        found = _annotator(**written).check(device="cpu")
+        assert [(node, family, variant) for node, family, variant, _ in found.downloads] == [
+            ("find", "grounding_dino", "tiny"), ("outline", "edgetam", "edgetam")]
+        assert [size for *_, size in found.downloads] == [
+            weights.download_size("grounding_dino", "tiny", device="cpu"),
+            weights.download_size("edgetam", "edgetam", device="cpu")]
+
+    def test_a_cached_model_is_listed_with_nothing_left_to_fetch(self, monkeypatch):
+        from mozo import weights
+
+        monkeypatch.setattr(weights, "download_size",
+                            lambda family, variant, **kw: 0 if family == "edgetam" else 123)
+        found = _annotator().check(device="cpu")
+        assert [(use.family, use.size) for use in found.models] == [
+            ("grounding_dino", 123), ("edgetam", 0)]
+        assert [family for _, family, _, _ in found.downloads] == ["grounding_dino"]
+
+    def test_each_model_carries_its_licence(self):
+        found = _annotator().check(device="cpu")
+        assert [use.license for use in found.models] == ["Apache-2.0", "Apache-2.0"]
+
+    def test_the_variant_is_the_one_the_run_would_use(self):
+        found = _detect(variant="nano").check(device="cpu", variant="medium")
+        assert [(use.family, use.variant) for use in found.models] == [("rfdetr", "medium")]
+
+    def test_a_checkpoint_of_your_own_is_not_a_download(self):
+        found = _shared().check(device="cpu")
+        assert found.models == () and found.downloads == ()
+
+    def test_naming_the_device_imports_no_torch(self, tmp_path):
+        """A host listing workflows on a settings page should not pay for torch to do it."""
+        finished = fresh_interpreter(
+            "import sys\n"
+            "sys.path.insert(0, 'tests')\n"
+            "sys.path.insert(0, 'tests/workflow')\n"
+            "from mozo import weights\n"
+            "from test_models import _annotator\n"
+            f"weights.configure(cache={str(tmp_path)!r}, offline=True)\n"
+            "found = _annotator().check(device='cpu')\n"
+            "print(len(found.models), all(use.size for use in found.models),"
+            " 'torch' in sys.modules)\n"
+        )
+        assert finished.stdout.split() == ["2", "True", "False"]
 
 
 def _model_nodes():

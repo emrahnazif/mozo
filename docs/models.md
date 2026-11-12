@@ -273,9 +273,10 @@ Two ways to prompt it, off one checkpoint:
   include, `0` exclude), `boxes=`, or both, and returns what SAM 2 returns: the candidate masks,
   best first, each with its box and predicted IoU. Over HTTP it is `?point=x,y&label=1` or
   `?box=x1,y1,x2,y2`. A phrase and a click in one call are refused — a box beside a phrase is an
-  *example* of the concept in SAM 3, which mozo does not take yet. Clicks need the torch runtime
-  for now: the published CoreML graph carries the phrase path only, and says so rather than
-  guessing.
+  *example* of the concept in SAM 3, which mozo does not take yet. Clicks run on every runtime
+  SAM 3 publishes: the CoreML graph carries both halves of the image encoder from revision
+  2026-11-12. A graph pinned to 2026-08-20 carries the phrase half only and refuses a click,
+  saying so, rather than answering it from the wrong pyramid.
 
 One image encode serves both, as in Meta's own image path: a click on a photograph already
 searched by phrase costs only its decoder, and `/prepare` warms both. Click masks match

@@ -1222,7 +1222,7 @@
       }
     },
     "sam3/sam3": {
-      "latest": "2026-08-20",
+      "latest": "2026-11-12",
       "revisions": {
         "2026-08-20": {
           "artifacts": {
@@ -1243,6 +1243,31 @@
             },
             "torch-fp32": {
               "path": "sam3/sam3/2026-08-20/torch-fp32.pth",
+              "sha256": "9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e",
+              "size": 3450062241
+            }
+          },
+          "license": "SAM License"
+        },
+        "2026-11-12": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "sam3/sam3/2026-11-12/LICENSE",
+              "sha256": "4dea99bfaa016e21bc860d73f344236bd1e5c4977d1a9a8fd32f822b500ae1be",
+              "size": 7353
+            },
+            "NOTICE": {
+              "path": "sam3/sam3/2026-11-12/NOTICE",
+              "sha256": "50c96760d91d0b0de3a22ce9f40ef538a772c39fc51fbf02f23402d6bbfef021",
+              "size": 1967
+            },
+            "coreml-fp32": {
+              "path": "sam3/sam3/2026-11-12/coreml-fp32.zip",
+              "sha256": "384a116044aea0694e51980317d9a216ce4958f507b043e358a7474e2f0f38cc",
+              "size": 1728022592
+            },
+            "torch-fp32": {
+              "path": "sam3/sam3/2026-11-12/torch-fp32.pth",
               "sha256": "9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e",
               "size": 3450062241
             }

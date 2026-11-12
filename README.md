@@ -97,7 +97,7 @@ A mask from a click or a box. Returns detections, one row per mask.
 |---|---|---|---|
 | `sam2` | `tiny` `small` `base_plus` `large` | Apache-2.0 | points, box, or both |
 | `edgetam` | `edgetam` | Apache-2.0 | points, box, or both |
-| `sam3` | `sam3` | SAM License | points, box, or both — on the torch runtime |
+| `sam3` | `sam3` | SAM License | points, box, or both |
 
 ### Text recognition
 

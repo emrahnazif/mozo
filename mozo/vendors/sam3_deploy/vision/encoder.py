@@ -25,6 +25,11 @@ class VisionEncoder(nn.Module):
         spec: Vision geometry. Defaults to the published model.
     """
 
+    #: The pyramids this encoder can build: both halves of the dual neck. A stand-in encoder
+    #: states its own, and :class:`~..predictor.Segmenter` reads it to know whether a click
+    #: head has anything to read.
+    stacks = Neck.STACKS
+
     def __init__(self, spec: Spec = SPEC):
         super().__init__()
         self.trunk = Trunk(spec.trunk)

@@ -41,7 +41,7 @@ try:
 except ImportError:
     raise ImportError("PixelFlow is not installed. Install it with: pip install pixelflow") from None
 
-__all__ = ["GraphVision", "Sam3Predictor"]
+__all__ = ["CLICK_LEVELS", "GraphVision", "LEVELS", "Sam3Predictor"]
 
 #: The family this adapter serves, as the registry and the manifest name it.
 FAMILY = "sam3"
@@ -52,6 +52,10 @@ FAMILY = "sam3"
 #: returned them the other way round would segment confidently and wrongly.
 LEVELS = ("level0", "level1", "level2")
 
+#: The graph's names for the click pyramid's levels, finest first, in the same order as
+#: :data:`LEVELS`. A graph exported before the click half was added has none of them.
+CLICK_LEVELS = ("click0", "click1", "click2")
+
 
 _log = logging.getLogger(__name__)
 
@@ -60,36 +64,48 @@ class GraphVision:
     """A graph artifact standing in for SAM 3's torch vision encoder.
 
     :class:`~mozo.vendors.sam3_deploy.predictor.Segmenter` asks its encoder one question -- a
-    preprocessed batch in, the concept pyramid and its position encoding out -- and this answers
-    it from a CoreML package instead of from the trunk. That is the whole of what the graph
-    replaces; the text tower and the concept head stay in torch, so the checkpoint is still
-    loaded either way.
+    preprocessed batch in, the requested pyramids and the position encoding out -- and this
+    answers it from a CoreML package instead of from the trunk. That is the whole of what the
+    graph replaces; the text tower, the concept head and the click head stay in torch, so the
+    checkpoint is still loaded either way.
+
+    A graph carries the concept pyramid, and the click pyramid as well when it was exported with
+    both halves of the neck. :attr:`stacks` says which, read off the package's own outputs, so a
+    graph published before the click half was added still loads -- and serves phrases only.
 
     Args:
         runner: The loaded package.
         device: Where the torch half runs, and so where the outputs must land.
 
+    Attributes:
+        stacks: The pyramids this graph can return.
+
     Raises:
-        ValueError: If asked for the click stack. The published graph carries the concept stack
-            alone; the click head reads a pyramid of its own, built by the other half of the
-            dual neck. Refusing here rather than returning the concept pyramid is the difference
-            between an error and a mask of the wrong pixels.
+        ValueError: If asked for a pyramid the graph does not carry. Returning another one in its
+            place is the difference between an error and a mask of the wrong pixels.
     """
 
     def __init__(self, runner: CoreMLRunner, device: str) -> None:
         self.runner = runner
         self.device = device
+        self.stacks = (("concept", "click") if set(CLICK_LEVELS) <= set(runner.outputs)
+                       else ("concept",))
 
     def __call__(self, batch: torch.Tensor, stacks: tuple[str, ...] = ("concept",)) -> dict:
-        if tuple(stacks) != ("concept",):
+        missing = set(stacks) - set(self.stacks)
+        if missing:
             raise ValueError(
-                f"the SAM 3 graph encoder serves the concept stack only, not {stacks!r}"
+                f"this SAM 3 graph carries the {' and '.join(self.stacks)} stack(s), "
+                f"not {sorted(missing)!r}"
             )
         got = dict(zip(self.runner.outputs, self.runner(batch.cpu().numpy())))
-        return {
+        found = {
             "concept": [torch.from_numpy(got[name]).to(self.device) for name in LEVELS],
             "positions": torch.from_numpy(got["positions"]).to(self.device),
         }
+        if "click" in stacks:
+            found["click"] = [torch.from_numpy(got[name]).to(self.device) for name in CLICK_LEVELS]
+        return found
 
 
 class Sam3Predictor(Preparing):
@@ -211,8 +227,8 @@ class Sam3Predictor(Preparing):
                 empty; or if points arrive without labels. SAM 3 will happily encode the empty
                 string and return whatever it finds most salient, which is not what an empty
                 prompt means.
-                Also for a click on a runtime whose image encoder carries the phrase path only
-                -- the published CoreML graph does, for now.
+                Also for a click on a graph exported with the phrase path only, as CoreML
+                graphs published before clicks were added are.
         """
         clicked = points is not None or labels is not None or boxes is not None
         if clicked and text is not None:
@@ -224,9 +240,9 @@ class Sam3Predictor(Preparing):
         if clicked:
             if self._segmenter.click is None:
                 raise ValueError(
-                    f"SAM 3 on {self.runtime} answers phrases only: its image encoder graph "
-                    "carries the phrase path and not the click path. Load it with "
-                    "runtime='torch-fp32' to click."
+                    f"SAM 3 on {self.runtime} answers phrases only: this revision's graph was "
+                    "exported without the click half of the image encoder. Load it with "
+                    "runtime='torch-fp32' to click, or a revision whose graph carries it."
                 )
             pixels = load_image(image)
             self._after_prepare(pixels)

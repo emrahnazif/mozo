@@ -121,9 +121,10 @@ class Segmenter:
         vision: An encoder to use instead of building the torch one -- anything that answers
             :meth:`~..vision.encoder.VisionEncoder.forward`'s question, i.e. takes the
             preprocessed batch and returns ``{"concept": [levels], "positions": ...}``. A
-            graph runtime is what this is for. Passing one **turns the click path off**: the
-            click head reads a pyramid of its own from the same encode, which such a graph does
-            not carry.
+            graph runtime is what this is for. Its ``stacks`` attribute says which pyramids it
+            can build; one without ``"click"`` there -- or with no ``stacks`` at all -- **turns
+            the click path off**, since the click head reads a pyramid of its own that such an
+            encoder does not make.
 
     Attributes:
         image_size: Square side the encoder runs at.
@@ -138,18 +139,20 @@ class Segmenter:
     ):
         state = load_state_dict(os.fspath(checkpoint))
 
-        # The trunk is 1.85 GB of the checkpoint and the click head is only reachable through
-        # it, so a supplied encoder builds neither. It does not read them either: the state
-        # above is mapped, not materialised, so a section this branch never names is never
-        # faulted in. That is what makes the graph path cheaper to construct and not merely
-        # cheaper to hold -- 3.37 GB peak against 5.28 GB. See :func:`~.checkpoint.load_state_dict`.
+        # The trunk is 1.85 GB of the checkpoint, so a supplied encoder does not build it. It
+        # does not read it either: the state above is mapped, not materialised, so a section
+        # this branch never names is never faulted in. That is what makes the graph path cheaper
+        # to construct and not merely cheaper to hold -- 3.37 GB peak against 5.28 GB. See
+        # :func:`~.checkpoint.load_state_dict`.
         self.vision = vision
-        self.click = None
         if vision is None:
             self.vision = VisionEncoder()
             self.vision.load_state_dict(vision_state_dict(state), strict=True)
-            # 4.2 M parameters against the trunk's 300 M, and 16 ms to build against a 3.45 GB
-            # checkpoint load. Making it optional would save nothing worth the branch.
+        # The click head reads the click pyramid, so it is built wherever the encoder can make
+        # one: always for the torch encoder, and for a graph that carries that half of the neck.
+        # 4.2 M parameters against the trunk's 300 M, and 16 ms to build.
+        self.click = None
+        if "click" in getattr(self.vision, "stacks", ("concept",)):
             self.click = ClickHead()
             self.click.load_state_dict(click_state_dict(state), strict=True)
         self.text = TextEncoder()
@@ -349,8 +352,9 @@ class Segmenter:
 
         Raises:
             ValueError: If no prompt is given, or if points arrive without labels.
-            RuntimeError: If this segmenter was built with a supplied ``vision`` encoder, which
-                carries the concept pyramid alone. Answering from it would mask the wrong pixels.
+            RuntimeError: If this segmenter's image encoder does not build the click pyramid --
+                a supplied one without ``"click"`` in its ``stacks``. Answering from the concept
+                pyramid would mask the wrong pixels.
         """
         if points is None and boxes is None and mask_input is None:
             raise ValueError("a prompt is required: give points, boxes or mask_input")
@@ -358,8 +362,9 @@ class Segmenter:
             raise ValueError("points and labels go together; got one without the other")
         if self.click is None:
             raise RuntimeError(
-                "this Segmenter was built with a supplied vision encoder, which serves the "
-                "concept path only. Build one from the checkpoint to click on an image."
+                "this Segmenter's image encoder does not build the click pyramid, so it serves "
+                "the concept path only. Build one from the checkpoint, or supply an encoder whose "
+                "stacks include 'click', to click on an image."
             )
 
         shape = image.shape[:2]

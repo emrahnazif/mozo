@@ -2,7 +2,7 @@
 """Export SAM 3's vision encoder to the CoreML package mozo publishes.
 
     python tools/export/sam3.py sam3
-    python tools/export/sam3.py sam3 --revision 2026-08-20
+    python tools/export/sam3.py sam3 --revision 2026-11-12
 
 This runs once, on a machine you control, and never ships. It needs macOS: the gate below runs
 the package it just built, and nothing else can.
@@ -14,12 +14,13 @@ half worth exporting and the only one exported here. The text tower and the conc
 torch, and the checkpoint is loaded either way; what the package changes is that the trunk's
 1.85 GB is then never loaded beside it.
 
-The graph carries the trunk, the *concept* half of the dual FPN, and the coarsest level's
-position encoding -- exactly what ``VisionEncoder.forward(batch, stacks=("concept",))`` returns,
+The graph carries the trunk, *both* halves of the dual FPN, and the coarsest level's position
+encoding -- exactly what ``VisionEncoder.forward(batch, stacks=("concept", "click"))`` returns,
 so :class:`~mozo.adapters.sam3.GraphVision` can stand where the torch encoder stood without
-assembling anything. The click stack is not in it: the click path reads a differently
-preprocessed image and needs its own trunk pass, so a segmenter given this graph refuses clicks
-rather than answering them from the wrong pixels.
+assembling anything, for a phrase and a click alike. One trunk pass feeds both, as in Meta's own
+image path. Revision 2026-08-20's graph carried the concept half alone; the click half adds 8
+percent to an encode (1229 ms against 1139 ms, measured interleaved on an M1 Max) and 26 MB to
+the package, 1.73 GB against 1.70.
 
 **The rotation is rewritten in real arithmetic, and that is the only change to the model.**
 ``vision/vit.py`` keeps SAM 3's rotary table complex, as the checkpoint ships it and as upstream
@@ -81,7 +82,8 @@ Two of the rejected rows are worth keeping rather than just discarding:
 **The gate checks two different things, because one of them is not enough.**
 
 What must not change is what the model *finds*, so every prompt is checked on its instance count,
-then its scores, then its mask pixels. That is the claim a user cares about, and the way a vision
+then its scores, then its mask pixels -- and every click prompt ``tools/verify/sam3.py`` gates on
+is checked on its predicted IoU and its mask pixels the same way. That is the claim a user cares about, and the way a vision
 encoder could quietly break it is the threshold: ``instances`` cuts at 0.5, so a query at 0.4999
 appearing or vanishing is a regression no mask comparison would see.
 
@@ -117,7 +119,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from common import fixtures, variant_parser  # noqa: E402
-from mozo.adapters.sam3 import LEVELS, GraphVision  # noqa: E402
+from tools.verify.sam3 import CLICKS, click_prompt  # noqa: E402
+from mozo.adapters.sam3 import CLICK_LEVELS, LEVELS, GraphVision  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import CoreMLRunner  # noqa: E402
 from mozo.vendors.sam3_deploy import Segmenter  # noqa: E402
@@ -126,8 +129,8 @@ from mozo.vendors.sam3_deploy.config import SPEC  # noqa: E402
 from mozo.vendors.sam3_deploy.vision.encoder import VisionEncoder  # noqa: E402
 from mozo.vendors.sam3_deploy.vision.vit import RoPEAttention  # noqa: E402
 
-#: The revision these weights were published under.
-REVISION = "2026-08-20"
+#: The revision this export publishes into. 2026-08-20's graph predates the click half.
+REVISION = "2026-11-12"
 
 #: The artifact this writes. No ``-vision`` suffix, though that is what it holds: a suffix in an
 #: artifact key means "one part of a runtime split across files", and SAM 3's CoreML runtime is
@@ -215,8 +218,8 @@ class Graph(nn.Module):
         self.encoder = encoder
 
     def forward(self, batch: torch.Tensor) -> tuple[torch.Tensor, ...]:
-        got = self.encoder(batch, stacks=("concept",))
-        return (*got["concept"], got["positions"])
+        got = self.encoder(batch, stacks=("concept", "click"))
+        return (*got["concept"], got["positions"], *got["click"])
 
 
 def _instances(segmenter: Segmenter, pixels: np.ndarray) -> dict[str, dict]:
@@ -229,14 +232,36 @@ def _reject(reason: str) -> None:
     raise SystemExit(f"{ARTIFACT} {reason}; not published")
 
 
-def _features(want: list, got: list, image: str) -> None:
+def _features(want: list, got: list, image: str, stack: str) -> None:
     """Raise unless every pyramid level the graph produced matches the trunk's closely enough."""
     for level, (a, b) in enumerate(zip(want, got)):
         drift = (torch.linalg.vector_norm(a - b) / torch.linalg.vector_norm(a)).item()
-        print(f"    {image} level{level:<29} relative L2 {drift:.2e}")
+        print(f"    {image} {stack} level{level:<21} relative L2 {drift:.2e}")
         if drift > FEATURE_TOLERANCE:
-            _reject(f"moves level{level} on {image} by {drift:.2e}, "
+            _reject(f"moves the {stack} pyramid's level{level} on {image} by {drift:.2e}, "
                     f"over {FEATURE_TOLERANCE:.0e}")
+
+
+def _clicks(torch_segmenter: Segmenter, graph_segmenter: Segmenter, pixels, image: str) -> None:
+    """Raise unless every gated click finds the same masks with the same predicted IoU.
+
+    The click prompts are the parity gate's own, so a graph is held to the prompts the torch path
+    was proved exact on -- a lone negative point and ``multimask_output=False`` included.
+    Measured on the fixture: predicted IoU moved by at most 7.7e-06 and at most 4 mask pixels,
+    both inside the limits the phrases are held to.
+    """
+    for spec in CLICKS:
+        prompt = click_prompt(spec, pixels.shape[:2])
+        want, got = torch_segmenter.segment(pixels, **prompt), graph_segmenter.segment(pixels, **prompt)
+        score = (want["scores"] - got["scores"]).abs().max().item()
+        differing = int((want["masks"] ^ got["masks"]).flatten(2).sum(2).max())
+        print(f"    {image} click {spec[0]!r:28} dIoU {score:.1e}, {differing:>3} mask px differ")
+        if score > SCORE_TOLERANCE:
+            _reject(f"moves the predicted IoU of click {spec[0]!r} on {image} by {score:.2e}, "
+                    f"over {SCORE_TOLERANCE:.0e}")
+        if differing > MASK_TOLERANCE_PX:
+            _reject(f"disagrees with torch by {differing} mask px for click {spec[0]!r} "
+                    f"on {image}, over {MASK_TOLERANCE_PX}")
 
 
 def _compare(want: dict, got: dict, prompt: str, image: str) -> None:
@@ -290,7 +315,7 @@ def export_variant(checkpoint: Path, destination: Path) -> None:
             traced,
             inputs=[ct.TensorType(name="image", shape=(1, 3, size, size), dtype=np.float32)],
             outputs=[ct.TensorType(name=name, dtype=np.float32)
-                     for name in (*LEVELS, "positions")],
+                     for name in (*LEVELS, "positions", *CLICK_LEVELS)],
             compute_precision=ct.precision.FLOAT32,
             minimum_deployment_target=getattr(ct.target, TARGET),
         ).save(str(staged))
@@ -299,14 +324,19 @@ def export_variant(checkpoint: Path, destination: Path) -> None:
         torch_segmenter = Segmenter(checkpoint)
         graph_segmenter = Segmenter(
             checkpoint, vision=GraphVision(CoreMLRunner(staged), "cpu"))
+        if graph_segmenter.click is None:
+            _reject("carries no click pyramid")
         for image in fixtures():
             pixels = load_image(image)
-            _features(torch_segmenter.encode_image(pixels)["concept"],
-                      graph_segmenter.encode_image(pixels)["concept"], image.name)
+            want_features = torch_segmenter.encode_image(pixels)
+            got_features = graph_segmenter.encode_image(pixels)
+            for stack in ("concept", "click"):
+                _features(want_features[stack], got_features[stack], image.name, stack)
             want = _instances(torch_segmenter, pixels)
             got = _instances(graph_segmenter, pixels)
             for prompt in PROMPTS:
                 _compare(want[prompt], got[prompt], prompt, image.name)
+            _clicks(torch_segmenter, graph_segmenter, pixels, image.name)
         del torch_segmenter, graph_segmenter
 
         # Only now, with every prompt agreed, does anything land where the manifest can see it.

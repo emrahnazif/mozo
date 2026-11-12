@@ -598,12 +598,38 @@ def test_the_graph_encoder_answers_the_vision_encoders_question():
     assert all(isinstance(level, torch.Tensor) for level in got["concept"])
 
 
-def test_the_graph_encoder_refuses_the_click_stack():
-    """It carries the concept stack alone; answering with it would mask the wrong pixels."""
+def test_a_graph_without_the_click_half_refuses_the_click_stack():
+    """A graph published before clicks carries the concept stack alone; answering a click with
+    it would mask the wrong pixels."""
     from mozo.adapters.sam3 import GraphVision
 
-    with pytest.raises(ValueError, match="concept stack only"):
-        GraphVision(_StubRunner(), "cpu")(torch.zeros(1, 3, 1008, 1008), stacks=("click",))
+    graph = GraphVision(_StubRunner(), "cpu")
+    assert graph.stacks == ("concept",)
+    with pytest.raises(ValueError, match="not \\['click'\\]"):
+        graph(torch.zeros(1, 3, 1008, 1008), stacks=("concept", "click"))
+
+
+class _ClickStubRunner(_StubRunner):
+    """A graph exported with both halves of the neck: the click levels follow the concept's."""
+
+    outputs = (*_StubRunner.outputs, "click0", "click1", "click2")
+
+    def __call__(self, batch):
+        sides = (288, 144, 72)
+        return (*super().__call__(batch),
+                *(np.full((1, 256, s, s), 3.0, dtype=np.float32) for s in sides))
+
+
+def test_a_graph_with_the_click_half_serves_both_stacks_from_one_run():
+    from mozo.adapters.sam3 import GraphVision
+
+    graph = GraphVision(_ClickStubRunner(), "cpu")
+    assert graph.stacks == ("concept", "click")
+    got = graph(torch.zeros(1, 3, 1008, 1008), stacks=("concept", "click"))
+    assert [tuple(level.shape[-2:]) for level in got["click"]] == [(288, 288), (144, 144), (72, 72)]
+    assert all((level == 3.0).all() for level in got["click"]), "the click outputs, not the concept"
+    assert all((level == 0.0).all() for level in got["concept"])
+    assert "click" not in graph(torch.zeros(1, 3, 1008, 1008)), "built only when asked for"
 
 
 def test_the_graphs_outputs_are_the_levels_the_neck_survives_the_scalp_with():

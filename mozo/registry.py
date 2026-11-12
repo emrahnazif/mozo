@@ -15,8 +15,8 @@ To add a family: add an entry below, and give its adapter the same ``VARIANTS``.
 
 from __future__ import annotations
 
-__all__ = ["BOXED", "ENCODES", "EXECUTES", "MODEL_REGISTRY", "NEEDS", "PREPARES", "PROMPTED",
-           "get_model_info"]
+__all__ = ["BOXED", "CLICKABLE", "ENCODES", "EXECUTES", "MODEL_REGISTRY", "NEEDS", "PREPARES",
+           "PROMPTED", "get_model_info"]
 
 from typing import Any
 
@@ -43,6 +43,14 @@ PROMPTED = frozenset({
 #: Distinct from promptable segmentation, which *accepts* a box and equally accepts a click. This
 #: is the set that requires one.
 BOXED = frozenset({"pose_estimation", "image_inpainting"})
+
+#: Families that segment what a click or a box points at: ``?point=`` and ``?box=`` mean "this
+#: one thing", as they do for SAM 2. Every promptable-segmentation family, and SAM 3, whose task
+#: is concept segmentation but which carries a click head too -- so a family rather than a task
+#: set, because a task name cannot say that one of its families also does this. Read before
+#: anything is loaded, for the reason PROMPTED is, and served by ``/models`` so a page knows when
+#: to let a picture be clicked.
+CLICKABLE = frozenset({"edgetam", "sam2", "sam3"})
 
 #: What each family can encode, and from what. A family absent from here does not encode at all.
 #:
@@ -267,8 +275,9 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         'task_type': 'concept_segmentation',
         'description': (
             'SAM 3 by Meta — promptable concept segmentation. Name a thing in words and it '
-            'returns every instance of it, with a mask, a box and a score. One published model, '
-            'so one variant. Unlike every other family here the weights are neither Apache-2.0 '
+            'returns every instance of it, with a mask, a box and a score; or click a point or '
+            'draw a box and it returns the one thing you pointed at, as SAM 2 does. One '
+            'published model, so one variant. Unlike every other family here the weights are neither Apache-2.0 '
             'nor AGPL: they carry Meta\'s SAM License, which restricts what they may be used '
             'for and binds whoever you serve predictions to. See the NOTICE published beside '
             'the checkpoint.'

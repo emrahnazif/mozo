@@ -620,3 +620,139 @@ def test_a_supplied_vision_encoder_turns_the_click_path_off():
         blank.segment(np.zeros((8, 8, 3), dtype=np.uint8),
                       points=np.array([[1.0, 1.0]]), labels=np.array([1]))
 
+
+# --- clicks through the adapter ----------------------------------------------------------------
+
+class _ClickingSegmenter:
+    """Stands in for the vendor Segmenter's click path: three candidates, scored out of order."""
+
+    def __init__(self):
+        self.asked, self.click = [], object()
+
+    def segment(self, pixels, **prompt):
+        self.asked.append(prompt)
+        masks = torch.zeros(1, 3, 8, 8, dtype=torch.bool)
+        for candidate, side in enumerate((2, 6, 4)):
+            masks[0, candidate, :side, :side] = True
+        return {"masks": masks, "scores": torch.tensor([[0.2, 0.9, 0.5]]),
+                "logits": torch.zeros(1, 3, 288, 288)}
+
+
+def _clicking_model():
+    from mozo.adapters.sam3 import Sam3Predictor
+
+    model = Sam3Predictor.__new__(Sam3Predictor)
+    model._segmenter, model.device = _ClickingSegmenter(), "cpu"
+    return model
+
+
+def test_a_click_comes_back_as_sam2s_answer_does():
+    """Ranked candidates, each with the box around its own mask and its predicted IoU, and no
+    class name -- the same rows SAM 2 returns for the same click."""
+    model = _clicking_model()
+    found = model.predict(np.zeros((8, 8, 3), dtype=np.uint8), points=[[1, 1]], labels=[1])
+
+    assert [round(float(d.confidence), 2) for d in found] == [0.9, 0.5, 0.2]
+    assert [list(map(float, d.bbox)) for d in found] == [[0, 0, 6, 6], [0, 0, 4, 4], [0, 0, 2, 2]]
+    assert all(d.class_name is None for d in found)
+    assert model._segmenter.asked == [{"points": [[1, 1]], "labels": [1], "boxes": None,
+                                       "multimask_output": True}]
+
+
+def test_a_box_alone_is_a_click():
+    model = _clicking_model()
+    model.predict(np.zeros((8, 8, 3), dtype=np.uint8), boxes=[0, 0, 4, 4], multimask_output=False)
+    assert model._segmenter.asked[0]["boxes"] == [0, 0, 4, 4]
+
+
+@pytest.mark.parametrize("click", [{"points": [[1, 1]], "labels": [1]}, {"boxes": [0, 0, 4, 4]}])
+def test_a_phrase_and_a_click_together_are_refused(click):
+    """A box beside a phrase is an exemplar in SAM 3 -- a different question -- so neither reading
+    is picked silently. Refused before ``self`` or the image is touched."""
+    from mozo.adapters.sam3 import Sam3Predictor
+
+    with pytest.raises(ValueError, match="phrase or a click, not both"):
+        Sam3Predictor.predict(None, None, "car", **click)
+
+
+def test_neither_a_phrase_nor_a_click_is_refused():
+    from mozo.adapters.sam3 import Sam3Predictor
+
+    with pytest.raises(ValueError, match="concept to look for or a click"):
+        Sam3Predictor.predict(None, None)
+
+
+# --- clicks over HTTP --------------------------------------------------------------------------
+
+class _Recording:
+    """What ``/predict`` calls, recording how it was called."""
+
+    def __init__(self):
+        self.calls = []
+
+    def predict(self, image, *args, **kwargs):
+        import pixelflow as pf
+
+        self.calls.append((args, kwargs))
+        return pf.Detections()
+
+
+@pytest.fixture
+def served(client, monkeypatch):
+    model = _Recording()
+    monkeypatch.setattr(client.app.state.model_manager, "get_model",
+                        lambda family, variant, **kw: model)
+    return client, model
+
+
+def _ask(client, query):
+    from conftest import FIXTURE
+
+    return client.post(f"/predict/sam3/sam3{query}",
+                       files={"file": ("a.jpg", FIXTURE.read_bytes(), "image/jpeg")})
+
+
+def test_a_click_over_http_takes_the_click_path(served):
+    client, model = served
+    response = _ask(client, "?point=10,20&label=1&multimask=false&name=cup")
+    assert response.status_code == 200
+    [(args, kwargs)] = model.calls
+    assert args == ()
+    assert kwargs == {"points": [[10.0, 20.0]], "labels": [1], "boxes": None,
+                      "multimask_output": False, "name": "cup"}
+
+
+def test_a_box_over_http_is_a_click_too(served):
+    client, model = served
+    assert _ask(client, "?box=1,2,30,40").status_code == 200
+    assert model.calls[0][1]["boxes"] == [[1.0, 2.0, 30.0, 40.0]]
+
+
+def test_a_phrase_over_http_still_takes_the_phrase_path(served):
+    client, model = served
+    assert _ask(client, "?text=car&threshold=0.4").status_code == 200
+    assert model.calls == [((["car"],), {"threshold": 0.4})]
+
+
+@pytest.mark.parametrize("query", ["?text=car&point=1,2&label=1", "?text=car&box=1,2,3,4"])
+def test_a_phrase_and_a_click_over_http_are_refused_before_loading(served, query):
+    client, model = served
+    response = _ask(client, query)
+    assert response.status_code == 400
+    assert "not both" in response.json()["detail"]
+    assert model.calls == []
+
+
+def test_the_catalogue_says_sam3_takes_clicks(client):
+    info = client.get("/models").json()["sam3"]
+    assert info["prompted"] and info["clicks"]
+
+
+def test_a_click_on_a_runtime_without_the_click_path_says_what_to_do():
+    """The published CoreML graph carries the phrase path alone. Over HTTP that must be a clear
+    400 naming the runtime that can click, not a 500 about the vendor's internals."""
+    model = _clicking_model()
+    model._segmenter.click, model.runtime = None, "coreml-fp32"
+    with pytest.raises(ValueError, match="runtime='torch-fp32' to click"):
+        model.predict(np.zeros((8, 8, 3), dtype=np.uint8), points=[[1, 1]], labels=[1])
+    assert model._segmenter.asked == []

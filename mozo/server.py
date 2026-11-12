@@ -32,7 +32,8 @@ from .depth import encode as encode_depth
 from .text import comma_separated
 from .image import encode_image, load_image
 from .prepared import PreparedImages, limit_from_environment
-from .registry import BOXED, ENCODES, MODEL_REGISTRY, PREPARES, PROMPTED, get_model_info
+from .registry import (BOXED, CLICKABLE, ENCODES, MODEL_REGISTRY, PREPARES, PROMPTED,
+                       get_model_info)
 from .weights import license_of
 from .workflow.api import router as workflow_router
 
@@ -439,8 +440,9 @@ def predict(
     ),
     point: Optional[List[str]] = Query(
         None,
-        description="A click, as x,y in the image's own pixels, for promptable models. Repeat "
-                    "it to give several: ?point=820,640&point=900,700. Each needs a ?label=.",
+        description="A click, as x,y in the image's own pixels, for promptable models and "
+                    "SAM 3. Repeat it to give several: ?point=820,640&point=900,700. Each needs "
+                    "a ?label=. On SAM 3, give a click or ?text=, not both.",
     ),
     label: Optional[List[int]] = Query(
         None,
@@ -489,7 +491,9 @@ def predict(
             Required by every task in :data:`~mozo.registry.PROMPTED`, ignored by the rest. Deliberately *not*
             comma-separated the way ``labels`` is: a prompt is free text, and ``"a person,
             holding a mug"`` is one concept rather than two.
-        point: A click, as ``x,y`` in the image's own pixels, for promptable models. Repeatable.
+        point: A click, as ``x,y`` in the image's own pixels, for the families in
+            :data:`~mozo.registry.CLICKABLE`. Repeatable. On SAM 3 it takes the click path,
+            and cannot be combined with *text*.
         label: ``1`` to include the matching *point*, ``0`` to exclude it. One per point, in the
             same order, and required with them.
         box: A box, as ``x1,y1,x2,y2`` in the image's own pixels. Repeatable. Promptable models
@@ -516,17 +520,33 @@ def predict(
     # and failed to load.
     task = _catalogue_entry(family, variant)["task_type"]
 
+    # Whether this request is a click: always, for a promptable family; for one that also answers
+    # phrases -- SAM 3 -- when it is given ?point= or ?box=, which mean "this one thing" as they do
+    # for SAM 2. Not with a phrase as well: a box beside a phrase is an example of the concept in
+    # SAM 3, which this does not take yet, and reading the pair either way would answer a question
+    # the caller did not ask.
+    clicked = task == "promptable_segmentation" or (family in CLICKABLE and bool(point or box))
+    if clicked and text and task in PROMPTED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{family} takes ?text= or ?point=/?box=, not both. A box beside a phrase is "
+                   "an example of the concept, which this server does not take yet; send the "
+                   "phrase alone, or the click alone.",
+        )
+
     # Settled here rather than beside the call: nothing about it needs the image or the model,
     # and asking first is what keeps a forgotten parameter from costing a decode and a
     # multi-gigabyte load before the caller is told they forgot it.
     # Deliberately the adapter's own rule, not a looser one. A guard that accepted
     # ``?text=car&text=`` would hand the caller the same 400 from the adapter, but only after
     # decoding the image and loading the weights -- which is the cost this exists to avoid.
-    if task in PROMPTED and (not text or any(not t.strip() for t in text)):
+    if task in PROMPTED and not clicked and (not text or any(not t.strip() for t in text)):
         raise HTTPException(
             status_code=400,
             detail=f"{family} is prompted: pass ?text=... naming what to look for, and give "
-                   "every one a concept. Repeat it for several: ?text=car&text=person.",
+                   "every one a concept. Repeat it for several: ?text=car&text=person."
+                   + (" Or point at something: ?point=x,y with a ?label=1, or "
+                      "?box=x1,y1,x2,y2." if family in CLICKABLE else ""),
         )
 
     # Same reasoning as above: settled before the image is decoded and the weights are loaded,
@@ -561,7 +581,7 @@ def predict(
         )
         raise HTTPException(status_code=400, detail=detail)
 
-    if task == "promptable_segmentation":
+    if clicked:
         if not points and not corners:
             raise HTTPException(
                 status_code=400,
@@ -596,13 +616,13 @@ def predict(
             parsed = comma_separated(labels) or None
             return JSONResponse(
                 content=model.predict(image, labels=parsed or None, **floor).to_dict())
-        if task in PROMPTED:
-            return JSONResponse(content=model.predict(image, text, **floor).to_dict())
-        if task == "promptable_segmentation":
+        if clicked:
             return JSONResponse(content=model.predict(
                 image, points=points, labels=marks, boxes=corners,
                 multimask_output=multimask, name=name,
             ).to_dict())
+        if task in PROMPTED:
+            return JSONResponse(content=model.predict(image, text, **floor).to_dict())
         if task == "pose_estimation":
             return JSONResponse(content=model.predict(image, _subjects(corners)).to_dict())
         if task == "image_inpainting":
@@ -758,6 +778,9 @@ def list_models():
             "encodes": sorted(ENCODES.get(family, ())),
             # Whether /prepare and ?sha256= apply: an image can be encoded ahead of its prompts.
             "prepares": family in PREPARES,
+            # Whether ?point= and ?box= segment the one thing pointed at. Every promptable
+            # family, and SAM 3 beside its phrases; the task name alone cannot say so.
+            "clicks": family in CLICKABLE,
         }
         # Registry order, so narrowing removes entries without reshuffling the rest.
         for family, entry in MODEL_REGISTRY.items() if family in deployed

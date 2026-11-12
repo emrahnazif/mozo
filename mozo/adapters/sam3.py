@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""mozo's SAM 3 adapter: a phrase and an image in, PixelFlow detections out.
+"""mozo's SAM 3 adapter: a phrase or a click and an image in, PixelFlow detections out.
 
 Every other family in mozo answers a fixed question -- "where are the 80 COCO classes", "how far
 away is each pixel". SAM 3 answers whatever you ask it, so its ``predict`` takes a *prompt*, and
@@ -9,6 +9,10 @@ That fits mozo's rule that a class name comes from the weights or from the user 
 invented. Here it comes from the user, literally -- the phrase you searched for is the name every
 detection carries. There is no class list to resolve, so this adapter does not consult
 :mod:`mozo.labels` at all.
+
+It also answers a click the way SAM 2 does -- points and boxes in, the one thing pointed at out,
+in the same shape SAM 2 returns -- from SAM 3's own click head and the same image encode the
+phrase used.
 
 **The weights are not Apache-2.0.** SAM 3's checkpoints carry Meta's SAM License, which restricts
 what they may be used for and binds whoever you serve predictions to. See the NOTICE published
@@ -20,7 +24,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
 import torch
@@ -30,6 +34,7 @@ from ..runtimes import CoreMLRunner, get_default_device, select_runtime
 from ..vendors.sam3_deploy import Segmenter
 from ..weights import artifacts, framework_of, resolve
 from ._prepare import Preparing
+from ._promptable import candidates
 
 try:
     import pixelflow as pf
@@ -88,7 +93,7 @@ class GraphVision:
 
 
 class Sam3Predictor(Preparing):
-    """Concept segmentation: name a thing, get every instance of it.
+    """Concept segmentation -- name a thing, get every instance of it -- and clicks.
 
     Args:
         variant: Which published model. Meta ships one, so there is one name.
@@ -108,6 +113,7 @@ class Sam3Predictor(Preparing):
         >>> found[0].class_name                                # doctest: +SKIP
         'taxi'
         >>> many = model.predict("street.jpg", ["taxi", "cyclist"])   # doctest: +SKIP
+        >>> one = model.predict("street.jpg", points=[[820, 640]], labels=[1])   # doctest: +SKIP
     """
 
     #: Meta publishes a single SAM 3 rather than a size ladder, so there is no choice to make.
@@ -155,32 +161,87 @@ class Sam3Predictor(Preparing):
     def predict(
         self,
         image: Union[str, Path, bytes, np.ndarray],
-        text: Union[str, Sequence[str]],
+        text: Union[str, Sequence[str], None] = None,
         threshold: float = 0.5,
+        *,
+        points: Any = None,
+        labels: Any = None,
+        boxes: Any = None,
+        multimask_output: bool = True,
+        name: Union[str, Sequence[str], None] = None,
     ) -> "pf.detections.Detections":
-        """Find every instance of each concept in ``text``.
+        """Find every instance of each concept in ``text`` -- or segment what a click points at.
+
+        Give a phrase, or give clicks; not both. A box beside a phrase means something else in
+        SAM 3 -- an example of the concept, "find more like this" -- which this does not take yet,
+        so the combination is refused rather than read one way or the other.
 
         Args:
             image: A file path, encoded image bytes, or an ``HxWx3`` RGB ``uint8`` array.
             text: One concept as a noun phrase -- ``"taxi"``, ``"yellow school bus"`` -- or
                 several, as a sequence. Each is up to 32 tokens; longer is truncated. Several
                 prompts share one image encode but each pays its own decode.
-            threshold: Confidence floor.
+            threshold: Confidence floor for a phrase's instances. A click returns every
+                candidate with its predicted IoU instead, as SAM 2 does.
+            points: ``(N, 2)`` or ``(B, N, 2)`` x, y clicks in the image's own pixels.
+            labels: ``(N,)`` or ``(B, N)``, 1 for a point to include and 0 for one to exclude.
+                Required with *points*.
+            boxes: ``(4,)`` or ``(B, 4)`` x1, y1, x2, y2 around the one thing to segment.
+            multimask_output: Return three candidate masks per click rather than one. Worth
+                keeping on for a single click, which is ambiguous about whether you meant the part
+                or the whole.
+            name: What to call what a click pointed at. One name, or one per prompt. Omitted,
+                every click's detection carries ``class_name=None``.
 
         Returns:
-            A PixelFlow ``Detections`` carrying a box, a mask and a score per instance, with
-            ``class_name`` naming the prompt that found it. With several prompts this is one
-            result carrying several classes rather than one result per prompt.
+            For a phrase, a PixelFlow ``Detections`` carrying a box, a mask and a score per
+            instance, with ``class_name`` naming the prompt that found it. With several prompts
+            this is one result carrying several classes rather than one result per prompt.
 
             Instances found by different prompts may overlap: ask for ``"car"`` and
             ``"vehicle"`` and the same car comes back twice, under each name. That is what was
             asked for, so nothing here suppresses it.
 
+            For a click, what SAM 2 returns: one row per candidate mask, best first within each
+            prompt, with the box enclosing it and the model's predicted IoU as the score.
+            ``class_id`` is the index of the prompt.
+
         Raises:
-            ValueError: If any concept is empty, or none is given. SAM 3 will happily encode the
-                empty string and return whatever it finds most salient, which is not what an
-                empty prompt means.
+            ValueError: If both a phrase and a click are given, or neither; if any concept is
+                empty; or if points arrive without labels. SAM 3 will happily encode the empty
+                string and return whatever it finds most salient, which is not what an empty
+                prompt means.
+                Also for a click on a runtime whose image encoder carries the phrase path only
+                -- the published CoreML graph does, for now.
         """
+        clicked = points is not None or labels is not None or boxes is not None
+        if clicked and text is not None:
+            raise ValueError(
+                "SAM 3 takes a phrase or a click, not both. A box beside a phrase is an example "
+                "of the concept, which mozo does not take yet; send the phrase alone, or the "
+                "click alone."
+            )
+        if clicked:
+            if self._segmenter.click is None:
+                raise ValueError(
+                    f"SAM 3 on {self.runtime} answers phrases only: its image encoder graph "
+                    "carries the phrase path and not the click path. Load it with "
+                    "runtime='torch-fp32' to click."
+                )
+            pixels = load_image(image)
+            self._after_prepare(pixels)
+            found = self._segmenter.segment(
+                pixels, points=points, labels=labels, boxes=boxes,
+                multimask_output=multimask_output,
+            )
+            return candidates(found["masks"].cpu().numpy(), found["scores"].float().cpu().numpy(),
+                              name, self.device)
+        if text is None:
+            raise ValueError(
+                "SAM 3 needs a concept to look for or a click: pass text=, or points= and labels=, "
+                "or boxes=."
+            )
+
         prompts = [text] if isinstance(text, str) else list(text)
         if not prompts:
             raise ValueError("SAM 3 needs a concept to look for; no text was given.")

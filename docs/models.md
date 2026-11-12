@@ -269,9 +269,17 @@ Two ways to prompt it, off one checkpoint:
   "person", "dog"])` — and you get one result carrying several classes, with `class_id` indexing
   the prompts. Instances found by different prompts may overlap: ask for `"car"` and `"vehicle"`
   and the same car comes back under both names.
-- **Point at one thing** — `Segmenter.segment(image, points, labels)` takes clicks (`1` include,
-  `0` exclude), a box, or a previous mask to refine, and returns three candidate masks with
-  predicted IoU. Reached through `mozo.vendors.sam3_deploy` rather than the adapter for now.
+- **Point at one thing** — `predict(image, points=[[x, y]], labels=[1])` takes clicks (`1`
+  include, `0` exclude), `boxes=`, or both, and returns what SAM 2 returns: the candidate masks,
+  best first, each with its box and predicted IoU. Over HTTP it is `?point=x,y&label=1` or
+  `?box=x1,y1,x2,y2`. A phrase and a click in one call are refused — a box beside a phrase is an
+  *example* of the concept in SAM 3, which mozo does not take yet. Clicks need the torch runtime
+  for now: the published CoreML graph carries the phrase path only, and says so rather than
+  guessing.
+
+One image encode serves both, as in Meta's own image path: a click on a photograph already
+searched by phrase costs only its decoder, and `/prepare` warms both. Click masks match
+`facebookresearch/sam3`'s `predict_inst` bit for bit, its hole filling included.
 
 Prompts are up to 32 tokens. Inference is a fixed 1008×1008 square — SAM 3 squashes rather than
 letterboxing, so aspect ratio is not preserved.

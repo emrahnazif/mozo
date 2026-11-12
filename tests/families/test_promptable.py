@@ -16,14 +16,20 @@ import numpy as np
 import pytest
 
 from mozo.adapters._promptable import bounds
-from mozo.registry import MODEL_REGISTRY, get_model_info
+from mozo.registry import CLICKABLE, MODEL_REGISTRY, get_model_info
 from mozo.weights import WeightsError
 
-#: Every family the registry says answers a click. Discovered, not listed.
-FAMILIES = sorted(
-    family for family, entry in MODEL_REGISTRY.items()
-    if entry["task_type"] == "promptable_segmentation"
-)
+#: Every family the registry says answers a click -- the promptable ones, and SAM 3, whose click
+#: head answers in the same shape. Discovered, not listed.
+FAMILIES = sorted(CLICKABLE)
+
+
+def test_every_promptable_family_takes_clicks():
+    """``CLICKABLE`` is a family set because SAM 3 is in it without being promptable by task;
+    a promptable family missing from it would lose ``?point=`` over HTTP."""
+    promptable = {family for family, entry in MODEL_REGISTRY.items()
+                  if entry["task_type"] == "promptable_segmentation"}
+    assert promptable <= CLICKABLE <= set(MODEL_REGISTRY)
 
 
 def test_more_than_one_family_was_discovered():
@@ -85,12 +91,22 @@ def test_ranking_keeps_each_mask_with_its_own_score(model, image, click):
     """Sorting scores and masks apart would be invisible in the score column and wrong in every
     mask, so the two are checked against each other rather than each on its own."""
     found = model.predict(image, **click)
-    raw = model._segmenter.predict(image, **click)
+    masks, scores = _raw(model, image, click)
 
     for row in found:
         mask = np.asarray(row.masks[0] if isinstance(row.masks, list) else row.masks)
-        candidate = int(np.argmin(np.abs(raw.scores[0] - row.confidence)))
-        assert mask.sum() == raw.masks[0, candidate].sum()
+        candidate = int(np.argmin(np.abs(scores[0] - row.confidence)))
+        assert mask.sum() == masks[0, candidate].sum()
+
+
+def _raw(model, image, click):
+    """The vendor's own answer to a click, unranked: ``(masks, scores)`` as arrays. SAM 3's
+    segmenter answers clicks through ``segment``, its ``predict`` being the phrase path."""
+    if hasattr(model._segmenter, "segment"):
+        found = model._segmenter.segment(image, **click)
+        return found["masks"].cpu().numpy(), found["scores"].float().cpu().numpy()
+    found = model._segmenter.predict(image, **click)
+    return found.masks, found.scores
 
 
 def test_nothing_names_what_was_clicked_unless_the_caller_does(model, image, click):

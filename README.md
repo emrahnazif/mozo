@@ -76,7 +76,7 @@ Boxes for anything you can name, from a phrase rather than a fixed class list.
 |---|---|---|---|
 | `grounding_dino` | `tiny` `base` | Apache-2.0 | descriptions, ≤256 tokens total |
 | `owlv2` | `base` `base-ensemble` `large` `large-ensemble` | Apache-2.0 | phrases, ≤16 tokens |
-| `sam3` | `sam3` | SAM License | phrases, ≤32 tokens |
+| `sam3` | `sam3` | SAM License | phrases, ≤32 tokens — or a click, as below |
 
 ### Zero-shot classification and embeddings
 
@@ -97,6 +97,7 @@ A mask from a click or a box. Returns detections, one row per mask.
 |---|---|---|---|
 | `sam2` | `tiny` `small` `base_plus` `large` | Apache-2.0 | points, box, or both |
 | `edgetam` | `edgetam` | Apache-2.0 | points, box, or both |
+| `sam3` | `sam3` | SAM License | points, box, or both — on the torch runtime |
 
 ### Text recognition
 
@@ -293,10 +294,10 @@ Content-Type: multipart/form-data
 | `threshold` | detection, text-prompted | Confidence floor. Omitted, the family's own published default applies — they differ, and the endpoint deliberately does not restate them. |
 | `labels` | detection | Comma-separated class names overriding the model's own. |
 | `text` | text-prompted | The concept to look for. Required by those families. Repeat it for several. |
-| `point`, `label` | promptable | A click as `x,y`, and `1` to include or `0` to exclude. Repeat both together. |
-| `box` | promptable | A box as `x1,y1,x2,y2`. May be combined with points. |
-| `name` | promptable | What to call what you pointed at. |
-| `multimask` | promptable | Three candidate masks rather than one. Default `true`. |
+| `point`, `label` | promptable, SAM 3 | A click as `x,y`, and `1` to include or `0` to exclude. Repeat both together. On SAM 3, a click or `text`, not both. |
+| `box` | promptable, SAM 3 | A box as `x1,y1,x2,y2`. May be combined with points. |
+| `name` | promptable, SAM 3 | What to call what you pointed at. |
+| `multimask` | promptable, SAM 3 | Three candidate masks rather than one. Default `true`. |
 
 `text` is deliberately not comma-separated the way `labels` is: a prompt is free text, so
 `?text=a person, holding a mug` stays one concept rather than becoming two wrong ones. `label` is
@@ -315,6 +316,9 @@ curl -X POST "http://localhost:8000/predict/edgetam/edgetam?point=820,640&label=
 # A box, one mask, named by you
 curl -X POST "http://localhost:8000/predict/sam2/tiny?box=40,60,300,480&multimask=false&name=cat" \
   -F "file=@street.jpg"
+
+# SAM 3 answers a click the same way, from the encode its phrases use
+curl -X POST "http://localhost:8000/predict/sam3/sam3?point=820,640&label=1" -F "file=@street.jpg"
 
 # Encode once when the image opens, then click by its sha256 -- no upload per click
 curl -X POST "http://localhost:8000/prepare/sam2/large" -F "file=@street.jpg"   # {"sha256": "3f9a..."}

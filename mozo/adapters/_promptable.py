@@ -41,7 +41,7 @@ try:
 except ImportError:  # pragma: no cover - depends on the install
     raise ImportError("PixelFlow is not installed. Install it with: pip install pixelflow") from None
 
-__all__ = ["PromptablePredictor"]
+__all__ = ["PromptablePredictor", "candidates"]
 
 
 _log = logging.getLogger(__name__)
@@ -68,6 +68,62 @@ def bounds(masks: np.ndarray) -> np.ndarray:
         if len(rows) and len(columns):
             boxes[index] = (columns[0], rows[0], columns[-1] + 1, rows[-1] + 1)
     return boxes
+
+
+def candidates(masks: np.ndarray, scores: np.ndarray, name: Union[str, Sequence[str], None],
+               device: str) -> "pf.detections.Detections":
+    """What a click returns, from any model's answer to one: every candidate mask as a row.
+
+    Shared by every family that takes clicks -- the promptable ones here, and SAM 3, whose click
+    head answers the same question in the same shape -- so a click means the same thing whichever
+    model it was sent to.
+
+    Args:
+        masks: ``(B, C, H, W)`` bool, ``C`` candidates for each of ``B`` prompts.
+        scores: ``(B, C)`` the model's own predicted IoU for each.
+        name: What to call what was pointed at -- one name, one per prompt, or ``None``.
+        device: Where the model ran, so an accelerator's cache can be released.
+
+    Returns:
+        A PixelFlow ``Detections`` with one row per candidate, best first within each prompt,
+        ``class_id`` the index of the prompt that produced it.
+
+    Raises:
+        ValueError: If *name* is a sequence whose length is not the number of prompts.
+    """
+    prompts, count = masks.shape[:2]
+    names = [name] if isinstance(name, str) else (list(name) if name is not None else None)
+    if names is not None and len(names) != prompts:
+        raise ValueError(f"{len(names)} names for {prompts} prompt(s); give one each or none")
+
+    # Each prompt's candidates, best first. The model emits them in its own order -- the
+    # mask tokens are trained to specialise towards whole, part and subpart -- which means
+    # the highest-scoring one is not the first, and ``found[0]`` would otherwise be whichever
+    # candidate the model happened to put in slot zero. Every other family in mozo hands back
+    # ranked detections, so these are ranked too. Sorted *within* each prompt rather than
+    # globally, so a batch stays grouped and ``class_id`` still runs 0, 0, 0, 1, 1, 1.
+    order = np.argsort(-scores, axis=1, kind="stable")
+    rows = (np.arange(prompts)[:, None], order)
+    ranked = masks[rows].reshape(prompts * count, *masks.shape[2:])
+    ranked_scores = scores[rows].reshape(-1).astype(np.float32)
+    # The prompt index, repeated across that prompt's candidates. With one prompt this is all
+    # zeros, which is what a single unnamed thing should look like; with several it is what
+    # keeps them apart.
+    class_ids = np.repeat(np.arange(prompts, dtype=np.int64), count)
+
+    # Where ``_yolo`` and ``rfdetr`` release it: at the end of a call, which is a point that
+    # runs. ``ModelManager`` holds every model for the life of the process, so a finalizer
+    # would fire at interpreter shutdown or never.
+    if device == "mps":
+        torch.mps.empty_cache()
+
+    return pf.detections.from_arrays(
+        boxes=bounds(ranked),
+        scores=ranked_scores,
+        class_ids=class_ids,
+        masks=ranked,
+        labels=names,
+    )
 
 
 class PromptablePredictor(Preparing):
@@ -190,37 +246,4 @@ class PromptablePredictor(Preparing):
             pixels, points=points, labels=labels, boxes=boxes,
             multimask_output=multimask_output,
         )
-
-        prompts, candidates = found.masks.shape[:2]
-        names = [name] if isinstance(name, str) else (list(name) if name is not None else None)
-        if names is not None and len(names) != prompts:
-            raise ValueError(f"{len(names)} names for {prompts} prompt(s); give one each or none")
-
-        # Each prompt's candidates, best first. The model emits them in its own order -- the
-        # mask tokens are trained to specialise towards whole, part and subpart -- which means
-        # the highest-scoring one is not the first, and ``found[0]`` would otherwise be whichever
-        # candidate the model happened to put in slot zero. Every other family in mozo hands back
-        # ranked detections, so these are ranked too. Sorted *within* each prompt rather than
-        # globally, so a batch stays grouped and ``class_id`` still runs 0, 0, 0, 1, 1, 1.
-        order = np.argsort(-found.scores, axis=1, kind="stable")
-        rows = (np.arange(prompts)[:, None], order)
-        masks = found.masks[rows].reshape(prompts * candidates, *found.masks.shape[2:])
-        scores = found.scores[rows].reshape(-1).astype(np.float32)
-        # The prompt index, repeated across that prompt's candidates. With one prompt this is all
-        # zeros, which is what a single unnamed thing should look like; with several it is what
-        # keeps them apart.
-        class_ids = np.repeat(np.arange(prompts, dtype=np.int64), candidates)
-
-        # Where ``_yolo`` and ``rfdetr`` release it: at the end of a call, which is a point that
-        # runs. ``ModelManager`` holds every model for the life of the process, so a finalizer
-        # would fire at interpreter shutdown or never.
-        if self.device == "mps":
-            torch.mps.empty_cache()
-
-        return pf.detections.from_arrays(
-            boxes=bounds(masks),
-            scores=scores,
-            class_ids=class_ids,
-            masks=masks,
-            labels=names,
-        )
+        return candidates(found.masks, found.scores, name, self.device)

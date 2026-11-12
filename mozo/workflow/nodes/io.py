@@ -396,7 +396,7 @@ def annotation_line(detections: Detections, *, label: str, width: int, height: i
     Args:
         detections: What was found in the image.
         label: The image's name: its file name without the extension, which is what
-            :func:`read_annotations` matches on.
+            :func:`read_annotations` matches on. Must be unique within one file.
         width: The image's width in pixels -- the one its boxes were measured against.
         height: Its height in pixels.
         index: Its place in the run.
@@ -434,8 +434,8 @@ def read_annotations(image: Image, run: Context, state: State,
     would otherwise hand every one of them some other picture's boxes, which look like boxes and
     are wrong.
 
-    Anything can write the file through :func:`annotation_line`, the same function this node's
-    writer uses.
+    **Names must be unique within the file**: two lines for one name are refused. Anything can
+    write the file through :func:`annotation_line`, the same function this node's writer uses.
 
     **An image the file has no line for is refused**, naming it. ``save_annotations`` writes a line
     for every image it saw, even an empty one, so a missing line means the image was never
@@ -495,13 +495,23 @@ _DETECTION_FIELDS = frozenset(inspect.signature(pf.Detection.__init__).parameter
 
 
 def _index_lines(path: str) -> dict:
-    """``{label: byte offset}`` for a ``save_annotations`` file: where each image's line starts."""
-    where = {}
+    """``{label: byte offset}`` for a ``save_annotations`` file: where each image's line starts.
+
+    Two lines with one label are refused, not resolved: two images sharing a name -- an ``a.jpg``
+    from each of two folders, or an ``a.jpg`` and an ``a.png`` in one -- would otherwise both get
+    the first one's boxes, which look like boxes and are wrong. The size check catches that only
+    when the two sizes differ.
+    """
+    found, offset = {}, 0  # {label: (byte offset, line number)}
     with open(path, "rb") as handle:
-        while True:
-            offset = handle.tell()
-            text = handle.readline()
-            if not text:
-                return where
+        for number, text in enumerate(handle, start=1):
             if text.strip():
-                where.setdefault(json.loads(text).get("label"), offset)
+                label = json.loads(text).get("label")
+                if label in found:
+                    raise ValueError(
+                        f"{path} has two lines for {label!r} (lines {found[label][1]} and "
+                        f"{number}): two images share that name, so neither can be told apart. "
+                        f"Give them distinct file names.")
+                found[label] = (offset, number)
+            offset += len(text)
+    return {label: at for label, (at, _) in found.items()}

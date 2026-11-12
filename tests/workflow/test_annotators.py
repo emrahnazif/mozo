@@ -303,6 +303,13 @@ class TestWritingAnnotations:
         _save(FIXTURE, saved, THREE)
         assert saved.read_text() == _line(THREE)
 
+    def test_two_lines_for_one_name_are_refused_not_resolved(self, tmp_path):
+        """An a.jpg from each of two folders: neither may get the other's boxes."""
+        annotations = tmp_path / "boxes.jsonl"
+        annotations.write_text(_line(THREE) + _line(pf.Detections(), index=1))
+        [failed] = [e for e in _read_back(annotations).stream() if e.status == "failed"]
+        assert f"two lines for '{FIXTURE.stem}' (lines 1 and 2)" in failed.error
+
 
 # --- Prompts as a list -------------------------------------------------------------------------
 

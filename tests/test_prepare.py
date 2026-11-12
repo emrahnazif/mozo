@@ -177,21 +177,30 @@ class FakeModel:
 
 @pytest.fixture
 def served(client, monkeypatch):
-    """The server with a fake model and an empty store of its own."""
+    """The server with a fake model and an empty store of its own.
+
+    The store is swapped by hand rather than with ``monkeypatch.setattr``: Starlette's ``State``
+    keeps its attributes in a dict of its own, and pytest 9.2's monkeypatch deletes such an
+    attribute on undo instead of restoring it -- every test after the first then found none.
+    """
     model = FakeModel()
     monkeypatch.setattr(client.app.state.model_manager, "get_model",
                         lambda family, variant, **kw: model)
-    monkeypatch.setattr(client.app.state, "prepared", PreparedImages(10**9))
-    return client, model
+    original = client.app.state.prepared
+    client.app.state.prepared = PreparedImages(10**9)
+    yield client, model
+    client.app.state.prepared = original
+
+
+@pytest.fixture(scope="module")
+def upload():
+    """The fixture photograph as uploaded bytes, and the sha256 a client would compute."""
+    data = FIXTURE.read_bytes()
+    return data, hashlib.sha256(data).hexdigest()
 
 
 class TestOverHTTP:
     CLICK = {"point": "10,10", "label": "1"}
-
-    @pytest.fixture(scope="class")
-    def upload(self):
-        data = FIXTURE.read_bytes()
-        return data, hashlib.sha256(data).hexdigest()
 
     def test_prepare_answers_with_the_files_own_sha256_and_encodes(self, served, upload):
         client, model = served

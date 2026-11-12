@@ -12,7 +12,7 @@ import json
 
 from click.testing import CliRunner
 
-from conftest import FIXTURE
+from conftest import FIXTURE, document
 from mozo.cli import cli
 
 
@@ -57,7 +57,7 @@ def test_the_file_is_bound_by_kind_not_by_a_name_written_here(workflow):
     renamed. The literal that used to be here did not."""
     from mozo.workflow import Workflow
 
-    assert Workflow.load(str(workflow)).file_parameter == "source"
+    assert Workflow.load(str(workflow)).file_parameter == "load.source"
     assert CliRunner().invoke(
         cli, ["run", str(workflow), "--file", str(FIXTURE)]).exit_code == 0
 
@@ -96,3 +96,43 @@ def test_the_bar_ends_its_line_before_anything_else_prints(capsys):
     assert "rfdetr/nano" in lines[0] and f"[{'#' * 15}{'.' * 15}]" in lines[0]  # half way
     assert lines[1] == "[mozo] downloading LICENSE (0.0 MB)"
     assert lines[2].strip().startswith("rfdetr/nano") and lines[2].endswith("MB")
+
+
+def _two_grayscale(tmp_path, **extra):
+    """read_media into two resizes, which share a parameter name."""
+    path = tmp_path / "twins.json"
+    path.write_text(json.dumps({**extra, **document(
+        {"load": ("read_media", {}), "a": ("resize", {}), "b": ("resize", {})},
+        [("load", "image", "a", "image"), ("load", "image", "b", "image")])}))
+    return path
+
+
+def test_set_reaches_one_node_by_its_id_and_is_typed_by_its_declaration(tmp_path):
+    result = CliRunner().invoke(cli, [
+        "run", str(_two_grayscale(tmp_path)), "--file", str(FIXTURE), "--test",
+        "--set", "a.height=40", "--set", "b.height=20"])
+    assert result.exit_code == 0, result.output
+    assert "a: a 60x40 image" in result.output and "b: a 30x20 image" in result.output
+
+
+def test_set_with_a_shared_name_says_how_to_say_which(tmp_path):
+    result = CliRunner().invoke(cli, [
+        "run", str(_two_grayscale(tmp_path)), "--file", str(FIXTURE), "--set", "height=40"])
+    assert result.exit_code != 0
+    assert "'a.height' or 'b.height'" in result.output
+
+
+def test_a_named_workflow_says_what_it_is_before_it_runs(tmp_path):
+    path = _two_grayscale(tmp_path, name="Two sizes", description="One photo, twice.")
+    result = CliRunner().invoke(cli, ["run", str(path), "--file", str(FIXTURE), "--test",
+                                      "--set", "a.height=40", "--set", "b.height=20"])
+    assert result.output.startswith("Two sizes -- One photo, twice.\n")
+
+
+def test_a_file_that_is_not_a_workflow_is_one_line_not_a_traceback(tmp_path):
+    path = tmp_path / "wf.json"
+    path.write_text(json.dumps(document({"a": ("invent", {})})))
+    result = CliRunner().invoke(cli, ["run", str(path)])
+    assert result.exit_code == 1
+    assert "is not a workflow: unknown node 'invent'" in result.output
+    assert "Traceback" not in result.output

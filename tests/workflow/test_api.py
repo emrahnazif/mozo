@@ -50,6 +50,16 @@ class TestTheCatalogue:
         assert variant["kind"] == "select"
         assert "seg-nano" in variant["options"]
 
+    def test_the_parameters_that_take_prompts_say_so(self, client):
+        """So a client of the HTTP API finds them by kind, as ``prompt_parameters`` does."""
+        offered = {node["name"]: node for node in client.get("/workflow/nodes").json()["nodes"]}
+        marked = sorted(name for name, node in offered.items()
+                        if any(p.get("prompts") for p in node["parameters"])
+                        and node["category"] != "Test")
+        assert marked == ["clip", "grounding_dino", "owlv2", "sam3", "siglip2"]
+        [text] = [p for p in offered["sam3"]["parameters"] if p.get("prompts")]
+        assert text["name"] == "text" and text["kind"] == "list"
+
 
 class TestValidating:
     """Whether a document is a workflow, without running it."""
@@ -116,6 +126,17 @@ class TestRunning:
             files={"file": ("photo.jpg", payload, "image/jpeg")})
         assert response.status_code == 400
         assert "no parameter" in response.json()["detail"]
+
+    def test_an_override_can_name_one_node(self, client, payload):
+        twins = as_json({"load": ("read_media", {}), "a": ("resize", {}), "b": ("resize", {})},
+                        [("load", "image", "a", "image"), ("load", "image", "b", "image")])
+        refused = client.post("/workflow/run", data={
+            "workflow": twins, "inputs": json.dumps({"height": 40})},
+            files={"file": ("photo.jpg", payload, "image/jpeg")})
+        assert refused.status_code == 400 and "'a.height' or 'b.height'" in refused.json()["detail"]
+
+        answer = _run(client, twins, payload, inputs=json.dumps({"a.height": 40, "b.height": 20}))
+        assert set(answer["results"]) >= {"a", "b"}
 
     def test_an_uploaded_video_runs_too(self, client, clip):
         """The complaint this change came from: the picker would not take an ``.mp4``."""

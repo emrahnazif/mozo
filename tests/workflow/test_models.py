@@ -15,7 +15,7 @@ import pixelflow as pf
 import pytest
 
 import mozo
-from conftest import FIXTURE, document, fresh_interpreter
+from conftest import FIXTURE, document, fresh_interpreter, on_cpu, require_present
 from mozo.manager import ModelManager
 from mozo.workflow import Workflow
 from mozo.workflow.node import Models, NodeSpec, Weights
@@ -326,6 +326,105 @@ class TestEveryModelNodeDeclaresItsModel:
         with pytest.raises(Asked):
             spec.run(**arguments)
         assert asked == [(spec.weights.family, spec.weights.default)]
+
+
+class TestEveryPromptedNodeIsMarked:
+    """A node that hands its model a list of prompts says so, and one that says so does."""
+
+    @pytest.mark.parametrize("spec", [s for s in _model_nodes() if s.weights], ids=lambda s: s.name)
+    def test_the_mark_and_the_call_agree(self, spec):
+        """Run the node against a model that records what it was asked. ``text=`` reaching the
+        model is the call in the node's body; the :data:`Prompts` mark is a second statement of
+        it, and this is what keeps the two equal -- a prompted node added unmarked would be
+        invisible to ``prompt_parameters``, and a host's prompts would never reach it."""
+        import numpy as np
+
+        from mozo.workflow.node import PortType
+
+        given_to_model = {}
+
+        class Asked(Exception):
+            pass
+
+        class Recording:
+            """Whatever the node calls -- ``predict``, ``cutout`` -- records and stops."""
+
+            def __getattr__(self, method):
+                def record(*args, **kwargs):
+                    given_to_model.update(kwargs)
+                    raise Asked
+                return record
+
+        one = pf.Detections()
+        one.add_detection(pf.Detection(bbox=[1, 1, 6, 6], confidence=0.9, class_id=0))
+        inputs = {PortType.IMAGE: np.zeros((8, 8, 3), dtype=np.uint8), PortType.DETECTIONS: one}
+        arguments = {port.name: inputs[port.type] for port in spec.inputs}
+        arguments |= {p.name: p.default for p in spec.parameters}
+        arguments[spec.models] = lambda family, variant, **kwargs: Recording()
+        with pytest.raises(Asked):
+            spec.run(**arguments)
+
+        marked = [p.name for p in spec.parameters if p.prompts]
+        assert bool(marked) == ("text" in given_to_model)
+        if marked:
+            [name] = marked
+            assert given_to_model["text"] == list(arguments[name])
+
+    def test_the_five_that_take_text_are_marked(self):
+        marked = sorted(spec.name for spec in _model_nodes()
+                        if any(p.prompts for p in spec.parameters))
+        assert marked == ["clip", "grounding_dino", "owlv2", "sam3", "siglip2"]
+
+
+class TestPromptList:
+    """Reading prompts: an empty entry is refused, because a prompt's position is its class_id."""
+
+    def test_a_list_is_kept_as_given(self):
+        from mozo.text import prompt_list
+
+        assert prompt_list([" bolt, M8 ", "nut"]) == ["bolt, M8", "nut"]
+
+    def test_an_empty_entry_is_refused_rather_than_dropped(self):
+        """Dropped, ``car`` would come back as class 1 when the host sent it as class 2."""
+        from mozo.text import prompt_list
+
+        with pytest.raises(ValueError, match="prompt 1 of 3 is empty"):
+            prompt_list(["person", "  ", "car"])
+
+    def test_the_old_comma_string_still_reads_as_it_did(self):
+        from mozo.text import prompt_list
+
+        assert prompt_list("person, , car") == ["person", "car"]
+        assert prompt_list(None) == []
+
+    def test_a_node_given_an_empty_prompt_fails_and_says_why(self):
+        class Unreached:
+            def predict(self, *args, **kwargs):
+                raise AssertionError("the prompts are read before the model is asked")
+
+        [failed] = [e for e in _detect("sam3").stream(models=lambda *a, **k: Unreached(),
+                                                      **{"detect.text": ["person", ""]})
+                    if e.status == "failed"]
+        assert "prompt 1 of 2 is empty" in failed.error
+
+
+def test_real_models_side_by_side_take_one_prompt_list_given_once():
+    """The brief's "done when": SAM 3 beside Grounding DINO, one list given once, both get it,
+    and each answer's class_id indexes that list."""
+    require_present("sam3", "sam3")
+    require_present("grounding_dino", "tiny")
+    workflow = Workflow.from_dict(document(
+        {"src": ("read_media", {"source": str(FIXTURE)}),
+         "sam": ("sam3", {}), "dino": ("grounding_dino", {})},
+        [("src", "image", "sam", "image"), ("src", "image", "dino", "image")]))
+    assert workflow.prompt_parameters == ("sam.text", "dino.text")
+
+    prompts = ["dog", "person", "bicycle"]
+    results = workflow.run(models=on_cpu(), **{key: prompts for key in workflow.prompt_parameters})
+    for node in ("sam", "dino"):
+        assert len(results[node]) > 0, "the fixture photograph has people in it"
+        assert all(prompts[row.class_id] == row.class_name for row in results[node])
+        assert {row.class_name for row in results[node]} >= {"person"}
 
 
 class TestTheWeightsMark:

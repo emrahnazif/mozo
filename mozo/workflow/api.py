@@ -31,7 +31,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-from .graph import NO_SOURCE, Workflow
+from .graph import NO_SOURCE, Workflow, WorkflowError
 from .registry import catalogue
 from .wire import PREVIEW_EVERY, preview as wire_preview, serialise
 
@@ -238,7 +238,7 @@ def _build(document: str) -> Workflow:
         return Workflow.from_dict(json.loads(document))
     except json.JSONDecodeError as error:
         raise HTTPException(status_code=400, detail=f"not JSON: {error}") from error
-    except (KeyError, TypeError, ValueError) as error:
+    except WorkflowError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 

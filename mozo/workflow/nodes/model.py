@@ -37,9 +37,10 @@ import numpy as np
 import pixelflow as pf
 
 from mozo.registry import get_model_info
-from mozo.text import text_list
+from mozo.text import prompt_list, text_list
 
-from ..node import Classifications, Depth, Detections, FilePath, Image, Models, Weights
+from ..node import (Classifications, Depth, Detections, FilePath, Image, Models, Prompts,
+                    Weights)
 from ..registry import node
 
 
@@ -128,7 +129,7 @@ def rfdetr_checkpoint(image: Image, models: Models, checkpoint: Optional[FilePat
 # --- Detection from a description ----------------------------------------------------------------
 
 @node(category="Detect", exclusive=True)
-def owlv2(image: Image, models: Models, text: list[str] = ["a person", "a car", "a dog"],
+def owlv2(image: Image, models: Models, text: Prompts = ["a person", "a car", "a dog"],
           variant: variants("owlv2") = "base-ensemble", threshold: float = 0.1) -> Detections:
     """OWLv2 by Google -- find anything you can name, with no training.
 
@@ -136,11 +137,11 @@ def owlv2(image: Image, models: Models, text: list[str] = ["a person", "a car", 
     ``class_name`` that prompt.
     """
     return models("owlv2", variant).predict(
-        image, text=text_list(text), threshold=threshold)
+        image, text=prompt_list(text), threshold=threshold)
 
 
 @node(category="Detect", exclusive=True)
-def grounding_dino(image: Image, models: Models, text: list[str] = ["person", "car", "dog"],
+def grounding_dino(image: Image, models: Models, text: Prompts = ["person", "car", "dog"],
                    variant: variants("grounding_dino") = "tiny",
                    threshold: float = 0.3) -> Detections:
     """Grounding DINO by IDEA -- open-vocabulary detection from a phrase.
@@ -149,13 +150,13 @@ def grounding_dino(image: Image, models: Models, text: list[str] = ["person", "c
     ``class_name`` that prompt.
     """
     return models("grounding_dino", variant).predict(
-        image, text=text_list(text), threshold=threshold)
+        image, text=prompt_list(text), threshold=threshold)
 
 
 # --- Segmentation --------------------------------------------------------------------------------
 
 @node(category="Segment", exclusive=True)
-def sam3(image: Image, models: Models, text: list[str] = ["person"],
+def sam3(image: Image, models: Models, text: Prompts = ["person"],
          variant: variants("sam3") = "sam3", threshold: float = 0.5) -> Detections:
     """SAM 3 by Meta -- masks for every instance of a concept you name.
 
@@ -163,7 +164,7 @@ def sam3(image: Image, models: Models, text: list[str] = ["person"],
     ``class_name`` that prompt.
     """
     return models("sam3", variant).predict(
-        image, text=text_list(text), threshold=threshold)
+        image, text=prompt_list(text), threshold=threshold)
 
 
 def _segment_boxes(models: Models, family: str, variant: str, image: Image,
@@ -282,25 +283,25 @@ def vitpose(image: Image, detections: Detections, models: Models,
 # --- Classification ------------------------------------------------------------------------------
 
 @node(category="Classify", exclusive=True)
-def clip(image: Image, models: Models, text: list[str] = ["a photo of a cat", "a photo of a dog"],
+def clip(image: Image, models: Models, text: Prompts = ["a photo of a cat", "a photo of a dog"],
          variant: variants("clip") = "base") -> Classifications:
     """CLIP by OpenAI -- score an image against phrases you make up.
 
     One prompt per entry, taken as given; each result's ``class_id`` is its prompt's index and its
     ``class_name`` that prompt.
     """
-    return models("clip", variant).predict(image, text=text_list(text))
+    return models("clip", variant).predict(image, text=prompt_list(text))
 
 
 @node(category="Classify", exclusive=True)
-def siglip2(image: Image, models: Models, text: list[str] = ["a photo of a cat", "a photo of a dog"],
+def siglip2(image: Image, models: Models, text: Prompts = ["a photo of a cat", "a photo of a dog"],
             variant: variants("siglip2") = "base-224") -> Classifications:
     """SigLIP 2 by Google -- zero-shot classification against phrases you make up.
 
     One prompt per entry, taken as given; each result's ``class_id`` is its prompt's index and its
     ``class_name`` that prompt.
     """
-    return models("siglip2", variant).predict(image, text=text_list(text))
+    return models("siglip2", variant).predict(image, text=prompt_list(text))
 
 
 # --- Reading -------------------------------------------------------------------------------------

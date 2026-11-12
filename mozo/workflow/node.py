@@ -44,9 +44,18 @@ from ..image import as_rgb, has_alpha
 
 __all__ = [
     "Classifications", "Color", "Connection", "Depth", "Detections", "Embedding", "Image",
-    "Context", "FilePath", "Models", "NodeSpec", "Parameter", "Port", "PortType", "Source", "State",
-    "Weights",
+    "Context", "FilePath", "Models", "NodeSpec", "Parameter", "Port", "PortType", "Prompts", "Source",
+    "State", "Weights", "WorkflowError",
 ]
+
+
+class WorkflowError(ValueError):
+    """A workflow document that cannot be a workflow: an unknown node, a bad edge, a cycle.
+
+    One error for "this file is not valid", so a caller loading one catches one thing -- and never
+    a ``KeyError``, which would also catch the caller's own bugs. Not raised for a run's overrides,
+    which are the caller's to get right rather than the file's: those stay ``KeyError``.
+    """
 
 
 class PortType(Enum):
@@ -123,6 +132,15 @@ Source = NewType("Source", str)
 #: given and the editor offers an upload for. A fixed path is a plain box, and like a source it is
 #: checked before a run starts.
 FilePath = NewType("FilePath", str)
+
+#: A parameter holding the descriptions a model is told to find or to choose between -- the
+#: prompts of SAM 3 and Grounding DINO, the labels of CLIP. A list of strings everywhere else.
+#:
+#: **The mark is a promise about the output:** each result's ``class_id`` is the index into this
+#: list and its ``class_name`` that entry. Mark a node only if it keeps it, and read the value with
+#: :func:`mozo.text.prompt_list`. Found by :attr:`~mozo.workflow.graph.Workflow.prompt_parameters`
+#: whatever the node calls it, as :data:`Source` is by ``file_parameter``.
+Prompts = NewType("Prompts", list)
 
 class Context:
     """What a node may know about the run it is in, and about this item's place in it.
@@ -390,7 +408,7 @@ _KINDS = {int: "int", float: "float", str: "str", bool: "bool", Color: "color",
           # Several strings, each exactly as written -- the editor gives one per line, so an entry
           # may hold a comma. Read it with :func:`mozo.text.text_list`, which also takes the
           # comma-separated string workflows saved before held.
-          list[str]: "list"}
+          list[str]: "list", Prompts: "list"}
 
 
 @dataclass(frozen=True)
@@ -439,6 +457,8 @@ class Parameter:
     #: The published model family whose variant this chooses, from :class:`Weights`; None
     #: for every other parameter.
     family: Optional[str] = None
+    #: Annotated :data:`Prompts`: the list whose index each result's ``class_id`` is.
+    prompts: bool = False
 
 
 @dataclass(frozen=True)
@@ -462,9 +482,11 @@ class Connection:
     @classmethod
     def from_dict(cls, data: dict) -> Connection:
         """Read one edge. Both handles are required -- a guessed port is a silent miswiring."""
+        if not isinstance(data, dict):
+            raise WorkflowError(f"an edge is an object, not {data!r}")
         for key in ("source", "sourceHandle", "target", "targetHandle"):
             if not data.get(key):
-                raise ValueError(f"edge is missing {key!r}: {data}")
+                raise WorkflowError(f"edge is missing {key!r}: {data}")
         return cls(data["source"], data["sourceHandle"], data["target"], data["targetHandle"])
 
 
@@ -792,6 +814,14 @@ class NodeSpec:
         offered = [port.name for port in self.inputs] or ["nothing -- this node takes no input"]
         raise KeyError(f"{self.name} has no input {name!r}. It takes: {offered}")
 
+    def parameter(self, name: str) -> Parameter:
+        """The parameter called *name*, or a message naming the ones that exist."""
+        for candidate in self.parameters:
+            if candidate.name == name:
+                return candidate
+        raise KeyError(f"{self.name} has no parameter {name!r}. "
+                       f"It has: {[parameter.name for parameter in self.parameters]}")
+
     def to_dict(self) -> dict:
         """The catalogue entry the editor reads. Derived, so it cannot drift from what runs."""
         return {
@@ -842,12 +872,14 @@ def _port_dict(port: Port) -> dict:
 
 
 def _parameter_dict(parameter: Parameter) -> dict:
-    """One parameter, as the editor reads it. The last two keys appear only when they apply."""
+    """One parameter, as the editor reads it. The last three keys appear only when they apply."""
     described = {"name": parameter.name, "kind": parameter.kind, "default": parameter.default}
     if parameter.options:
         described["options"] = list(parameter.options)
     if parameter.optional:
         described["optional"] = True
+    if parameter.prompts:
+        described["prompts"] = True
     return described
 
 
@@ -913,7 +945,7 @@ def _parameter(node: str, name: str, annotation: Any, default: Any) -> Parameter
             raise TypeError(f"{node}: {name}={default!r} is not one of {list(options)}")
         return Parameter(name, "select", default, options, family=family)
 
-    return Parameter(name, _kind(node, name, annotation), default)
+    return Parameter(name, _kind(node, name, annotation), default, prompts=annotation is Prompts)
 
 
 def _kind(node: str, name: str, annotation: Any) -> str:

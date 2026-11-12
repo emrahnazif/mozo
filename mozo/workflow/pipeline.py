@@ -364,7 +364,7 @@ def _report(stages: dict, elapsed: float) -> dict:
     }
 
 
-def _build(workflow, settings: dict, over: str, workers: int, model_workers: int,
+def _build(workflow, settings: dict, over: Optional[tuple], workers: int, model_workers: int,
            results: Queue, measure: bool, stopped: dict, stopped_lock: threading.Lock,
            declared: dict, folded: dict, driving=None, run=None) -> tuple:
     """Wire one stage per node. Returns ``(stages, the stages each item is fed into)``.
@@ -372,8 +372,8 @@ def _build(workflow, settings: dict, over: str, workers: int, model_workers: int
     Every node with no inputs is a source and must be woken once per item, not only the one the
     items bind to -- a graph may legally have several, since ``_check_wiring`` requires only that
     declared input ports be fed and ``_sorted`` seeds on all zero-indegree nodes. The node that
-    takes *over* is found the way the serial path finds it, by asking which settings entry holds
-    it, rather than by assuming it is the topological root.
+    takes *over* is the one it names -- ``(node id, parameter)`` -- rather than whichever happens
+    to be the topological root.
 
     A node in *folded* was already run once by :meth:`~mozo.workflow.graph.Workflow._fold` and
     gets no stage at all: what it produced is settled, so its readers take it from their own
@@ -392,9 +392,9 @@ def _build(workflow, settings: dict, over: str, workers: int, model_workers: int
         # the same road a folded constant takes, travelled once per item instead of once.
         entry = {}
     else:
-        bound = next((node for node, values in settings.items() if over in values), sources[0])
+        bound, name = over if over is not None else (sources[0], None)
         #: Which port each source is woken on -- the one the items bind to, or a bare trigger.
-        entry = {node: (over if node == bound else _TRIGGER) for node in sources}
+        entry = {node: (name if node == bound else _TRIGGER) for node in sources}
 
     stages = {}
     for node_id in workflow.order:
@@ -402,8 +402,8 @@ def _build(workflow, settings: dict, over: str, workers: int, model_workers: int
             continue
         step = workflow.steps[node_id]
         arguments = step.arguments(settings)
-        if over is not None:
-            arguments.pop(over, None)                    # supplied per item, not once
+        if over is not None and node_id == over[0]:
+            arguments.pop(over[1], None)                 # supplied per item, not once
         ports = set()
         for target_port, (source_id, _) in workflow.incoming[node_id].items():
             if source_id in folded:
@@ -434,7 +434,7 @@ def _build(workflow, settings: dict, over: str, workers: int, model_workers: int
     return stages, entries
 
 
-def run_pipelined(workflow, items, over: str, settings: dict, workers: int,
+def run_pipelined(workflow, items, over: Optional[tuple], settings: dict, workers: int,
                   on_error: Optional[Callable] = None, model_workers: int = 1,
                   stats: Optional[dict] = None, folded: Optional[dict] = None,
                   folded_results: Optional[dict] = None, driving: Optional[str] = None,

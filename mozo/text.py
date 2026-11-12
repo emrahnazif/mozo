@@ -23,14 +23,34 @@ def comma_separated(text: Optional[str]) -> list:
 
 
 def text_list(value: Union[str, Sequence[str], None]) -> list:
-    """Several strings -- prompts, class names -- as a list, each exactly as given.
+    """Several strings -- class names, keypoint names -- as a list, each exactly as given.
 
-    A list is taken as it is, a comma inside an entry included, because a prompt is free text and
-    ``"bolt, M8"`` is one concept, not two. Splitting it would hand every later prompt the wrong
-    ``class_id``: results that look right and are not. A string is the old form, from workflows
-    saved before these were lists, and keeps its old meaning: split by :func:`comma_separated`.
-    The editor splits one the same way when it shows it, so editing it keeps what it meant.
+    A list is taken as it is, a comma inside an entry included: ``"bolt, M8"`` is one name, not
+    two. Empty entries are dropped. A string is the old form, from workflows saved before these
+    were lists, and keeps its old meaning: split by :func:`comma_separated`. The editor splits one
+    the same way when it shows it, so editing it keeps what it meant. Prompts, whose positions
+    matter, are read with :func:`prompt_list` instead.
     """
     if value is None or isinstance(value, str):
         return comma_separated(value)
     return [str(prompt).strip() for prompt in value if str(prompt).strip()]
+
+
+def prompt_list(value: Union[str, Sequence[str], None]) -> list:
+    """Prompts, as :func:`text_list` reads them -- except that a list's empty entry is refused.
+
+    Each result's ``class_id`` is its prompt's position (see :data:`mozo.workflow.node.Prompts`),
+    so dropping an empty entry would silently move every prompt after it. The old comma string is
+    still split as :func:`text_list` splits it: the positions a person sees in it are those left.
+
+    Raises:
+        ValueError: If a list has an entry that is empty, or only whitespace.
+    """
+    if value is not None and not isinstance(value, str):
+        empty = [index for index, prompt in enumerate(value) if not str(prompt).strip()]
+        if empty:
+            raise ValueError(
+                f"prompt {empty[0]} of {len(value)} is empty. Each result's class_id is its "
+                f"prompt's position, so dropping it would move every prompt after it; remove it, "
+                f"or give it text.")
+    return text_list(value)

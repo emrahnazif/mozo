@@ -15,7 +15,7 @@ import numpy as np
 import pixelflow as pf
 import pytest
 
-from conftest import FIXTURE, document
+from conftest import FIXTURE, document, on_cpu
 from mozo.workflow import Workflow
 
 
@@ -70,15 +70,6 @@ class Provider:
     def __call__(self, family, variant, **kwargs):
         self.asked.append(family)
         return self.models[family]
-
-
-def _on_cpu():
-    """A provider of real models from the local cache, on the CPU."""
-    from mozo.manager import ModelManager
-
-    models = ModelManager()
-    return lambda family, variant, **kw: models.get_model(
-        family, variant, device="cpu", runtime="torch-fp32", **kw)
 
 
 def _require(*models):
@@ -173,7 +164,7 @@ class TestSegmentingBoxes:
 def test_real_models_detect_then_segment_keeping_every_detected_row():
     """RF-DETR finds the boxes and EdgeTAM outlines them, offline from the local cache."""
     _require(("rfdetr", "nano"), ("edgetam", "edgetam"))
-    results = _detect_then_segment(detector=("rfdetr", {"variant": "nano"})).run(models=_on_cpu())
+    results = _detect_then_segment(detector=("rfdetr", {"variant": "nano"})).run(models=on_cpu())
 
     assert len(results["detect"]) > 0, "the fixture photograph has people in it"
     assert _rows(results["segment"]) == _rows(results["detect"])
@@ -184,7 +175,7 @@ def test_real_sam3_outlines_the_boxes_it_is_given():
     """The same graph with SAM 3's click head doing the outlining, through its real adapter."""
     _require(("rfdetr", "nano"), ("sam3", "sam3"))
     results = _detect_then_segment("sam3_boxes", detector=("rfdetr", {"variant": "nano"})).run(
-        models=_on_cpu())
+        models=on_cpu())
 
     assert len(results["detect"]) > 0, "the fixture photograph has people in it"
     assert _rows(results["segment"]) == _rows(results["detect"])
@@ -289,7 +280,7 @@ class TestReadingAnnotations:
 
     def test_the_file_a_run_reads_is_still_the_sources(self, boxed_folder):
         """An annotations file is a fixed path: --file and the editor's upload bind to the source."""
-        assert _complete_objects(*boxed_folder).file_parameter == "source"
+        assert _complete_objects(*boxed_folder).file_parameter == "load.source"
 
 
 def _line(detections, **extra):
@@ -370,7 +361,7 @@ class TestPromptsAsAList:
         """The contract each docstring states, held on the model that has it: class_id is the
         prompt's index and class_name the prompt -- with a comma inside one of them."""
         _require(("sam3", "sam3"))
-        found = _prompted("sam3", ["laptop, open", "person"]).run(models=_on_cpu())["ask"]
+        found = _prompted("sam3", ["laptop, open", "person"]).run(models=on_cpu())["ask"]
         assert {(r.class_id, r.class_name) for r in found} <= {(0, "laptop, open"), (1, "person")}
         assert any(r.class_id == 1 for r in found), "the fixture photograph has people in it"
 

@@ -103,6 +103,15 @@ def require_present(family: str, variant: str, runtime: str = "torch-fp32") -> N
         pytest.skip(f"{family}/{variant} weights are not here")
 
 
+def on_cpu():
+    """A workflow's model provider: real models from the local cache, on the CPU, in fp32."""
+    from mozo.manager import ModelManager
+
+    models = ModelManager()
+    return lambda family, variant, **kw: models.get_model(
+        family, variant, device="cpu", runtime="torch-fp32", **kw)
+
+
 def _forget_deployment() -> None:
     """Drop ``mozo.server``'s memo of ``MOZO_ENABLE``, if the module has been imported.
 

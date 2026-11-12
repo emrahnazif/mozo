@@ -105,7 +105,7 @@ def start(host, port, reload, workers):
 @click.option("--file", "media",
               help="Run on this image or video instead of the one saved in the workflow")
 @click.option("--set", "settings", multiple=True, metavar="NAME=VALUE",
-              help="Override a parameter. Repeatable.")
+              help="Override a parameter, by name or as node.name for one node's. Repeatable.")
 @click.option("--test", is_flag=True,
               help="Run one item and describe every node, instead of the whole source")
 def run(workflow, media, settings, test):
@@ -125,9 +125,14 @@ def run(workflow, media, settings, test):
     A full run prints progress instead, because ten thousand items is ten thousand lines nobody
     reads. Nodes that write files have already written them.
     """
-    from mozo.workflow import Workflow
+    from mozo.workflow import Workflow, WorkflowError
 
-    built = Workflow.load(workflow)
+    try:
+        built = Workflow.load(workflow)
+    except WorkflowError as error:
+        raise click.ClickException(f"{workflow} is not a workflow: {error}") from None
+    if built.name:
+        click.echo(f"{built.name}" + (f" -- {built.description}" if built.description else ""))
 
     overrides = {}
     for setting in settings:
@@ -258,11 +263,10 @@ def _typed(built, name: str, text: str):
     true -- the opposite of what was asked, with nothing raised. The catalogue already says what
     each parameter is, so it says what to read.
     """
-    kinds = {parameter.name: parameter.kind
-             for step in built.steps.values() for parameter in step.spec.parameters}
-    kind = kinds.get(name)
-    if kind is None:
-        raise click.BadParameter(f"no parameter {name!r} in this workflow. It has: {sorted(kinds)}")
+    try:
+        kind = built.parameter(name)[1].kind
+    except KeyError as error:
+        raise click.BadParameter(error.args[0]) from None
 
     try:
         if kind == "int":

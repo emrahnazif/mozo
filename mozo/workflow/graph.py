@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
 from . import registry
-from .node import Connection, Context, Models, NodeSpec, State
+from .node import Connection, Context, Models, NodeSpec, Parameter, State, WorkflowError
 
-__all__ = ["Event", "ModelUse", "Preflight", "Workflow"]
+__all__ = ["Event", "ModelUse", "Preflight", "Workflow", "WorkflowError"]
 
 _log = logging.getLogger(__name__)
 
@@ -190,13 +190,24 @@ class Step:
         both halves of an edge's. Adding a field to the editor's node record is then one change
         here rather than two literals in the graph that have to be kept in step.
         """
+        if not isinstance(data, dict):
+            raise WorkflowError(f"a node is an object, not {data!r}")
         if "id" not in data or "type" not in data:
-            raise ValueError(f"node needs an id and a type: {data}")
+            raise WorkflowError(f"node needs an id and a type: {data}")
+        try:
+            spec = registry.get(data["type"])
+        except KeyError as error:
+            # The registry's message, which names every node it knows. ``registry.get`` keeps its
+            # own KeyError for its own callers; here an unknown type is a fault in the file.
+            raise WorkflowError(error.args[0]) from None
+        parameters = (data.get("data") or {}).get("parameters", {})
+        if not isinstance(parameters, dict):
+            raise WorkflowError(f"{data['id']}: parameters are an object, not {parameters!r}")
         return cls(
             id=data["id"],
-            spec=registry.get(data["type"]),
-            parameters=dict(data.get("data", {}).get("parameters", {})),
-            position=dict(data.get("position", {})),
+            spec=spec,
+            parameters=dict(parameters),
+            position=dict(data.get("position") or {}),
         )
 
 
@@ -249,15 +260,36 @@ def deliver(item, outcome, failure: Optional[Event], on_error: Optional[Any]) ->
 class Workflow:
     """A directed acyclic graph of nodes.
 
+    Args:
+        steps: The nodes.
+        connections: The edges between them.
+        name: What the workflow is called, for a person choosing one. Optional; a file without
+            one is a workflow without one, and nothing invents it from the file name.
+        description: What it does, in a sentence or two. Optional, likewise.
+
+    Raises:
+        WorkflowError: If the nodes and edges cannot make a workflow -- two nodes sharing an id,
+            an edge to a node or port that is not there, ports of different types, an input left
+            unconnected, a cycle.
+
     Examples:
         >>> workflow = Workflow.load("blur_faces.json")     # doctest: +SKIP
         >>> results = workflow.run(image="street.jpg")      # doctest: +SKIP
     """
 
-    def __init__(self, steps: list, connections: list) -> None:
+    def __init__(self, steps: list, connections: list, *, name: Optional[str] = None,
+                 description: Optional[str] = None) -> None:
+        if not isinstance(name, (str, type(None))):
+            raise WorkflowError(f"a workflow's name is text, not {name!r}")
+        if not isinstance(description, (str, type(None))):
+            raise WorkflowError(f"a workflow's description is text, not {description!r}")
+        #: What the workflow is called, or None. Carried through :meth:`to_dict` and :meth:`save`.
+        self.name = name
+        #: What it does, or None.
+        self.description = description
         self.steps = {step.id: step for step in steps}
         if len(self.steps) != len(steps):
-            raise ValueError("two nodes share an id")
+            raise WorkflowError("two nodes share an id")
         self.connections = list(connections)
 
         # Settled at construction, because validity depends on them: checking the wiring is what
@@ -278,23 +310,54 @@ class Workflow:
 
     @classmethod
     def load(cls, path: str | Path) -> Workflow:
-        """Read a workflow from a JSON file."""
+        """Read a workflow from a JSON file.
+
+        Raises:
+            FileNotFoundError: If there is no file at *path*.
+            WorkflowError: If there is, and it is not JSON or not a workflow.
+        """
         path = Path(path)
         if not path.is_file():
             raise FileNotFoundError(f"no workflow at {path}")
-        return cls.from_dict(json.loads(path.read_text()))
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError as error:
+            raise WorkflowError(f"{path} is not JSON: {error}") from None
+        return cls.from_dict(data)
 
     @classmethod
     def from_dict(cls, data: dict) -> Workflow:
-        """Read a workflow from the editor's ``{nodes, edges}`` format."""
+        """Read a workflow from the editor's ``{name, description, nodes, edges}`` format.
+
+        ``name`` and ``description`` are optional, so a file written before they existed loads as
+        it always did.
+
+        Raises:
+            WorkflowError: If *data* is not a workflow. One error for every way it can fail to be,
+                with a message that says which.
+        """
+        if not isinstance(data, dict):
+            raise WorkflowError(f"a workflow is a JSON object, not {type(data).__name__}")
+        nodes, edges = data.get("nodes", []), data.get("edges", [])
+        for key, value in (("nodes", nodes), ("edges", edges)):
+            if not isinstance(value, list):
+                raise WorkflowError(f"a workflow's {key} are a list, not {value!r}")
         return cls(
-            [Step.from_dict(node) for node in data.get("nodes", [])],
-            [Connection.from_dict(edge) for edge in data.get("edges", [])],
+            [Step.from_dict(node) for node in nodes],
+            [Connection.from_dict(edge) for edge in edges],
+            name=data.get("name"),
+            description=data.get("description"),
         )
 
     def to_dict(self) -> dict:
-        """Write the workflow back out in the format it was read from."""
+        """Write the workflow back out in the format it was read from.
+
+        ``name`` and ``description`` are written only when set, so a file without them comes back
+        exactly as it went in.
+        """
+        described = {"name": self.name, "description": self.description}
         return {
+            **{key: value for key, value in described.items() if value is not None},
             "nodes": [step.to_dict() for step in self.steps.values()],
             "edges": [connection.to_dict() for connection in self.connections],
         }
@@ -322,14 +385,14 @@ class Workflow:
         """
         found = [step_id for step_id, step in self.steps.items() if step.spec.produces_many]
         if len(found) > 1:
-            raise ValueError(
+            raise WorkflowError(
                 f"{len(found)} sources in one workflow: {found}. A run is one pass over one "
                 f"source, so two would be two runs and the facts of neither.")
         return found[0] if found else None
 
     @property
     def file_parameter(self) -> str:
-        """The parameter a file chosen somewhere else is the value of.
+        """The parameter a file chosen somewhere else is the value of, as a ``"node.parameter"`` key.
 
         A question about the graph's shape, like :attr:`source` and :attr:`parameters`, and asked
         here so that every way in gets the same answer. The three that need it -- the HTTP upload,
@@ -347,33 +410,81 @@ class Workflow:
         checkpoint of your own, annotations to read back -- is a fixed path the workflow was saved
         with, not the file a run is given.
 
+        A key that names its node, because the annotation has already said which node is meant: a
+        bare name would be refused as ambiguous whenever another node had a parameter of the same
+        name, and two input nodes sharing one would count as one.
+
         Raises:
             ValueError: If there is not exactly one. Both other answers are wrong in a way that
                 would be silent -- nowhere to put the file means it was chosen for nothing, and
                 two places means choosing one of them on the caller's behalf.
         """
-        named = sorted({parameter.name for _, parameter in self._files() if parameter.kind == "source"})
-        if not named:
+        keys = [f"{step_id}.{parameter.name}" for step_id, parameter in self._files()
+                if parameter.kind == "source"]
+        if not keys:
             raise ValueError(
                 "no node in this workflow reads a file, so there is nothing for one to be. "
                 "Add an input node, or set the value by name.")
-        if len(named) > 1:
+        if len(keys) > 1:
             raise ValueError(
-                f"{len(named)} parameters take a file: {named}. One file cannot say which it is "
-                f"-- set them by name instead.")
-        return named[0]
+                f"{len(keys)} parameters take a file: {keys}. One file cannot say which it is "
+                f"-- set each by its key instead.")
+        return keys[0]
 
     @property
     def parameters(self) -> dict:
         """Every parameter in the workflow, as ``name -> [node id, ...]``.
 
-        What :meth:`run` accepts as overrides, and what it consults to reject an ambiguous one.
+        The bare names :meth:`run` accepts as overrides, and what it consults to reject an
+        ambiguous one. Any of them is also reachable as ``"node.parameter"``.
         """
         found: dict = {}
         for step in self.steps.values():
             for parameter in step.spec.parameters:
                 found.setdefault(parameter.name, []).append(step.id)
         return found
+
+    @property
+    def prompt_parameters(self) -> tuple:
+        """Every :data:`~mozo.workflow.node.Prompts` parameter, as ``"node.parameter"`` keys in run
+        order -- what :meth:`run` takes, so a host reaches them without knowing their names::
+
+            workflow.run(image=path, **{key: prompts for key in workflow.prompt_parameters})
+        """
+        return tuple(f"{step_id}.{parameter.name}" for step_id in self.order
+                     for parameter in self.steps[step_id].spec.parameters if parameter.prompts)
+
+    def parameter(self, key: str) -> tuple[str, Parameter]:
+        """Which node's parameter an override *key* sets, as ``(node id, parameter)``.
+
+        A key is a parameter's name, when one node has it, or ``"node.parameter"`` for any one --
+        which is how two nodes with a parameter of the same name, SAM 3 beside Grounding DINO, are
+        each given their own value. Split on the last dot: a parameter's name is a Python
+        identifier and never has one, so a node id may.
+
+        Raises:
+            KeyError: If *key* names no parameter, or a name more than one node has. The message
+                lists what there is, or the keys that would say which.
+        """
+        step_id, dot, name = key.rpartition(".")
+        if not dot:
+            owners = self.parameters.get(key)
+            if not owners:
+                raise KeyError(
+                    f"no parameter {key!r} in this workflow. It has: {sorted(self.parameters)}")
+            if len(owners) > 1:
+                raise KeyError(
+                    f"{len(owners)} nodes have a parameter {key!r}: {owners}. Say which with "
+                    + " or ".join(repr(f"{owner}.{key}") for owner in owners) + ".")
+            step_id = owners[0]
+        if step_id not in self.steps:
+            raise KeyError(f"no node {step_id!r} in this workflow, for {key!r}. "
+                           f"It has: {sorted(self.steps)}")
+        step = self.steps[step_id]
+        try:
+            return step_id, step.spec.parameter(name)
+        except KeyError as error:
+            raise KeyError(f"{step_id}: {error.args[0]}") from None
 
     # --- Running ---
 
@@ -386,8 +497,10 @@ class Workflow:
                 ``None`` is the shared cache behind :func:`mozo.get_model`. See
                 :class:`~mozo.workflow.node.Models`. The same for every run method.
             **overrides: Parameter values to use instead of the ones saved in the workflow, by
-                parameter name. A name that more than one node uses is refused rather than guessed
-                at, naming the nodes that have it.
+                parameter name, or as ``"node.parameter"`` for one node's -- see :meth:`parameter`.
+                A name that more than one node uses is refused rather than guessed at, naming the
+                keys that would say which. From Python a dotted key goes in by unpacking:
+                ``run(**{"find.text": ["person"]})``.
 
         Returns:
             ``{node id: output}``. Every node, not only the terminal ones -- an intermediate result
@@ -484,7 +597,11 @@ class Workflow:
                 f"{over!r} is both the parameter each item binds to and an override, so every "
                 f"item would run on {overrides[over]!r} rather than on itself. Pass one or "
                 f"the other.")
+        # Refuses an override reaching the same parameter under another key, too.
         settings = self._resolve({over: None, **overrides})
+        # Carried as the node and the parameter: two nodes' settings may both hold that name.
+        step_id, parameter = self.parameter(over)
+        over = (step_id, parameter.name)
         states = self._remember(settings, models)
         try:
             yield from self._many(items, over, settings, on_error, workers, model_workers, stats)
@@ -494,7 +611,7 @@ class Workflow:
             # video would otherwise be left with no moov atom and no way to play it.
             _forget(states)
 
-    def _many(self, items, over: Optional[str], settings: dict, on_error, workers: int,
+    def _many(self, items, over: Optional[tuple], settings: dict, on_error, workers: int,
               model_workers: int, stats: Optional[dict], driving: Optional[str] = None,
               run: Optional[Context] = None) -> Iterator[tuple]:
         """One pass over *items*, however they were come by.
@@ -523,13 +640,12 @@ class Workflow:
         # and ``_steps`` only reads it, so one dict is safe to carry across the whole run. This is
         # also why it cannot be shared by two items at once, and why the pipeline above binds the
         # value to each item's parcel instead.
-        bound = next((values for values in settings.values() if over in values), None) \
-            if over is not None else None
+        bound = settings[over[0]] if over is not None else None
         port = self.steps[driving].spec.outputs[0].name if driving else None
 
         for index, item in enumerate(items):
             if bound is not None:
-                bound[over] = item
+                bound[over[1]] = item
             # The driving source is folded too, only per item rather than once: what it produced
             # is settled for this item exactly as a constant is settled for the run, so both reach
             # the graph by the same road and ``_steps`` does not have to know which is which.
@@ -726,7 +842,7 @@ class Workflow:
                 settings.setdefault(step_id, {})[step.spec.models] = supplied
         return states
 
-    def _fold(self, settings: dict, over: Optional[str] = None) -> tuple:
+    def _fold(self, settings: dict, over: Optional[tuple] = None) -> tuple:
         """Run the nodes whose value cannot change, once, before the run begins.
 
         A node with no inputs and settled parameters answers the same thing every time it is
@@ -738,7 +854,7 @@ class Workflow:
 
         Two no-input nodes are **not** constant, and both exclusions are the whole subtlety here:
 
-        * the node the items bind to, named by *over*. Its parameter is what changes per item, so
+        * the node the items bind to, *over*'s ``(node id, parameter)``. Its parameter is what changes per item, so
           folding it would run the whole workflow on whichever item happened to be first.
         * a source, which is not one value but many, and drives the run rather than feeding it.
 
@@ -756,10 +872,9 @@ class Workflow:
             step = self.steps[step_id]
             if self.incoming[step_id] or step.spec.produces_many:
                 continue
-            values = step.arguments(settings)
-            if over is not None and over in values:
+            if over is not None and step_id == over[0]:
                 continue
-            wires, failure = step.call(values)
+            wires, failure = step.call(step.arguments(settings))
             if failure is not None:
                 continue
             wires_by_node[step_id] = wires
@@ -858,18 +973,21 @@ class Workflow:
             yield Event(step_id, "completed", output=step.spec.result(wires))
 
     def _resolve(self, overrides: dict) -> dict:
-        """Turn ``{parameter: value}`` into ``{node id: {parameter: value}}``, or explain why not."""
-        available = self.parameters
+        """Turn ``{key: value}`` into ``{node id: {parameter: value}}``, or explain why not.
+
+        Two keys reaching one parameter -- ``text`` and ``find.text`` when only ``find`` has a
+        ``text`` -- are refused rather than one silently winning, since which of two values a run
+        used is not something a caller should have to find out from the result.
+        """
         settings: dict = {}
-        for name, value in overrides.items():
-            owners = available.get(name)
-            if not owners:
-                raise KeyError(f"no parameter {name!r} in this workflow. It has: {sorted(available)}")
-            if len(owners) > 1:
-                raise KeyError(
-                    f"{len(owners)} nodes have a parameter {name!r}: {owners}. Set it in the "
-                    f"workflow rather than here -- an override cannot say which one you meant.")
-            settings.setdefault(owners[0], {})[name] = value
+        given: dict = {}
+        for key, value in overrides.items():
+            step_id, parameter = self.parameter(key)
+            earlier = given.setdefault((step_id, parameter.name), key)
+            if earlier != key:
+                raise KeyError(f"{earlier!r} and {key!r} both set {step_id}.{parameter.name}. "
+                               f"Give one.")
+            settings.setdefault(step_id, {})[parameter.name] = value
         return settings
 
     # --- Validation ---
@@ -884,32 +1002,35 @@ class Workflow:
         for connection in self.connections:
             for end in (connection.source, connection.target):
                 if end not in self.steps:
-                    raise ValueError(f"edge names a node that is not here: {end!r}")
+                    raise WorkflowError(f"edge names a node that is not here: {end!r}")
 
             source, target = self.steps[connection.source], self.steps[connection.target]
             produced = {port.name: port for port in source.spec.outputs}
             if not produced:
-                raise ValueError(f"{source.id} ({source.spec.name}) produces nothing to connect")
+                raise WorkflowError(f"{source.id} ({source.spec.name}) produces nothing to connect")
             if connection.source_output not in produced:
-                raise ValueError(
+                raise WorkflowError(
                     f"{source.id} ({source.spec.name}) has no output "
                     f"{connection.source_output!r}. It produces {sorted(produced)}.")
 
             out = produced[connection.source_output]
-            port = target.spec.port(connection.target_input)
+            try:
+                port = target.spec.port(connection.target_input)
+            except KeyError as error:
+                raise WorkflowError(f"{target.id}: {error.args[0]}") from None
             if port.type is not out.type:
-                raise TypeError(
+                raise WorkflowError(
                     f"{source.id}.{out.name} is {out.type.value}, "
                     f"but {target.id}.{port.name} takes {port.type.value}")
 
             if port.name in fed[target.id]:
-                raise ValueError(f"{target.id}.{port.name} is fed by two connections")
+                raise WorkflowError(f"{target.id}.{port.name} is fed by two connections")
             fed[target.id][port.name] = (connection.source, connection.source_output)
 
         for step in self.steps.values():
             for port in step.spec.inputs:
                 if port.name not in fed[step.id]:
-                    raise ValueError(
+                    raise WorkflowError(
                         f"{step.id} ({step.spec.name}) has nothing connected to its "
                         f"{port.name!r} input")
         return fed
@@ -933,7 +1054,7 @@ class Workflow:
                     ready.append(follower)
 
         if len(order) != len(self.steps):
-            raise ValueError(
+            raise WorkflowError(
                 "the workflow has a cycle, through: "
                 + ", ".join(sorted(set(self.steps) - set(order))))
         return tuple(order)

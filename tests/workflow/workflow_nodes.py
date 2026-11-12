@@ -23,7 +23,7 @@ import numpy as np
 import pixelflow as pf
 
 from mozo.workflow import Classifications, Depth, Detections, Embedding, Image, node
-from mozo.workflow.node import Source
+from mozo.workflow.node import Prompts, Source
 from mozo.workflow.node import Context
 from mozo.workflow.registry import source
 
@@ -124,6 +124,24 @@ def fake_depth(image: Image) -> Depth:
     """Produce a depth map: a float array, which is not a picture."""
     return np.linspace(0.5, 40.0, image.shape[1], dtype=np.float32)[None, :].repeat(
         image.shape[0], 0)
+
+
+@node(category="Test")
+def locate(image: Image, text: Prompts = ["thing"]) -> Detections:
+    """Find one of each prompt, numbered by its position -- the :data:`Prompts` contract, kept."""
+    return pf.detections.from_arrays(
+        boxes=np.tile(np.array([0.0, 0.0, 1.0, 1.0], dtype=np.float32), (len(text), 1)),
+        scores=np.ones(len(text), dtype=np.float32),
+        class_ids=np.arange(len(text)),
+        labels=list(text),
+    )
+
+
+@node(category="Test")
+def choose_between(image: Image, classes: Prompts = ["this", "that"]) -> Classifications:
+    """Choose between the prompts, under a name other than ``text``: found by kind, not name."""
+    return pf.from_scores(np.linspace(1.0, 0.5, len(classes), dtype=np.float32),
+                          labels=list(classes))
 
 
 @node(category="Test")

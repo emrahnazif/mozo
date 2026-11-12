@@ -86,6 +86,8 @@ back empty keeps its box with an empty mask. An image with no boxes never runs t
 `read_annotations` reads back the file `save_annotations` writes, matching each line to the image
 by its file name and checking the line was written for an image of that size. Feed it files — a
 folder, or `run_many` over paths — not pixels in memory, which have no name to match.
+To write the file from your own code, use `mozo.workflow.annotation_line(detections, label=..., width=..., height=...)` — the function
+`save_annotations` itself writes through — so your file and mozo's cannot drift apart.
 
 Stop a run by closing its iterator, or leaving the `for` loop: no further item starts, a model
 call already running finishes, and the run's threads exit right after it.

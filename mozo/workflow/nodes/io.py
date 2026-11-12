@@ -368,16 +368,50 @@ def save_annotations(image: Image, detections: Detections, run: Context, state: 
         state["handle"] = handle
 
     height, width = image.shape[:2]
-    when = run.time
-    record = {"index": run.index, "label": run.label, "width": width, "height": height,
-              "detections": [{key: value for key, value in found.items() if not _nothing(value)}
-                             for found in detections.to_dict()]}
-    if when is not None:
-        record["time"] = when
     # One write of the whole line, flushed. The flush is what makes the claim above true: without
     # it the last few kilobytes live in a buffer that a killed process never gets to empty.
-    handle.write(json.dumps(record) + "\n")
+    handle.write(annotation_line(detections, label=run.label, width=width, height=height,
+                                 index=run.index, time=run.time))
     handle.flush()
+
+
+def annotation_line(detections: Detections, *, label: str, width: int, height: int,
+                    index: int = 0, time: Optional[float] = None) -> str:
+    """One line of the annotations file, exactly as :func:`save_annotations` writes it.
+
+    The format's one definition: the node writes through it, and so can anything else that wants
+    to hand annotations to :func:`read_annotations` -- an application writing the boxes it already
+    has for a workflow to complete -- without copying the format and drifting from it.
+
+    The line is one JSON object, ending in a newline::
+
+        {"index": 0, "label": "street", "width": 1920, "height": 1281,
+         "detections": [{"bbox": [x1, y1, x2, y2], "class_id": 0, "class_name": "car",
+                         "confidence": 0.9, "masks": [{"format": "png", "data": "..."}]}]}
+
+    ``detections`` holds :meth:`pixelflow.Detections.to_dict`'s entries, minus the keys holding
+    nothing; ``time`` appears only when given. :func:`read_annotations` matches a line to an image
+    by ``label`` and checks ``width`` and ``height`` against it.
+
+    Args:
+        detections: What was found in the image.
+        label: The image's name: its file name without the extension, which is what
+            :func:`read_annotations` matches on.
+        width: The image's width in pixels -- the one its boxes were measured against.
+        height: Its height in pixels.
+        index: Its place in the run.
+        time: Seconds from the start of the run, for a video frame.
+
+    Examples:
+        >>> with open("boxes.jsonl", "w") as out:                       # doctest: +SKIP
+        ...     out.write(annotation_line(found, label="street", width=1920, height=1281))
+    """
+    record = {"index": index, "label": label, "width": width, "height": height,
+              "detections": [{key: value for key, value in found.items() if not _nothing(value)}
+                             for found in detections.to_dict()]}
+    if time is not None:
+        record["time"] = time
+    return json.dumps(record) + "\n"
 
 
 @node(category="Input")
@@ -399,6 +433,9 @@ def read_annotations(image: Image, run: Context, state: State,
     line's ``width`` and ``height`` must be this image's: a file paired with the wrong images
     would otherwise hand every one of them some other picture's boxes, which look like boxes and
     are wrong.
+
+    Anything can write the file through :func:`annotation_line`, the same function this node's
+    writer uses.
 
     **An image the file has no line for is refused**, naming it. ``save_annotations`` writes a line
     for every image it saw, even an empty one, so a missing line means the image was never

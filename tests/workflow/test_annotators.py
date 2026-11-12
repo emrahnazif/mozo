@@ -280,6 +280,30 @@ class TestReadingAnnotations:
         assert _complete_objects(*boxed_folder).file_parameter == "source"
 
 
+def _line(detections, **extra):
+    """``annotation_line`` for the fixture photograph, at its own size."""
+    from mozo.image import load_image
+    from mozo.workflow import annotation_line
+
+    height, width = load_image(str(FIXTURE)).shape[:2]
+    return annotation_line(detections, label=FIXTURE.stem, width=width, height=height, **extra)
+
+
+class TestWritingAnnotations:
+    """``annotation_line`` is the format's one definition: the node writes through it, and so can
+    an application handing a workflow the boxes it already has."""
+
+    def test_what_it_writes_reads_back_the_same(self, tmp_path):
+        annotations = tmp_path / "boxes.jsonl"
+        annotations.write_text(_line(THREE))
+        assert _rows(_read_back(annotations).run()["boxes"]) == _rows(THREE)
+
+    def test_save_annotations_writes_exactly_what_it_returns(self, tmp_path):
+        saved = tmp_path / "out.jsonl"
+        _save(FIXTURE, saved, THREE)
+        assert saved.read_text() == _line(THREE)
+
+
 # --- Prompts as a list -------------------------------------------------------------------------
 
 TEXT_NODES = ["sam3", "owlv2", "grounding_dino", "clip", "siglip2"]

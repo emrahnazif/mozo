@@ -27,6 +27,7 @@ from .registry import catalogue, get, names, node
 # runtime has to import the nodes or ``Workflow.load`` would know no node types. It comes after
 # the imports above because the nodes are declared against them.
 from . import nodes  # noqa: E402,F401
+from .nodes.io import annotation_line  # noqa: E402
 
 #: What a node author and a caller need. ``Port``, ``Parameter`` and ``Connection`` are the
 #: engine's own records -- reachable from ``mozo.workflow.node`` for anyone introspecting, but not
@@ -34,5 +35,5 @@ from . import nodes  # noqa: E402,F401
 __all__ = [
     "Classifications", "Color", "Depth", "Detections", "Embedding", "Event", "Image", "NodeSpec",
     "Source",
-    "PortType", "Preflight", "Workflow", "catalogue", "get", "names", "node",
+    "PortType", "Preflight", "Workflow", "annotation_line", "catalogue", "get", "names", "node",
 ]

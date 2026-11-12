@@ -13,10 +13,10 @@ how a model works, or where it comes from: each node asks the run's
 host running the workflow supplied its own. Either way it caches, so a node that runs over fifty
 images loads the checkpoint once.
 
-Fourteen of the sixteen families are here. SAM 2 and EdgeTAM are not: they are prompted with points
-and boxes -- pixel coordinates picked on the image -- and there is no widget for that yet. Adding
-one before anything asks for it would be inventing a requirement, so they wait until the editor can
-express a click. Everything else about them already works through the run's models.
+Every family is here. SAM 2 and EdgeTAM come as box segmenters: they take the boxes another node
+found -- a detector's, or annotations read from a file -- and add a mask to each. Their other
+prompt, a click, is still not a node: it is a pixel picked on the image, and the editor has no way
+to express one yet. A tool that clicks calls the model directly.
 
 The variants each node offers are read from the registry rather than typed out again -- see
 :func:`variants`. There is one list of what mozo publishes and this is not a second one.
@@ -30,12 +30,16 @@ here so the duplication is a decision rather than a slip.
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Literal, Optional
 
-from mozo.registry import get_model_info
-from mozo.text import comma_separated
+import numpy as np
+import pixelflow as pf
 
-from ..node import Classifications, Depth, Detections, Image, Models, Source
+from mozo.registry import get_model_info
+from mozo.text import text_list
+
+from ..node import Classifications, Depth, Detections, FilePath, Image, Models
 from ..registry import node
 
 
@@ -90,17 +94,19 @@ def rfdetr(image: Image, models: Models, variant: variants("rfdetr") = "nano",
 
 
 @node(category="Detect", exclusive=True)
-def rfdetr_checkpoint(image: Image, models: Models, checkpoint: Optional[Source] = None,
-                      architecture: variants("rfdetr") = "nano", labels: str = "",
+def rfdetr_checkpoint(image: Image, models: Models, checkpoint: Optional[FilePath] = None,
+                      architecture: variants("rfdetr") = "nano", labels: list[str] = [],
                       threshold: float = 0.5) -> Detections:
     """RF-DETR from a checkpoint of your own -- a model you trained, run like a published one.
 
     ``architecture`` is the RF-DETR the checkpoint was trained as. ``labels`` names its classes,
-    comma-separated, in class-id order; leave it empty to use the names the checkpoint carries.
+    one per entry in class-id order, each exactly as given; leave it empty to use the names the
+    checkpoint carries. (A plain string, from workflows saved before, is split on commas.)
     """
     if not checkpoint:
         raise ValueError("choose the checkpoint file to run")
-    own = {"labels": comma_separated(labels)} if labels.strip() else {}
+    names = text_list(labels)
+    own = {"labels": names} if names else {}
     return models("rfdetr", architecture, checkpoint_path=checkpoint, **own).predict(
         image, threshold=threshold)
 
@@ -108,30 +114,95 @@ def rfdetr_checkpoint(image: Image, models: Models, checkpoint: Optional[Source]
 # --- Detection from a description ----------------------------------------------------------------
 
 @node(category="Detect", exclusive=True)
-def owlv2(image: Image, models: Models, text: str = "a person, a car, a dog",
+def owlv2(image: Image, models: Models, text: list[str] = ["a person", "a car", "a dog"],
           variant: variants("owlv2") = "base-ensemble", threshold: float = 0.1) -> Detections:
-    """OWLv2 by Google -- find anything you can name, with no training."""
+    """OWLv2 by Google -- find anything you can name, with no training.
+
+    One prompt per entry, taken as given; each result's ``class_id`` is its prompt's index and its
+    ``class_name`` that prompt.
+    """
     return models("owlv2", variant).predict(
-        image, text=comma_separated(text), threshold=threshold)
+        image, text=text_list(text), threshold=threshold)
 
 
 @node(category="Detect", exclusive=True)
-def grounding_dino(image: Image, models: Models, text: str = "person, car, dog",
+def grounding_dino(image: Image, models: Models, text: list[str] = ["person", "car", "dog"],
                    variant: variants("grounding_dino") = "tiny",
                    threshold: float = 0.3) -> Detections:
-    """Grounding DINO by IDEA -- open-vocabulary detection from a phrase."""
+    """Grounding DINO by IDEA -- open-vocabulary detection from a phrase.
+
+    One prompt per entry, taken as given; each result's ``class_id`` is its prompt's index and its
+    ``class_name`` that prompt.
+    """
     return models("grounding_dino", variant).predict(
-        image, text=comma_separated(text), threshold=threshold)
+        image, text=text_list(text), threshold=threshold)
 
 
 # --- Segmentation --------------------------------------------------------------------------------
 
 @node(category="Segment", exclusive=True)
-def sam3(image: Image, models: Models, text: str = "person", variant: variants("sam3") = "sam3",
-         threshold: float = 0.5) -> Detections:
-    """SAM 3 by Meta -- masks for every instance of a concept you name."""
+def sam3(image: Image, models: Models, text: list[str] = ["person"],
+         variant: variants("sam3") = "sam3", threshold: float = 0.5) -> Detections:
+    """SAM 3 by Meta -- masks for every instance of a concept you name.
+
+    One prompt per entry, taken as given; each result's ``class_id`` is its prompt's index and its
+    ``class_name`` that prompt.
+    """
     return models("sam3", variant).predict(
-        image, text=comma_separated(text), threshold=threshold)
+        image, text=text_list(text), threshold=threshold)
+
+
+def _segment_boxes(models: Models, family: str, variant: str, image: Image,
+                   detections: Detections) -> Detections:
+    """Add a mask to every row of *detections*, from one call to *family* with all its boxes.
+
+    One call rather than one per box, because the image encode is the cost and all the boxes share
+    it. One mask per box: a box says which object, so the three candidates a click needs are noise.
+    The adapter numbers what it returns by prompt, so each mask is put back on the row whose box
+    asked for it, and every other field of that row -- its box, class, name and score -- is kept as
+    it came. An image with nothing found never asks for the model, so it is never loaded for it.
+    """
+    if len(detections) == 0:
+        return detections
+    boxes = np.array([row.bbox for row in detections], dtype=np.float32)
+    found = models(family, variant).predict(image, boxes=boxes, multimask_output=False)
+    if len(found) != len(detections):
+        raise ValueError(f"{family} returned {len(found)} masks for {len(detections)} boxes; "
+                         f"it should return one per box")
+    # Each row copied shallowly -- its old masks, about to be replaced, are not worth duplicating.
+    rows = [copy.copy(row) for row in detections]
+    for answer in found:
+        rows[int(answer.class_id)].masks = answer.masks
+    segmented = pf.Detections()
+    for row in rows:
+        segmented.add_detection(row)
+    return segmented
+
+
+@node(category="Segment", exclusive=True)
+def sam2_boxes(image: Image, detections: Detections, models: Models,
+               variant: variants("sam2") = "tiny") -> Detections:
+    """SAM 2 by Meta -- a mask for each box it is given, the rows otherwise unchanged.
+
+    Wire a detector into ``detections`` -- Grounding DINO finds boxes from a description, this
+    outlines them -- or read existing annotations to give a box dataset its masks. The rows come
+    back in the order they arrived, each with its ``class_id``, ``class_name``, ``confidence`` and
+    ``bbox`` exactly as given and a mask added: the box stays the one the detector drew, not the
+    mask's bounds, so its score still describes it. A row whose mask comes back empty is kept with
+    an empty mask rather than dropped, so no box is ever lost. All of an image's boxes are
+    segmented in one call, and an image with none is passed through without running the model.
+    """
+    return _segment_boxes(models, "sam2", variant, image, detections)
+
+
+@node(category="Segment", exclusive=True)
+def edgetam_boxes(image: Image, detections: Detections, models: Models,
+                  variant: variants("edgetam") = "edgetam") -> Detections:
+    """EdgeTAM -- SAM 2 made small: a mask for each box it is given, the rows otherwise unchanged.
+
+    Everything ``sam2_boxes`` promises, at a fraction of the cost.
+    """
+    return _segment_boxes(models, "edgetam", variant, image, detections)
 
 
 # --- Edit ------------------------------------------------------------------------------------------
@@ -185,17 +256,25 @@ def vitpose(image: Image, detections: Detections, models: Models,
 # --- Classification ------------------------------------------------------------------------------
 
 @node(category="Classify", exclusive=True)
-def clip(image: Image, models: Models, text: str = "a photo of a cat, a photo of a dog",
+def clip(image: Image, models: Models, text: list[str] = ["a photo of a cat", "a photo of a dog"],
          variant: variants("clip") = "base") -> Classifications:
-    """CLIP by OpenAI -- score an image against phrases you make up."""
-    return models("clip", variant).predict(image, text=comma_separated(text))
+    """CLIP by OpenAI -- score an image against phrases you make up.
+
+    One prompt per entry, taken as given; each result's ``class_id`` is its prompt's index and its
+    ``class_name`` that prompt.
+    """
+    return models("clip", variant).predict(image, text=text_list(text))
 
 
 @node(category="Classify", exclusive=True)
-def siglip2(image: Image, models: Models, text: str = "a photo of a cat, a photo of a dog",
+def siglip2(image: Image, models: Models, text: list[str] = ["a photo of a cat", "a photo of a dog"],
             variant: variants("siglip2") = "base-224") -> Classifications:
-    """SigLIP 2 by Google -- zero-shot classification against phrases you make up."""
-    return models("siglip2", variant).predict(image, text=comma_separated(text))
+    """SigLIP 2 by Google -- zero-shot classification against phrases you make up.
+
+    One prompt per entry, taken as given; each result's ``class_id`` is its prompt's index and its
+    ``class_name`` that prompt.
+    """
+    return models("siglip2", variant).predict(image, text=text_list(text))
 
 
 # --- Reading -------------------------------------------------------------------------------------

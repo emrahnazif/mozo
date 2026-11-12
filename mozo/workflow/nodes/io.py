@@ -36,6 +36,7 @@ silence. One decoder, in the library whose whole contract is that images are RGB
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import re
@@ -47,7 +48,7 @@ import pixelflow as pf
 
 from mozo.image import encode_image, has_alpha, load_image as decode
 
-from ..node import Context, Detections, Image, Source, State
+from ..node import Context, Detections, FilePath, Image, Source, State
 from ..registry import node, source
 
 
@@ -377,3 +378,93 @@ def save_annotations(image: Image, detections: Detections, run: Context, state: 
     # it the last few kilobytes live in a buffer that a killed process never gets to empty.
     handle.write(json.dumps(record) + "\n")
     handle.flush()
+
+
+@node(category="Input")
+def read_annotations(image: Image, run: Context, state: State,
+                     path: Optional[FilePath] = None) -> Detections:
+    """The detections :func:`save_annotations` wrote for this image, read back.
+
+    What makes a box dataset a segmentation one: read each image's existing boxes, wire them into
+    a box segmenter, and every box gets a mask while keeping its class. Or wire them into anything
+    else that takes detections -- a crop, a filter, an annotator -- to work from labels already
+    made rather than from a model's guesses.
+
+    **The file is the one ``save_annotations`` writes**, one line of JSON per image, so a run's
+    output is the next run's input. Each line is matched to the image in hand by its ``label`` --
+    the image's file name, which is what a folder source and ``run_many`` over file paths both
+    call each image. Matched by name and nothing else: an image's place in a run is not an
+    identity -- every ``run_many`` item is a run of one, at place zero -- and pixels handed over in
+    memory have no name at all, so those are refused rather than paired by guesswork. Then the
+    line's ``width`` and ``height`` must be this image's: a file paired with the wrong images
+    would otherwise hand every one of them some other picture's boxes, which look like boxes and
+    are wrong.
+
+    **An image the file has no line for is refused**, naming it. ``save_annotations`` writes a line
+    for every image it saw, even an empty one, so a missing line means the image was never
+    annotated -- not that it has nothing in it, which is a different answer and not this node's to
+    guess.
+
+    The file is indexed once per run -- where each line starts -- and a line is parsed only when
+    its image comes up, so a dataset's masks are never all in memory at once. Every field
+    PixelFlow's ``Detection`` takes is read back as saved, masks decoded; keypoints are not yet.
+
+    Args:
+        image: The image the annotations are for. Wired from the source, which is what makes this
+            per image rather than once per run.
+        path: The ``.jsonl`` file to read.
+
+    Raises:
+        ValueError: If no file is chosen, the file has no line for this image, or the line was
+            written for an image of another size.
+    """
+    if not path:
+        raise ValueError("choose the annotations file to read -- one save_annotations wrote")
+    where = state.get("where")
+    if where is None:
+        where = state["where"] = _index_lines(path)
+
+    offset = where.get(run.label)
+    record = None
+    if offset is not None:
+        with open(path, "rb") as handle:
+            handle.seek(offset)
+            record = json.loads(handle.readline())
+    if record is None:
+        raise ValueError(f"{path} has no line for {run.label!r}: it was never annotated, this "
+                         f"file belongs to other images, or the image has no file name to match "
+                         f"-- pass files, not pixels")
+    height, width = image.shape[:2]
+    if (record.get("width"), record.get("height")) != (width, height):
+        raise ValueError(
+            f"{path}'s line for {run.label!r} was written for a {record.get('width')}x"
+            f"{record.get('height')} image, and this one is {width}x{height}: the file belongs "
+            f"to other images, or they were resized after it was written")
+
+    found = pf.Detections()
+    for saved in record.get("detections", []):
+        fields = {key: value for key, value in saved.items() if key in _DETECTION_FIELDS}
+        if fields.get("masks"):
+            fields["masks"] = [pf.Detection.decode_mask(mask) for mask in fields["masks"]]
+        found.add_detection(pf.Detection(**fields))
+    return found
+
+
+#: What a saved detection can be rebuilt from: whatever PixelFlow's ``Detection`` takes, read off
+#: its constructor so a field it adds is read back without a change here. Keypoints are left out:
+#: saved as plain dicts, they would come back as something that is not a keypoint.
+_DETECTION_FIELDS = frozenset(inspect.signature(pf.Detection.__init__).parameters) - {
+    "self", "keypoints"}
+
+
+def _index_lines(path: str) -> dict:
+    """``{label: byte offset}`` for a ``save_annotations`` file: where each image's line starts."""
+    where = {}
+    with open(path, "rb") as handle:
+        while True:
+            offset = handle.tell()
+            text = handle.readline()
+            if not text:
+                return where
+            if text.strip():
+                where.setdefault(json.loads(text).get("label"), offset)

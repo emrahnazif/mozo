@@ -304,12 +304,16 @@ class Workflow:
         which is why it puts a file picker on the node. An input node added tomorrow, calling its
         parameter anything at all, is reachable from all three without any of them changing.
 
+        Only a :data:`~mozo.workflow.node.Source`: a :data:`~mozo.workflow.node.FilePath` -- a
+        checkpoint of your own, annotations to read back -- is a fixed path the workflow was saved
+        with, not the file a run is given.
+
         Raises:
             ValueError: If there is not exactly one. Both other answers are wrong in a way that
                 would be silent -- nowhere to put the file means it was chosen for nothing, and
                 two places means choosing one of them on the caller's behalf.
         """
-        named = sorted({parameter.name for _, parameter in self._files()})
+        named = sorted({parameter.name for _, parameter in self._files() if parameter.kind == "source"})
         if not named:
             raise ValueError(
                 "no node in this workflow reads a file, so there is nothing for one to be. "
@@ -418,6 +422,12 @@ class Workflow:
             than yielded with the nodes that did complete: a caller iterating results would have
             no way to tell a partial answer from a whole one, and half a workflow's output is the
             kind of wrong that looks right.
+
+            **Stopping is closing the iterator** -- ``close()``, or leaving a ``for`` loop over it.
+            No item starts a node after that. A call already running finishes -- a model mid-way
+            through an image cannot be interrupted -- and the pipeline's threads exit as soon as
+            it does. ``close()`` does not wait for them: they are gone within the length of the
+            longest call that was in flight, not necessarily by the time it returns.
 
         Raises:
             KeyError: On the first item, if *over* or an override names no parameter or an
@@ -574,13 +584,14 @@ class Workflow:
     def _files(self) -> Iterator[tuple]:
         """``(node id, parameter)`` for every parameter that names a file, in run order.
 
-        A file parameter is a :data:`~mozo.workflow.node.Source` -- what a person cannot type and
-        the editor offers a picker for -- whatever it is called. One definition, so the input a
-        ``--file`` binds to and the files checked before a run cannot disagree about which they are.
+        A file parameter is a :data:`~mozo.workflow.node.Source` -- the file a run is given -- or
+        a :data:`~mozo.workflow.node.FilePath`, a fixed one, whatever either is called. One
+        definition, so the input ``--file`` binds to and the files checked before a run cannot
+        disagree about which they are.
         """
         for step_id in self.order:
             for parameter in self.steps[step_id].spec.parameters:
-                if parameter.kind == "source":
+                if parameter.kind in ("source", "path"):
                     yield step_id, parameter
 
     def check(self, **overrides) -> Preflight:

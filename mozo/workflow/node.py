@@ -44,7 +44,7 @@ from ..image import as_rgb, has_alpha
 
 __all__ = [
     "Classifications", "Color", "Connection", "Depth", "Detections", "Embedding", "Image",
-    "Context", "Models", "NodeSpec", "Parameter", "Port", "PortType", "Source", "State",
+    "Context", "FilePath", "Models", "NodeSpec", "Parameter", "Port", "PortType", "Source", "State",
 ]
 
 
@@ -116,6 +116,12 @@ Color = NewType("Color", str)
 #: server's. So the editor offers a file picker beside the box, and what it uploads arrives as this
 #: parameter's value. From Python or the command line nothing changes: it is a path.
 Source = NewType("Source", str)
+
+#: A parameter naming a file the workflow uses as saved -- a checkpoint of your own, annotations
+#: to read back. Not where a run's items come from: that is :data:`Source`, the file a run is
+#: given and the editor offers an upload for. A fixed path is a plain box, and like a source it is
+#: checked before a run starts.
+FilePath = NewType("FilePath", str)
 
 class Context:
     """What a node may know about the run it is in, and about this item's place in it.
@@ -379,7 +385,11 @@ _PORTS = {
 #: Annotation -> the widget the editor should offer. ``typing.Literal`` is handled separately: it
 #: is a choice, and its options are the values it names.
 _KINDS = {int: "int", float: "float", str: "str", bool: "bool", Color: "color",
-          Source: "source"}
+          Source: "source", FilePath: "path",
+          # Several strings, each exactly as written -- the editor gives one per line, so an entry
+          # may hold a comma. Read it with :func:`mozo.text.text_list`, which also takes the
+          # comma-separated string workflows saved before held.
+          list[str]: "list"}
 
 
 @dataclass(frozen=True)
@@ -870,5 +880,5 @@ def _kind(node: str, name: str, annotation: Any) -> str:
     except (KeyError, TypeError):
         raise TypeError(
             f"{node}: parameter {name!r} is annotated {annotation!r}, which the editor has no "
-            f"widget for. Use int, float, str, bool, Color, Source, or Literal for a "
-            f"choice.") from None
+            f"widget for. Use int, float, str, bool, list[str], Color, Source, FilePath, or "
+            f"Literal for a choice.") from None

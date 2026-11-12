@@ -45,6 +45,7 @@ from ..image import as_rgb, has_alpha
 __all__ = [
     "Classifications", "Color", "Connection", "Depth", "Detections", "Embedding", "Image",
     "Context", "FilePath", "Models", "NodeSpec", "Parameter", "Port", "PortType", "Source", "State",
+    "Weights",
 ]
 
 
@@ -401,6 +402,23 @@ class Port:
 
 
 @dataclass(frozen=True)
+class Weights:
+    """Marks a choice as which variant of a published model family a node loads.
+
+    Written as ``Annotated[Literal[...], Weights("edgetam")]`` -- in practice through
+    :func:`~mozo.workflow.nodes.model.variants`, which builds it from the registry. The node's
+    declaration of what it downloads: :meth:`~mozo.workflow.Workflow.check` reads it to list a
+    workflow's models before anything runs, rather than guessing from a node's name, which is
+    wrong for every node that is not named after its family -- ``edgetam_boxes`` loads EdgeTAM.
+
+    A choice of architecture for a checkpoint of your own is not this: nothing is downloaded for
+    it, so it is a plain ``Literal``.
+    """
+
+    family: str
+
+
+@dataclass(frozen=True)
 class Parameter:
     """A value typed in rather than wired: its widget, its default, and its choices if any.
 
@@ -418,6 +436,9 @@ class Parameter:
     default: Any
     options: tuple = ()
     optional: bool = False
+    #: The published model family whose variant this chooses, from :class:`Weights`; None
+    #: for every other parameter.
+    family: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -524,6 +545,10 @@ class NodeSpec:
     state: Optional[str] = None
     #: The argument this node is handed the run's :class:`Models` on, or None where it loads none.
     models: Optional[str] = None
+    #: The parameter choosing which published model this node loads -- the one carrying
+    #: :class:`Weights`, whose ``family`` is the model and whose value is the variant. None for a
+    #: node that loads nothing, or only a checkpoint of your own.
+    weights: Optional[Parameter] = None
 
     @classmethod
     def from_function(cls, function: Callable, category: str,
@@ -552,7 +577,9 @@ class NodeSpec:
         Returns:
             The spec. Building it is the only validation a node gets, and it happens at import.
         """
-        hints = typing.get_type_hints(function)
+        # ``include_extras`` keeps ``Annotated``, which is how a parameter says it is a model's
+        # variant (:class:`Weights`); without it the marker is stripped before it is read.
+        hints = typing.get_type_hints(function, include_extras=True)
         signature = inspect.signature(function)
 
         inputs, parameters, state, context, models = [], [], None, None, None
@@ -596,6 +623,12 @@ class NodeSpec:
 
         produced = _produced(function.__name__, hints["return"], outputs)
 
+        weighed = [parameter for parameter in parameters if parameter.family]
+        if len(weighed) > 1:
+            raise TypeError(
+                f"{function.__name__}: {[p.name for p in weighed]} each choose a model's variant. "
+                f"A node loads one published model; give the others a plain Literal.")
+
         if produces_many:
             if inputs:
                 raise TypeError(
@@ -630,6 +663,7 @@ class NodeSpec:
             state=state,
             context=context,
             models=models,
+            weights=weighed[0] if weighed else None,
             produces_many=produces_many,
             alpha=alpha,
             _input_names=frozenset(port.name for port in inputs),
@@ -864,11 +898,20 @@ def _parameter(node: str, name: str, annotation: Any, default: Any) -> Parameter
                 f"{default!r}. A value that means 'unset' is the thing this replaces.")
         return Parameter(name, _kind(node, name, inner), None, optional=True)
 
+    family = None
+    if typing.get_origin(annotation) is typing.Annotated:
+        annotation, *extras = typing.get_args(annotation)
+        marks = [extra for extra in extras if isinstance(extra, Weights)]
+        if marks and typing.get_origin(annotation) is not typing.Literal:
+            raise TypeError(f"{node}: {name} names a model's variant, so it must be a Literal of "
+                            f"them -- see mozo.workflow.nodes.model.variants")
+        family = marks[0].family if marks else None
+
     if typing.get_origin(annotation) is typing.Literal:
         options = typing.get_args(annotation)
         if default not in options:
             raise TypeError(f"{node}: {name}={default!r} is not one of {list(options)}")
-        return Parameter(name, "select", default, options)
+        return Parameter(name, "select", default, options, family=family)
 
     return Parameter(name, _kind(node, name, annotation), default)
 

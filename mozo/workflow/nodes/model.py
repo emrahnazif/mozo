@@ -31,7 +31,7 @@ here so the duplication is a decision rather than a slip.
 from __future__ import annotations
 
 import copy
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 import numpy as np
 import pixelflow as pf
@@ -39,12 +39,17 @@ import pixelflow as pf
 from mozo.registry import get_model_info
 from mozo.text import text_list
 
-from ..node import Classifications, Depth, Detections, FilePath, Image, Models
+from ..node import Classifications, Depth, Detections, FilePath, Image, Models, Weights
 from ..registry import node
 
 
 def variants(family: str) -> Any:
-    """The variants *family* publishes, as a choice the editor renders as a dropdown.
+    """The variants *family* publishes, as a choice -- and the node's word that it loads one.
+
+    The editor renders it as a dropdown. The :class:`~mozo.workflow.node.Weights` mark on it is
+    how :meth:`~mozo.workflow.Workflow.check` knows which model a node downloads, so it is for a
+    node that loads *family*'s published weights; a choice of architecture for a checkpoint of
+    your own is :func:`architectures`.
 
     Read from the registry so that publishing a variant offers it, and retiring one stops offering
     it, without this module being touched. ``Literal`` accepts a tuple, which is what makes a
@@ -52,6 +57,15 @@ def variants(family: str) -> Any:
 
     Through :func:`~mozo.registry.get_model_info` rather than indexing the registry, so that a
     misspelled family says which families there are -- at import, before anything can run.
+    """
+    return Annotated[architectures(family), Weights(family)]
+
+
+def architectures(family: str) -> Any:
+    """*family*'s variants as a plain choice, for a node that loads a checkpoint of its own.
+
+    The same dropdown as :func:`variants` without its claim: nothing published is downloaded, so
+    nothing should be planned for.
     """
     return Literal[tuple(get_model_info(family)["variants"])]
 
@@ -95,7 +109,7 @@ def rfdetr(image: Image, models: Models, variant: variants("rfdetr") = "nano",
 
 @node(category="Detect", exclusive=True)
 def rfdetr_checkpoint(image: Image, models: Models, checkpoint: Optional[FilePath] = None,
-                      architecture: variants("rfdetr") = "nano", labels: list[str] = [],
+                      architecture: architectures("rfdetr") = "nano", labels: list[str] = [],
                       threshold: float = 0.5) -> Detections:
     """RF-DETR from a checkpoint of your own -- a model you trained, run like a published one.
 

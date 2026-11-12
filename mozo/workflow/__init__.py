@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from .graph import Event, Preflight, Workflow
 from .node import (Classifications, Color, Depth, Detections, Embedding, Image, NodeSpec,
-                   PortType, Source)
+                   PortType, Source, Weights)
 from .registry import catalogue, get, names, node
 
 # Last, and for its side effect: a node registers itself by being declared, so importing the
@@ -34,6 +34,6 @@ from .nodes.io import annotation_line  # noqa: E402
 #: part of the surface this module documents.
 __all__ = [
     "Classifications", "Color", "Depth", "Detections", "Embedding", "Event", "Image", "NodeSpec",
-    "Source",
+    "Source", "Weights",
     "PortType", "Preflight", "Workflow", "annotation_line", "catalogue", "get", "names", "node",
 ]

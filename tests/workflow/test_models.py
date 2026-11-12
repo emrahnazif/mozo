@@ -9,6 +9,7 @@ so a workflow that says nothing runs as it always has.
 from __future__ import annotations
 
 import threading
+from typing import Annotated
 
 import pixelflow as pf
 import pytest
@@ -17,6 +18,8 @@ import mozo
 from conftest import FIXTURE, document
 from mozo.manager import ModelManager
 from mozo.workflow import Workflow
+from mozo.workflow.node import Models, NodeSpec, Weights
+from mozo.workflow.nodes.model import variants
 
 
 class Recorder:
@@ -193,3 +196,73 @@ class TestBeforeARun:
         from mozo.workflow import Preflight
 
         assert _detect().check() == Preflight(missing=(), downloads=())
+
+
+def _model_nodes():
+    from mozo.workflow import registry
+
+    return [registry.get(name) for name in registry.names() if registry.get(name).models]
+
+
+class TestEveryModelNodeDeclaresItsModel:
+    def test_every_declared_family_is_published(self):
+        from mozo.registry import MODEL_REGISTRY
+
+        declared = {spec.name: spec.weights.family for spec in _model_nodes() if spec.weights}
+        assert declared and set(declared.values()) <= set(MODEL_REGISTRY)
+        assert declared["edgetam_boxes"] == "edgetam" and declared["sam3_boxes"] == "sam3"
+
+    def test_only_a_checkpoint_of_your_own_declares_none(self):
+        assert [spec.name for spec in _model_nodes() if not spec.weights] == ["rfdetr_checkpoint"]
+
+    def test_no_node_takes_a_parameter_called_device(self):
+        """``check(device=)`` sits beside the parameter overrides, so a node parameter of that
+        name could never be overridden there."""
+        from mozo.workflow import registry
+
+        assert not [name for name in registry.names()
+                    if any(p.name == "device" for p in registry.get(name).parameters)]
+
+    @pytest.mark.parametrize("spec", [s for s in _model_nodes() if s.weights], ids=lambda s: s.name)
+    def test_the_node_asks_for_the_model_it_declares(self, spec):
+        """Run the node and record what it asks the run's models for. The declaration is a
+        second statement of the call in the node's body, and this is what keeps the two equal."""
+        import numpy as np
+
+        from mozo.workflow.node import PortType
+
+        asked = []
+
+        class Asked(Exception):
+            pass
+
+        def models(family, variant, **kwargs):
+            asked.append((family, variant))
+            raise Asked
+
+        one = pf.Detections()
+        one.add_detection(pf.Detection(bbox=[1, 1, 6, 6], confidence=0.9, class_id=0))
+        given = {PortType.IMAGE: np.zeros((8, 8, 3), dtype=np.uint8), PortType.DETECTIONS: one}
+        arguments = {port.name: given[port.type] for port in spec.inputs}
+        arguments |= {p.name: p.default for p in spec.parameters}
+        arguments[spec.models] = models
+        with pytest.raises(Asked):
+            spec.run(**arguments)
+        assert asked == [(spec.weights.family, spec.weights.default)]
+
+
+class TestTheWeightsMark:
+    def test_two_variant_choices_on_one_node_are_refused(self):
+        def both(models: Models, a: variants("sam2") = "tiny",
+                 b: variants("edgetam") = "edgetam") -> None:
+            pass
+
+        with pytest.raises(TypeError, match="each choose a model's variant"):
+            NodeSpec.from_function(both, "Test")
+
+    def test_the_mark_belongs_on_a_choice(self):
+        def loose(variant: Annotated[str, Weights("sam2")] = "tiny") -> None:
+            pass
+
+        with pytest.raises(TypeError, match="must be a Literal"):
+            NodeSpec.from_function(loose, "Test")

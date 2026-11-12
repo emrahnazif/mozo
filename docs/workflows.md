@@ -139,6 +139,12 @@ thickness scales itself to the image.
 The catalogue the editor reads is generated from these declarations, so it cannot drift from what
 runs. Adding a node is adding a function.
 
+A node that loads a published model says which on its variant parameter, `variant:
+variants("edgetam") = "edgetam"`: the editor offers the variants as a dropdown, and the family is
+read from it — `edgetam_boxes` declares that it downloads EdgeTAM. A choice of
+architecture for a checkpoint of your own is `architectures("rfdetr")` instead: nothing is
+downloaded for it.
+
 ## Port types
 
 A connection is only allowed between ports of the same type.

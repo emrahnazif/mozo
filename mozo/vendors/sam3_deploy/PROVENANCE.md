@@ -96,8 +96,9 @@ The click path is gated too, on seven prompt shapes: one positive point, positiv
 two positives, a box, a box with a negative point, a lone negative point, and
 `multimask_output=False`. The last two exist because a simpler set misses them -- a lone negative
 is the only prompt with nothing to include, and the single-mask call is the only one that reaches
-the stability fallback. Scores and low-resolution logits are bit-identical to the published model
-on all seven; binary masks are excluded from the comparison for the hole-filling reason below.
+the stability fallback. Masks, scores and low-resolution logits are bit-identical to the published
+model on all seven, run the way Meta's own example runs it: `Sam3Processor.set_image`, then
+`predict_inst`.
 
 ## The click path
 
@@ -145,11 +146,17 @@ Three further things could not be read off the weights at all, and each was foun
 - **`dynamic_multimask_via_stability` is on.** It carries no parameters, so the strict load could
   not catch it, and it only changes an answer when the single-mask token is unstable. It survived
   23 of 24 parity prompts before one image caught it.
-- **The two heads do not share a preprocessing**, and therefore cannot share an image encode.
-  The concept path rounds the resize back to uint8 and multiplies by `1/255`; the click path stays
-  in float and divides by `255`. Both choices are the opposite of the other's, they differ by half
-  a grey level, and that is worth 9e-03 of predicted IoU and several thousand mask pixels. The
-  published model runs the trunk twice for this reason and so does mozo, with a second cache.
+- **The two heads share one preprocessing and one encode.** Meta's image path,
+  `Sam3Processor.set_image` then `predict_inst`, runs the trunk once on the concept transform and
+  feeds both halves of the dual neck from it. `transformers`' `sam3_tracker`, and Meta's own
+  standalone `inst_interactive_predictor.set_image`, prepare the image the way SAM 2 does instead
+  -- resize in float, divide by 255 -- and so need a trunk pass of their own. An earlier version
+  of this package followed that, with a second encode and a second cache. The two preparations
+  differ by half a grey level, which moves a click mask by about 900 pixels on average (30 COCO
+  images, 720 masks) against 0.1 pixels between CPU and MPS. On 15 COCO images and 225 masks,
+  with hole filling off on both sides, the shared encode is bit-identical to `predict_inst` and
+  the separate one is not: mean mask IoU 0.970, worst 0.598, a different best candidate on 1.3
+  percent of prompts.
 - **`no_mem_embed` applies here too**, as it does on SAM 2's image path -- trained as "there is no
   memory to attend to", which is a single image's situation exactly.
 
@@ -157,11 +164,14 @@ Three further things could not be read off the weights at all, and each was foun
 other 160 (7.5 M) are memory attention and mask-memory fusion, which have nothing to attend to on
 a still image, and are filtered at load.
 
-**Hole filling is not implemented**, matching `sam2_deploy`, which records the same omission: it
-needs a CUDA connected-components extension. Upstream fills holes up to 256 low-resolution pixels
-before thresholding, so mozo's binary masks come out a *strict subset* of the reference's --
-verified as 0 pixels present in mozo and absent upstream, with every difference lying inside a
-filled hole. The low-resolution logits the masks are thresholded from are bit-identical.
+**Holes are filled as upstream fills them.** Meta's interactive predictor sets every background
+region of at most 256 pixels in the 288x288 logits just above the threshold before resizing
+(`max_hole_area=256`), labelling regions through all eight neighbours with a CUDA kernel or, on
+CPU, scikit-image. `image.fill_holes` does the same with OpenCV, already a mozo dependency; it is
+this package's own code, written to the rule rather than copied. Measured on 720 masks from 30 COCO
+images, it matches upstream's fill bit for bit on all 720, and the fill changes 593 of them. The
+returned logits stay unfilled, as upstream's do. `sam2_deploy` still omits it: SAM 2's own image
+predictor does not fill by default.
 
 ## Dependencies
 

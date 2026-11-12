@@ -31,13 +31,12 @@ decode           ~650 ms  depends on both
 ```
 
 A phrase encoded once is valid for every image afterwards. An image encoded once serves every
-prompt afterwards. What it does *not* buy is one encode for both heads: they preprocess an image
-differently, so each runs its own trunk pass and reads its own neck stack. One checkpoint and one
-process still serve both, which is the reason to deploy SAM 3 rather than two models.
+prompt afterwards, phrase or click: the trunk runs once and each head reads its own half of the
+dual neck, as in Meta's own image path. One checkpoint, one process and one encode serve both,
+which is the reason to deploy SAM 3 rather than two models.
 
-The per-image cache is expensive: **111 MB** per entry in float32 for one FPN pyramid, against
-SAM 2's 16.8 MB, and the two heads keep separate entries. That is a live design constraint, not
-a footnote.
+The per-image cache is expensive: **228 MB** per entry in float32 for the two heads' pyramids,
+against SAM 2's 16.8 MB. That is a live design constraint, not a footnote.
 
 ## Prompting
 
@@ -94,13 +93,16 @@ reserved labels `2` and `3`, because the network has no box input. `boxes=` spel
 Give a box and points together and the corners go first — the encoder adds a different learned
 embedding per position, so the order is meaning rather than convention.
 
-**The click path does not share the concept path's image encode**, and this is worth knowing
-before you plan around it. The two heads preprocess the same photograph differently — one rounds
-the resize back to uint8, the other stays in float — and half a grey level of input moves the
-predicted IoU by 9e-03. The published model runs the trunk twice for this reason; so does mozo,
-with a second cache. Using both heads on one image costs two encodes, not one.
+**The click path shares the concept path's image encode.** A photograph already encoded for a
+phrase costs a click nothing but the decoder, and the reverse. Building the click pyramid adds
+about 8 percent to an encode (1.56 s against 1.41 s on MPS) and saves a whole second one wherever
+both heads are used: two encodes cost 2.87 s.
 
-What you still save is everything after the first click. On a 1999x1510 photograph, on an M-series
+Small background regions of each click mask are filled before it is resized, as Meta's predictor
+does: any region of up to 256 pixels in the 288x288 logits. The returned logits are the unfilled
+ones, which is what you feed back as `mask_input` -- Meta's do the same.
+
+Everything after the first prompt on an image is cheap. On a 1999x1510 photograph, on an M-series
 GPU (`device="mps"`):
 
 | | encode | click |
@@ -108,9 +110,9 @@ GPU (`device="mps"`):
 | MPS | 1.16 s | 14 ms |
 | CPU | 5.1 s | 44 ms |
 
-The trunk is 90 percent of the encode, which is why the second one costs what it does. Of a 14 ms
-click, 3.7 ms is the sha256 over the image that keys the cache -- content keying is what makes the
-same photograph arriving twice over HTTP one encode instead of two, and it is not free.
+Of a 14 ms click, 3.7 ms is the sha256 over the image that keys the cache -- content keying is
+what makes the same photograph arriving twice over HTTP one encode instead of two, and it is not
+free.
 
 A held image answers a repeated click identically, which the gate checks rather than assumes.
 
@@ -123,9 +125,7 @@ A held image answers a repeated click identically, which the gate checks rather 
 - Clicks, boxes and mask refinement, through SAM 3's own tracker head.
 - CPU and CUDA. CPU runs at about 0.2 images/second; this model wants a GPU.
 
-Not supported: video tracking, and hole filling (which needs a CUDA extension) — so binary masks
-come out a strict subset of the reference's, differing only inside holes it would have filled.
-The logits they are thresholded from are bit-identical.
+Not supported: video tracking.
 
 ## Licensing
 

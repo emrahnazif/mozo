@@ -35,22 +35,19 @@ from .click import ClickHead
 from .config import SPEC
 from .grounding import ConceptHead
 from .grounding.boxes import box_cxcywh_to_xyxy
-from .image import preprocess, preprocess_click, to_model_coords, to_original
+from .image import fill_holes, preprocess, to_model_coords, to_original
 from .text import TextEncoder, Tokenizer
 from .vision import VisionEncoder
 
 __all__ = ["Segmenter", "instances"]
 
-#: How many images' concept-path encoder outputs to keep. Each is 111 MB at fp32 -- one FPN
-#: pyramid -- so this is the one number in the package that has to be justified rather than
-#: chosen. Two is enough for the job the image cache exists for, which is trying several prompts
-#: on the picture in front of you. SAM 2 keeps five because each of its entries is 17 MB; scaling
-#: that count here would rule out a Jetson.
+#: How many images' encoder outputs to keep. Each holds both heads' pyramids, 228 MB at fp32 --
+#: 117 for the concept head's and its position encoding, 111 for the click head's -- so this is
+#: the one number in the package that has to be justified rather than chosen. Two is enough for
+#: the job the image cache exists for, which is trying several prompts on the picture in front of
+#: you. SAM 2 keeps five because each of its entries is 17 MB; scaling that count here would rule
+#: out a Jetson.
 IMAGE_CACHE = 2
-
-#: How many click-path image encodes to keep, at 111 MB each. Separate from :data:`IMAGE_CACHE`
-#: because the click path needs its own encode -- see :meth:`Segmenter.encode_click`.
-CLICK_CACHE = 2
 
 #: How many encoded prompts to keep. Each is 33 KB, so this is 1 MB and the number is
 #: uninteresting -- it exists only so a server fed unbounded distinct prompts does not grow
@@ -68,6 +65,10 @@ LOGIT_LIMIT = 32.0
 
 #: Above this a mask logit is foreground.
 MASK_THRESHOLD = 0.0
+
+#: The largest background region, in the click head's 288x288 logits, filled into a click mask --
+#: upstream's ``max_hole_area``. See :func:`~.image.fill_holes`.
+MAX_HOLE_AREA = 256
 
 
 def instances(
@@ -120,9 +121,9 @@ class Segmenter:
         vision: An encoder to use instead of building the torch one -- anything that answers
             :meth:`~..vision.encoder.VisionEncoder.forward`'s question, i.e. takes the
             preprocessed batch and returns ``{"concept": [levels], "positions": ...}``. A
-            graph runtime is what this is for. Passing one **turns the click path off**: it is
-            fed by a second encode of its own, which such a graph does not carry, and the two
-            preprocess differently so it cannot borrow this one. See :meth:`encode_click`.
+            graph runtime is what this is for. Passing one **turns the click path off**: the
+            click head reads a pyramid of its own from the same encode, which such a graph does
+            not carry.
 
     Attributes:
         image_size: Square side the encoder runs at.
@@ -168,7 +169,6 @@ class Segmenter:
         self.image_size = SPEC.trunk.image_size
 
         self._images: OrderedDict[bytes, dict] = OrderedDict()
-        self._clicks: OrderedDict[bytes, list] = OrderedDict()
         self._prompts: OrderedDict[str, dict] = OrderedDict()
         # One segmenter instance is shared across requests -- mozo.server runs handlers in a
         # threadpool -- and check-then-act on an OrderedDict is not safe across threads.
@@ -194,6 +194,16 @@ class Segmenter:
         several prompts on one photograph pays for it once. Keyed on pixel content rather than on
         a filename or an object identity, because the same image arriving twice over HTTP is two
         different arrays and should still be one encode.
+
+        One encode serves both heads, as in Meta's own image path: the trunk runs once and the
+        dual neck builds the concept pyramid and the click pyramid from it, so a phrase and a
+        click on the same photograph share it. The click pyramid is built whenever this segmenter
+        has a click head -- 8 percent of the encode -- rather than on the first click, which
+        would mean a second trunk pass or holding the trunk's output as well.
+
+        Returns:
+            ``concept`` (the concept head's levels), ``positions``, and ``click`` (the click
+            head's levels) when this segmenter has a click head.
         """
         # sha256 over the pixels, not a sample of them: a key that skipped content would collide
         # on two images differing only where it did not look, and hand back a confident mask of
@@ -202,42 +212,14 @@ class Segmenter:
         return self._remember(
             self._images,
             key,
-            lambda: self.vision(preprocess(image).to(self.device), stacks=("concept",)),
+            lambda: self.vision(preprocess(image).to(self.device), stacks=self._stacks),
             IMAGE_CACHE,
         )
 
-    def encode_click(self, image: np.ndarray) -> list[torch.Tensor]:
-        """Return the click pyramid for one image, computing it only if not already held.
-
-        Separate from :meth:`encode_image` because it has to be. The published model runs the
-        trunk twice over the same photograph -- once per head -- because the two heads
-        preprocess differently, and half a grey level of input is worth several thousand mask
-        pixels of output. Sharing one encode between them would be cheaper and would not be SAM
-        3, so there are two encodes and two caches.
-
-        Only the click pyramid is kept. The concept stack this forward also produces belongs to
-        the other preprocessing and would be wrong to serve from here.
-
-        Raises:
-            RuntimeError: If this segmenter was built with a supplied ``vision`` encoder. Such
-                an encoder carries the concept stack alone, and the click stack cannot be
-                derived from it -- the two read a differently preprocessed image. Serving the
-                concept pyramid here would answer with masks from the wrong pixels.
-        """
-        if self.click is None:
-            raise RuntimeError(
-                "this Segmenter was built with a supplied vision encoder, which serves the "
-                "concept path only. Build one from the checkpoint to click on an image."
-            )
-        key = hashlib.sha256(np.ascontiguousarray(image)).digest()
-        return self._remember(
-            self._clicks,
-            key,
-            lambda: self.vision(
-                preprocess_click(image).to(self.device), stacks=("click",)
-            )["click"],
-            CLICK_CACHE,
-        )
+    @property
+    def _stacks(self) -> tuple[str, ...]:
+        """The neck stacks an encode builds: the click head's too, when there is one to read it."""
+        return ("concept",) if self.click is None else ("concept", "click")
 
     def encode_text(self, prompt: str) -> dict:
         """Return the encoded prompt, computing it only if not already held.
@@ -341,10 +323,13 @@ class Segmenter:
     ) -> dict[str, torch.Tensor]:
         """Segment what the prompt points at, rather than what a phrase names.
 
-        The first click on a photograph pays for an encode of its own -- see
-        :meth:`encode_click` for why it cannot borrow the concept path's. Every click after it
-        on the same photograph costs the decoder alone, which is what makes interactive
-        refinement usable.
+        The first prompt on a photograph, phrase or click, pays for its encode -- see
+        :meth:`encode_image`. Every click after it on the same photograph costs the decoder
+        alone, which is what makes interactive refinement usable.
+
+        Small background regions of each mask are filled before it is resized, as upstream does
+        (:func:`~.image.fill_holes`, up to :data:`MAX_HOLE_AREA` low-resolution pixels). The
+        returned logits are the unfilled ones, which is what upstream feeds back too.
 
         Args:
             image: ``HxWx3`` RGB ``uint8``, as :func:`mozo.image.load_image` returns.
@@ -364,14 +349,21 @@ class Segmenter:
 
         Raises:
             ValueError: If no prompt is given, or if points arrive without labels.
+            RuntimeError: If this segmenter was built with a supplied ``vision`` encoder, which
+                carries the concept pyramid alone. Answering from it would mask the wrong pixels.
         """
         if points is None and boxes is None and mask_input is None:
             raise ValueError("a prompt is required: give points, boxes or mask_input")
         if (points is None) != (labels is None):
             raise ValueError("points and labels go together; got one without the other")
+        if self.click is None:
+            raise RuntimeError(
+                "this Segmenter was built with a supplied vision encoder, which serves the "
+                "concept path only. Build one from the checkpoint to click on an image."
+            )
 
         shape = image.shape[:2]
-        click = self.encode_click(image)
+        click = self.encode_image(image)["click"]
         coords, marks = self._prompt(points, labels, boxes, shape)
         low_res, iou = self.click(
             click,
@@ -382,7 +374,8 @@ class Segmenter:
             multimask_output,
         )
         return {
-            "masks": to_original(low_res, shape) > MASK_THRESHOLD,
+            "masks": to_original(fill_holes(low_res, MASK_THRESHOLD, MAX_HOLE_AREA), shape)
+            > MASK_THRESHOLD,
             "scores": iou,
             "logits": low_res.clamp(-LOGIT_LIMIT, LOGIT_LIMIT),
         }

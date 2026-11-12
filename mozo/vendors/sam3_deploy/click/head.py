@@ -2,9 +2,9 @@
 """SAM 3's click path: point at something, get that one thing back.
 
 The concept path answers "where is every taxi". This one answers "what is *this*". They are not
-alternatives -- one checkpoint and one process serve both -- but they are not one forward pass
-either: the two heads preprocess an image differently, so each runs its own trunk pass and reads
-its own neck stack. :meth:`~..predictor.Segmenter.encode_click` is where that is measured.
+alternatives -- one checkpoint, one process and one image encode serve both. The trunk runs once
+and each head reads its own half of the dual neck; :meth:`~..predictor.Segmenter.encode_image`
+is where that happens.
 
 Derived from ``transformers/models/sam3_tracker`` (Apache-2.0), which is SAM 3's own tracker --
 the same provenance as the rest of this package. Nothing here comes from another vendor.

@@ -19,10 +19,11 @@ from mozo.registry import get_model_info
 from mozo.vendors.sam3_deploy import checkpoint as loader
 from mozo.vendors.sam3_deploy.config import SPEC, TEXT
 from mozo.vendors.sam3_deploy.click import ClickHead
-from mozo.vendors.sam3_deploy.image import preprocess, preprocess_click, to_model_coords
+from mozo.vendors.sam3_deploy.image import fill_holes, preprocess, to_model_coords
 from mozo.vendors.sam3_deploy.predictor import (
-    CLICK_CACHE,
     IMAGE_CACHE,
+    MASK_THRESHOLD,
+    MAX_HOLE_AREA,
     PROMPT_CACHE,
     Segmenter,
     instances,
@@ -97,28 +98,114 @@ def test_preprocessing_refuses_anything_that_is_not_rgb():
 
 # --- the click path ------------------------------------------------------------------------
 
-def test_the_two_heads_do_not_preprocess_alike():
-    """The concept path rounds the resize back to uint8 and multiplies by 1/255; the click path
-    does neither. This is the difference that was worth 9e-03 of predicted IoU, so it is pinned
-    here rather than left to a gate that needs 3.45 GB."""
+class _Vision:
+    """The vision encoder's surface: records what it was asked, answers with blank pyramids."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, batch, stacks):
+        self.calls.append((batch, stacks))
+        levels = [torch.zeros(1, 256, side, side) for side in (288, 144, 72)]
+        return {"concept": levels, "positions": torch.zeros(1, 256, 72, 72), "click": levels}
+
+
+class _ClickHead:
+    """The click head's surface, answering with whatever logits it was given."""
+
+    def __init__(self, logits):
+        self.logits = logits
+
+    def __call__(self, pyramid, coords, marks, mask_input, multimask_output):
+        return self.logits, torch.zeros(self.logits.shape[:2])
+
+
+def test_one_encode_serves_a_phrase_and_a_click():
+    """Meta's image path runs the trunk once, on the concept preprocessing, and both heads read
+    that encode. A click on a photograph already encoded for a phrase must not encode it again."""
+    segmenter = _segmenter()
+    segmenter.vision = _Vision()
+    segmenter.click = _ClickHead(torch.ones(1, 3, 288, 288))
     image = np.random.default_rng(0).integers(0, 256, (321, 517, 3), dtype=np.uint8)
-    concept, click = preprocess(image), preprocess_click(image)
-    assert concept.shape == click.shape
-    assert not torch.equal(concept, click), "the two transforms must not collapse into one"
-    # Half a grey level in [-1, 1] space, which is what a uint8 round-trip costs.
-    assert (concept - click).abs().max() < 2.0 / 255
+
+    segmenter.encode_image(image)
+    segmenter.segment(image, points=np.array([[10.0, 10.0]]), labels=np.array([1]))
+
+    [(batch, stacks)] = segmenter.vision.calls
+    assert stacks == ("concept", "click")
+    assert torch.equal(batch, preprocess(image)), "the click head reads the concept preprocessing"
 
 
-def test_click_preprocessing_squares_and_normalises_like_its_sibling():
-    batch = preprocess_click(np.zeros((100, 3000, 3), dtype=np.uint8))
-    side = SPEC.trunk.image_size
-    assert batch.shape == (1, 3, side, side)
-    assert torch.allclose(batch, torch.full_like(batch, -1.0))
+def test_without_a_click_head_only_the_concept_stack_is_built():
+    segmenter = _segmenter()
+    segmenter.vision, segmenter.click = _Vision(), None
+    segmenter.encode_image(np.zeros((8, 8, 3), dtype=np.uint8))
+    assert segmenter.vision.calls[0][1] == ("concept",)
 
 
-def test_click_preprocessing_refuses_anything_that_is_not_rgb():
-    with pytest.raises(ValueError, match="HxWx3"):
-        preprocess_click(np.zeros((64, 64), dtype=np.uint8))
+# --- hole filling ------------------------------------------------------------------------------
+
+def _plane(foreground=None, holes=()):
+    """288x288 logits: -1 background, +1 inside ``foreground``, -1 again inside each hole."""
+    logits = torch.full((1, 1, 288, 288), -1.0)
+    if foreground:
+        (y0, y1), (x0, x1) = foreground
+        logits[..., y0:y1, x0:x1] = 1.0
+    for (y0, y1), (x0, x1) in holes:
+        logits[..., y0:y1, x0:x1] = -1.0
+    return logits
+
+
+def test_a_small_hole_is_filled_and_a_large_one_is_not():
+    logits = _plane(((50, 250), (50, 250)), holes=[((60, 70), (60, 70)), ((100, 120), (100, 120))])
+    filled = fill_holes(logits, MASK_THRESHOLD, MAX_HOLE_AREA)
+    assert (filled[..., 60:70, 60:70] > MASK_THRESHOLD).all(), "100 px is a hole"
+    assert (filled[..., 100:120, 100:120] <= MASK_THRESHOLD).all(), "400 px is not"
+    assert torch.equal(filled[..., 0:40, :], logits[..., 0:40, :]), "the outside is left alone"
+
+
+def test_a_hole_of_exactly_the_limit_is_filled():
+    logits = _plane(((50, 250), (50, 250)), holes=[((60, 76), (60, 76))])   # 16 x 16 = 256
+    assert (fill_holes(logits, MASK_THRESHOLD, MAX_HOLE_AREA)[..., 60:76, 60:76] > 0).all()
+
+
+def test_regions_touching_at_a_corner_are_one_region():
+    """Upstream labels through all eight neighbours, so two 130 px squares meeting diagonally are
+    one 260 px region -- over the limit, so neither is filled. Four-neighbour labelling would see
+    two holes and fill both."""
+    logits = _plane(((50, 250), (50, 250)))
+    logits[..., 60:70, 60:73] = -1.0     # 130 px
+    logits[..., 70:80, 73:86] = -1.0     # 130 px, touching the first only at its corner
+    filled = fill_holes(logits, MASK_THRESHOLD, MAX_HOLE_AREA)
+    assert (filled[..., 60:80, 60:86] == logits[..., 60:80, 60:86]).all()
+
+
+def test_a_small_background_region_at_the_border_is_filled_too():
+    """Upstream's rule is any background region up to the limit, not only enclosed ones."""
+    logits = _plane(((0, 288), (0, 288)), holes=[((0, 5), (0, 5))])
+    assert (fill_holes(logits, MASK_THRESHOLD, MAX_HOLE_AREA) > MASK_THRESHOLD).all()
+
+
+def test_filling_returns_new_logits_and_works_per_mask():
+    first = _plane(((50, 250), (50, 250)), holes=[((60, 70), (60, 70))])
+    batch = torch.cat([torch.cat([first, _plane()], dim=1)] * 2)      # (2, 2, 288, 288)
+    before = batch.clone()
+    filled = fill_holes(batch, MASK_THRESHOLD, MAX_HOLE_AREA)
+    assert torch.equal(batch, before), "the input is not changed"
+    assert (filled[:, 0, 60:70, 60:70] > 0).all()
+    assert torch.equal(filled[:, 1], batch[:, 1]), "an empty mask has one large region, unfilled"
+
+
+def test_a_click_fills_its_masks_but_hands_back_unfilled_logits():
+    """The logits are fed back as the next prompt's mask, and upstream feeds back the unfilled
+    ones; the filled version is for the mask alone."""
+    logits = _plane(((50, 250), (50, 250)), holes=[((60, 70), (60, 70))])
+    segmenter = _segmenter()
+    segmenter.vision, segmenter.click = _Vision(), _ClickHead(logits)
+    out = segmenter.segment(np.zeros((288, 288, 3), dtype=np.uint8),
+                            points=np.array([[100.0, 100.0]]), labels=np.array([1]))
+    assert out["masks"][0, 0, 60:70, 60:70].all()
+    assert torch.equal(out["logits"], logits)
 
 
 def test_prompt_coordinates_squash_with_the_pixels():
@@ -365,9 +452,8 @@ def _segmenter():
     from threading import Lock
 
     blank = Segmenter.__new__(Segmenter)
-    blank._images, blank._clicks = OrderedDict(), OrderedDict()
-    blank._prompts, blank._lock = OrderedDict(), Lock()
-    blank.device = "cpu"
+    blank._images, blank._prompts, blank._lock = OrderedDict(), OrderedDict(), Lock()
+    blank.device, blank.click = "cpu", None
     return blank
 
 
@@ -406,25 +492,6 @@ def test_a_repeated_prompt_is_encoded_once_and_kept_apart_from_the_images():
     assert encoder.calls == 2, "one encode for the phrase, one for the image"
     assert set(segmenter._prompts) == {"cow"} and set(segmenter._images) == {b"pixels"}
     assert PROMPT_CACHE > IMAGE_CACHE
-
-
-def test_the_two_heads_do_not_share_a_cache():
-    """They cannot: their preprocessing differs, so the same photograph produces two different
-    encodes. One cache keyed on pixels alone would serve the click head the concept head's
-    features -- which is wrong by 3.5 standard deviations of the feature map, not by a rounding."""
-    segmenter, encoder = _segmenter(), _Recorder()
-    segmenter._remember(segmenter._images, b"same", encoder, IMAGE_CACHE)
-    segmenter._remember(segmenter._clicks, b"same", encoder, CLICK_CACHE)
-    assert encoder.calls == 2, "the same key in the two caches must not collide"
-    assert len(segmenter._images) == len(segmenter._clicks) == 1
-
-
-def test_the_click_cache_is_bounded_and_evicts_least_recently_used():
-    segmenter, encoder = _segmenter(), _Recorder()
-    for index in range(CLICK_CACHE + 2):
-        segmenter._remember(segmenter._clicks, bytes([index]), encoder, CLICK_CACHE)
-    assert len(segmenter._clicks) == CLICK_CACHE
-    assert encoder.calls == CLICK_CACHE + 2
 
 
 # --- the registry ------------------------------------------------------------------------------
@@ -549,6 +616,7 @@ def test_the_graphs_outputs_are_the_levels_the_neck_survives_the_scalp_with():
 def test_a_supplied_vision_encoder_turns_the_click_path_off():
     """Refusing beats answering from the concept pyramid, which reads different pixels."""
     blank = _segmenter()
-    blank.click = None
     with pytest.raises(RuntimeError, match="concept path only"):
-        blank.encode_click(np.zeros((8, 8, 3), dtype=np.uint8))
+        blank.segment(np.zeros((8, 8, 3), dtype=np.uint8),
+                      points=np.array([[1.0, 1.0]]), labels=np.array([1]))
+

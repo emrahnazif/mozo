@@ -9,9 +9,8 @@ and different weights, and runs both over the *same* trunk output: one feeds the
 (text and exemplar prompts), the other feeds the click head that the checkpoint's ``tracker.``
 weights drive. ``transformers`` implements only the concept half, so only one stack appears there.
 Both are built here because the checkpoint has weights for both and a strict load must find
-somewhere to put them. What they do *not* do is serve one encode between them: the two heads
-preprocess an image differently, so each runs its own trunk pass and reads its own stack. See
-:meth:`~..predictor.Segmenter.encode_click`.
+somewhere to put them, and because Meta's image path runs both off one trunk pass -- one encode
+serves a phrase and a click alike. See :meth:`~..predictor.Segmenter.encode_image`.
 
 The position encoding is a function of shape alone -- not of the image, and not of which stack
 produced the map -- so it lives in :mod:`..position`, which memoises it. Only the coarsest
@@ -102,10 +101,9 @@ class Neck(nn.Module):
     ) -> dict[str, list[Tensor] | Tensor]:
         """Run the requested stacks over ``x``, for the levels that survive the scalp.
 
-        Both stacks are built and loaded, but a caller rarely wants both at once: the two heads
-        preprocess an image differently, so each encodes separately and reads one stack. Running
-        the other and discarding it costs 62 ms on an M-series GPU and a transient 111 MB, which
-        is the same kind of waste the scalp above exists to avoid.
+        Both stacks are built and loaded. A segmenter with a click head asks for both, so one
+        encode serves a phrase and a click alike; one without asks for the concept stack alone,
+        since building a stack nothing will read costs 62 ms on an M-series GPU and 111 MB.
 
         Args:
             x: ``(B, hidden, grid, grid)`` from the trunk.

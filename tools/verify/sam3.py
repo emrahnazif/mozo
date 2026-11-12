@@ -15,7 +15,8 @@ machine, forever. A fingerprint is a hash of the numbers, not the numbers, so no
 Materials.
 
 Two kinds of fingerprint are recorded, and they carry different weight. The ``concept.*`` and
-``exemplars.*`` stages were checked against the published model when they were written, so a
+``exemplars.*`` and ``click.*`` scores, logits and masks were checked against the published
+model when they were written, so a
 failure there means mozo has diverged from Meta. The rest -- ``preprocess``, ``vision.*``,
 ``text.*``, ``tokenizer.ids``, ``concept.*.semantic`` and ``segmenter.*`` -- have no counterpart
 in the reference's public surface and were recorded from mozo alone; they catch drift from what
@@ -47,7 +48,7 @@ sys.path.insert(0, str(ROOT))
 
 from mozo.image import load_image  # noqa: E402
 from mozo.vendors.sam3_deploy import Segmenter  # noqa: E402
-from mozo.vendors.sam3_deploy.image import preprocess, preprocess_click  # noqa: E402
+from mozo.vendors.sam3_deploy.image import preprocess  # noqa: E402
 from mozo.weights import manifest  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "tests"))
@@ -190,10 +191,10 @@ def observe(image: Path, checkpoint: Path) -> dict[str, dict]:
     repeat = segmenter.predict(pixels, PROMPTS[0])
     seen["segmenter.cached.masks"] = digest(repeat["masks"])
 
-    # The click path. Its encode is deliberately not the concept path's -- the two preprocess
-    # differently -- so this also pins that the right one is being used.
-    seen["preprocess.click"] = digest(preprocess_click(pixels))
-    for level, tensor in enumerate(segmenter.encode_click(pixels)):
+    # The click path, read from the same encode as the concept path above -- Meta's image path
+    # runs the trunk once and feeds both heads -- so this also pins that no second encode with
+    # a preprocessing of its own has crept back in.
+    for level, tensor in enumerate(features["click"]):
         seen[f"click.features.{level}"] = digest(tensor)
     for spec in CLICKS:
         out = segmenter.segment(pixels, **click_prompt(spec, pixels.shape[:2]))

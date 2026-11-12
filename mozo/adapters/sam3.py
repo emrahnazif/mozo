@@ -66,10 +66,9 @@ class GraphVision:
 
     Raises:
         ValueError: If asked for the click stack. The published graph carries the concept stack
-            alone, and the click path reads a differently preprocessed image -- see
-            :meth:`~mozo.vendors.sam3_deploy.predictor.Segmenter.encode_click`. Refusing here
-            rather than returning the concept pyramid is the difference between an error and a
-            mask of the wrong pixels.
+            alone; the click head reads a pyramid of its own, built by the other half of the
+            dual neck. Refusing here rather than returning the concept pyramid is the difference
+            between an error and a mask of the wrong pixels.
     """
 
     def __init__(self, runner: CoreMLRunner, device: str) -> None:

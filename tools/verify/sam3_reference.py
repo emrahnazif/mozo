@@ -9,7 +9,7 @@ and then stores a fingerprint of every stage mozo produces for :mod:`sam3` to ch
 Those two sets are not the same size, and the difference matters. The reference exposes
 ``pred_masks``, ``pred_boxes``, ``pred_logits`` and ``presence_logit_dec`` from
 ``forward_grounding``, so the ``concept.*`` and ``exemplars.*`` fingerprints are genuinely
-validated against Meta. ``preprocess``, ``vision.*``, ``text.*``, ``tokenizer.ids``,
+validated against Meta, and ``predict_inst`` returns the click path's masks, scores and logits. ``preprocess``, ``vision.*``, ``text.*``, ``tokenizer.ids``,
 ``concept.*.semantic`` and ``segmenter.*`` have no counterpart there; they are written from mozo
 alone and are regression fingerprints, not reference-validated ones. The closing summary says how
 many of each were written.
@@ -154,27 +154,23 @@ def reference_stages(image: Path, checkpoint: Path, bpe: Path) -> dict[str, dict
     seen["exemplars.logits"] = digest(raw["pred_logits"].squeeze(-1))
     seen["exemplars.presence"] = digest(raw["presence_logit_dec"])
 
-    # The click path lives on a second predictor that the builder leaves without a backbone,
-    # because upstream shares the detector's. Handing it over is what makes it runnable; it is
-    # the same module object, so no weight is loaded twice and none is substituted.
-    clicker = model.inst_interactive_predictor
-    clicker.model.backbone = model.backbone
+    # The click path as Meta's own example runs it (examples/sam3_for_sam1_task_example.ipynb):
+    # ``Sam3Processor.set_image`` once, then ``predict_inst`` against that state, so the click
+    # head reads the same encode as the concept head. Not ``inst_interactive_predictor.set_image``,
+    # which prepares the image the way SAM 2 does and needs a second encode -- the builder does
+    # not even give that predictor a backbone of its own.
+    state = processor.set_image(pil)
     array = np.asarray(pil)
-    clicker.set_image(array)
     for spec in CLICKS:
         prompt = click_prompt(spec, array.shape[:2])
-        masks, scores, low = clicker.predict(
-            point_coords=prompt["points"], point_labels=prompt["labels"],
+        masks, scores, low = model.predict_inst(
+            state, point_coords=prompt["points"], point_labels=prompt["labels"],
             box=prompt["boxes"], multimask_output=prompt["multimask_output"],
         )
-        # Binary masks are left out on purpose. Upstream fills holes up to 256 low-resolution
-        # pixels before thresholding, using a CUDA connected-components extension that mozo does
-        # not carry -- the same omission sam2_deploy records. Our masks come out a strict subset
-        # of theirs, differing only inside those holes, so comparing them would fail on a
-        # difference that is deliberate. The logits they are thresholded from are compared, and
-        # those are exact.
         # Upstream returns one prompt's results unbatched; mozo keeps the batch dimension, and
         # a digest covers shape as well as bytes, so the axis is put back rather than compared away.
+        # Its masks come back as 0.0/1.0 floats; mozo's are bool, and the cast loses nothing.
+        seen[f"click.{spec[0]}.masks"] = digest(torch.from_numpy(masks).bool()[None])
         seen[f"click.{spec[0]}.scores"] = digest(torch.from_numpy(scores)[None])
         seen[f"click.{spec[0]}.logits"] = digest(torch.from_numpy(low)[None])
     return seen

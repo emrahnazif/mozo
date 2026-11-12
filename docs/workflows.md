@@ -26,7 +26,19 @@ worth looking at, and hiding it would mean running the whole thing again to see 
 reports each node as it starts and finishes, which is what the editor draws.
 
 Overrides address a parameter by name: `run(source=..., threshold=0.6)`. A name more than one node
-uses is refused rather than guessed at, and the message names the nodes that have it.
+uses is refused rather than guessed at; address one node's as `node.parameter` instead, which is
+how SAM 3 and Grounding DINO side by side get different thresholds:
+
+```python
+workflow.run(source="street.jpg", **{"sam.threshold": 0.5, "dino.threshold": 0.3})
+```
+
+```bash
+mozo run compare.json --file street.jpg --set sam.threshold=0.5 --set dino.threshold=0.3
+```
+
+Over HTTP the `inputs` object takes the same keys. Giving one parameter two ways in one run —
+`threshold` and `dino.threshold` — is refused rather than one silently winning.
 
 ### Where the models come from
 
@@ -72,9 +84,26 @@ runtime asks `mozo.weights.download_size` with it.
 
 The text-prompted nodes — `sam3`, `owlv2`, `grounding_dino`, `clip`, `siglip2` — take a list of
 prompts, one per line in the editor, each exactly as written: `"bolt, M8"` is one prompt. Each
-result's `class_id` is the index of the prompt that found it, and its `class_name` is that prompt.
-A workflow saved before prompts were a list holds a comma-separated string, and it still means
-what it meant.
+result's `class_id` is the index of the prompt that found it — or, for CLIP and SigLIP 2, of the
+label it chose — and its `class_name` is that prompt. That holds for every one of them, so results
+read back the same way whichever model produced them. A list with an empty entry is refused rather
+than shortened, since shortening it would move every later prompt's `class_id`. A workflow saved
+before prompts were a list holds a comma-separated string, and it still means what it meant.
+
+`workflow.prompt_parameters` names every parameter that takes prompts, as the `node.parameter`
+keys an override takes, so a host gives one list to every prompted node without knowing what any
+node calls it:
+
+```python
+prompts = ["hard hat", "vest", "boot"]
+results = workflow.run(source="site.jpg",
+                       **{key: prompts for key in workflow.prompt_parameters})
+```
+
+Whether every node gets the same list is the caller's choice; give each its own by key instead.
+Write prompts as short noun phrases — `"hard hat"`, not `"a photo of a hard hat"`. The locating
+models find nothing for a caption: on the test photograph SAM 3 and Grounding DINO each found six
+or more people for `"person"` and none for `"a photo of a person"`, while CLIP ranked both the same.
 
 ### Annotating a list of images
 
@@ -106,6 +135,8 @@ call already running finishes, and the run's threads exit right after it.
 
 ```json
 {
+  "name": "Detect street objects",
+  "description": "Segment everything YOLO knows in one photo.",
   "nodes": [
     {"id": "load-1", "type": "read_media",
      "position": {"x": 0, "y": 0},
@@ -120,10 +151,17 @@ call already running finishes, and the run's threads exit right after it.
 }
 ```
 
+`name` and `description` are optional: they are what a person choosing a workflow reads, the
+editor shows and edits them, and a file without them loads as it always did. They are written back
+only when set, so saving an old file changes nothing in it.
+
 A workflow either is valid or does not exist. Loading one checks that every connection names ports
 that exist, that the types on both ends agree, that every input is fed exactly once, and that the
 graph is acyclic — so a workflow that loaded will not fail for a structural reason halfway through a
-run with a model already on the GPU.
+run with a model already on the GPU. Every way a file can fail to be a workflow raises one error,
+`mozo.workflow.WorkflowError` — a `ValueError` — with a message that says which: an unknown node
+type names the ones there are. A missing file stays `FileNotFoundError`, and an override that names
+nothing stays a `KeyError`: that is the caller's mistake, not the file's.
 
 ## Nodes
 
@@ -139,8 +177,8 @@ def draw_boxes(image: Image, detections: Detections,
 
 One rule splits the two kinds of argument: **an annotation that names a port type is an input;
 anything else is a parameter.** Inputs are wired from other nodes; parameters are typed in. The
-widget the editor draws comes from the annotation too — `int`, `float`, `str`, `bool`, `Color`, and
-`Literal[...]` for a choice. `int | None` means the parameter may be left unset, which is how a
+widget the editor draws comes from the annotation too — `int`, `float`, `str`, `bool`, `Color`,
+`list[str]`, and `Literal[...]` for a choice. `int | None` means the parameter may be left unset, which is how a
 thickness scales itself to the image.
 
 The catalogue the editor reads is generated from these declarations, so it cannot drift from what
@@ -151,6 +189,13 @@ variants("edgetam") = "edgetam"`: the editor offers the variants as a dropdown, 
 the family from it — which is how `edgetam_boxes` is known to download EdgeTAM. A choice of
 architecture for a checkpoint of your own is `architectures("rfdetr")` instead: nothing is
 downloaded for it.
+
+A node whose results are numbered by a list of descriptions annotates that list `Prompts` instead
+of `list[str]`, and reads it with `mozo.text.prompt_list`. The mark is a promise about the output:
+**each result's `class_id` is the index into this list, and its `class_name` that entry.** Mark a
+node only if it keeps it — that is what lets `prompt_parameters` hand it a host's class list and
+read the answers back like any other prompted node's. The catalogue flags the parameter with
+`"prompts": true`.
 
 ## Port types
 

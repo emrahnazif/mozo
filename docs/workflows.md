@@ -76,12 +76,13 @@ Three graphs cover the common jobs:
 | Job | Graph |
 |---|---|
 | Find objects by name | `read_media` → `sam3` |
-| Find boxes, then outline them | `read_media` → `grounding_dino` → `edgetam_boxes` (or `sam2_boxes`) |
+| Find boxes, then outline them | `read_media` → `grounding_dino` → `edgetam_boxes` (or `sam2_boxes`, `sam3_boxes`) |
 | Give existing boxes masks | `read_media` + `read_annotations` → `edgetam_boxes` |
 
-`sam2_boxes` and `edgetam_boxes` add a mask to every box they are given, in one call per image,
-and keep every row as it came: same order, same class, name, score and box. A row whose mask comes
-back empty keeps its box with an empty mask. An image with no boxes never runs the model.
+`sam2_boxes`, `edgetam_boxes` and `sam3_boxes` add a mask to every box they are given, in one
+call per image, and keep every row as it came: same order, same class, name, score and box. A row
+whose mask comes back empty keeps its box with an empty mask. An image with no boxes never runs the
+model. `sam3_boxes` after a `sam3` node on the same image reuses that node's image encode.
 
 `read_annotations` reads back the file `save_annotations` writes, matching each line to the image
 by its file name and checking the line was written for an image of that size. Feed it files — a
@@ -183,6 +184,7 @@ asks for `all`; a batch job over full-resolution frames should not have to.
 ## What is not there
 
 - **Tracking.** Stateful across frames, and mozo has no concept of a video.
-- **Zones**, and clicking for **SAM 2** / **EdgeTAM**. Both are pixel coordinates, and the editor
-  has no way yet to express a click. Boxes already work: `sam2_boxes` and `edgetam_boxes` segment
-  the boxes another node found. A tool that clicks calls the model directly.
+- **Zones**, and clicking for **SAM 2** / **EdgeTAM** / **SAM 3**. Both are pixel coordinates, and
+  the editor has no way yet to express a click. Boxes already work: `sam2_boxes`, `edgetam_boxes`
+  and `sam3_boxes` segment the boxes another node found. A tool that clicks calls the model
+  directly.

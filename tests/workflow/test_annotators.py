@@ -124,7 +124,8 @@ def _save(source, path, *answers):
 
 
 class TestSegmentingBoxes:
-    @pytest.mark.parametrize("node, family", [("edgetam_boxes", "edgetam"), ("sam2_boxes", "sam2")])
+    @pytest.mark.parametrize("node, family", [("edgetam_boxes", "edgetam"), ("sam2_boxes", "sam2"),
+                                              ("sam3_boxes", "sam3")])
     def test_every_row_comes_back_in_order_with_its_fields_and_a_mask(self, node, family):
         out = _detect_then_segment(node).run(
             models=Provider(grounding_dino=Detector(THREE), **{family: Segmenter()}))["segment"]
@@ -173,6 +174,17 @@ def test_real_models_detect_then_segment_keeping_every_detected_row():
     """RF-DETR finds the boxes and EdgeTAM outlines them, offline from the local cache."""
     _require(("rfdetr", "nano"), ("edgetam", "edgetam"))
     results = _detect_then_segment(detector=("rfdetr", {"variant": "nano"})).run(models=_on_cpu())
+
+    assert len(results["detect"]) > 0, "the fixture photograph has people in it"
+    assert _rows(results["segment"]) == _rows(results["detect"])
+    assert all(row.masks and row.masks[0].any() for row in results["segment"])
+
+
+def test_real_sam3_outlines_the_boxes_it_is_given():
+    """The same graph with SAM 3's click head doing the outlining, through its real adapter."""
+    _require(("rfdetr", "nano"), ("sam3", "sam3"))
+    results = _detect_then_segment("sam3_boxes", detector=("rfdetr", {"variant": "nano"})).run(
+        models=_on_cpu())
 
     assert len(results["detect"]) > 0, "the fixture photograph has people in it"
     assert _rows(results["segment"]) == _rows(results["detect"])

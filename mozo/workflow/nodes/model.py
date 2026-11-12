@@ -205,6 +205,18 @@ def edgetam_boxes(image: Image, detections: Detections, models: Models,
     return _segment_boxes(models, "edgetam", variant, image, detections)
 
 
+@node(category="Segment", exclusive=True)
+def sam3_boxes(image: Image, detections: Detections, models: Models,
+               variant: variants("sam3") = "sam3") -> Detections:
+    """SAM 3 by Meta -- a mask for each box it is given, the rows otherwise unchanged.
+
+    Everything ``sam2_boxes`` promises, from SAM 3's own click head: the masks Meta's
+    ``predict_inst`` draws for the same boxes, bit for bit. On the image encode a ``sam3`` node
+    already paid for, these boxes cost only their decode. The weights carry the SAM License.
+    """
+    return _segment_boxes(models, "sam3", variant, image, detections)
+
+
 # --- Edit ------------------------------------------------------------------------------------------
 
 @node(category="Edit", exclusive=True)

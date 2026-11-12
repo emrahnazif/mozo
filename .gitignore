@@ -233,3 +233,4 @@ weights/
 # `mozo/workflow/static/`, which is committed, and never ships itself.
 ui/node_modules/
 ui/.vite/
+/plans

@@ -228,16 +228,65 @@ Lists of different lengths are refused rather than padded.
 
 ```
 GET  /workflow            the editor
-GET  /workflow/nodes      the catalogue
+GET  /workflow/nodes      the catalogue, and whether /process is offered
 POST /workflow/validate   build it, and say why not
 POST /workflow/run        run it
 POST /workflow/stream     run it, one server-sent event per node
+POST /workflow/process    run it over its whole source, with progress
 ```
 
 `run` and `stream` take the document as a form field, an optional uploaded image, and `include`,
 which is `terminals` by default. Sending every node's output means encoding every intermediate: on
 one 1920×1281 photograph a five-node workflow takes 27 ms to run and 347 ms to encode. The editor
 asks for `all`; a batch job over full-resolution frames should not have to.
+
+## Inside your own application
+
+The routes come from `workflow_router()`, and mozo's server mounts the default one. An application
+of your own mounts its own, under any prefix, with how its models load:
+
+```python
+from mozo.workflow.api import workflow_router
+
+app.include_router(workflow_router(models=manager.get_model, process=False), prefix="/mozo")
+```
+
+- `models` is what `run(models=...)` takes: a `ModelManager` or anything shaped like `get_model`.
+  Without it every model is loaded mozo's own way — a second copy beside yours, possibly on
+  another device.
+- `process=False` leaves out whole-source runs, for an application that runs workflows as jobs of
+  its own; the editor then offers Test and not Run.
+
+The editor is then at `/mozo/workflow`. It finds its files and its API from where it was served,
+so the prefix needs no configuration. `/mozo/workflow?toolbar=0` leaves out its toolbar, for a
+page that frames it.
+
+To put the editor in a page of your own, mount it into an element:
+
+```html
+<div id="editor" style="height: 600px"></div>
+<script type="module">
+  import { mount } from "/mozo/workflow/assets/editor.js";
+
+  const editor = mount(document.querySelector("#editor"), { document: saved, toolbar: false });
+  editor.on("change", () => markUnsaved());
+  saveButton.onclick = () => save(editor.getDocument());
+  testButton.onclick = async () => show(await editor.test(file));
+</script>
+```
+
+| | |
+|---|---|
+| `mount(element, {document, toolbar, base})` | Draw an editor filling `element`. `document` opens a workflow, `toolbar: false` leaves the buttons to you, `base` points at a router elsewhere. |
+| `getDocument()` / `setDocument(document)` | The workflow on the canvas, in and out. Setting one is not a change; a connection to a node or port that is not there is left out, and the editor says which. |
+| `on("change", listener)` | Called with the document whenever the person changes it — once a drag ends, not during it. Returns a function that stops listening. |
+| `test(file)` | Test on a file, or on the one chosen on the input node. Resolves to every node's output. |
+| `destroy()` | Take it off the page. |
+
+It keeps to its own box. It mounts in a shadow root, so its styles cannot reach your page and
+yours cannot reach it. Restyle it through its tokens, set on the element you mounted it into — `--mz-color-bg`, `--mz-color-text`, `--mz-font-sans`, `--mz-radius-md`
+and the rest in `ui/src/styles/editor.css` — and `color-scheme: dark` there turns it dark. Nodes
+your application registers with `@node` are in its palette, because the palette is the registry.
 
 ## What is not there
 

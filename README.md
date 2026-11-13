@@ -237,7 +237,9 @@ model.unit                           # 'metres' — or None, and then it is not 
 ### 3. Workflows
 
 A workflow is a graph of nodes in a JSON file. Draw it at `/workflow`, or write it by hand; run it
-from Python, from the command line, or over HTTP.
+from Python, from the command line, or over HTTP. The editor also mounts into a page of your own,
+and the routes into your own FastAPI app — see
+[docs/workflows.md](docs/workflows.md#inside-your-own-application).
 
 ![The mozo workflow UI](docs/workflow.png)
 
@@ -532,7 +534,7 @@ The workflow editor is a Svelte app in `ui/`. Its build output is committed, so 
 *change* it and never to install mozo:
 
 ```bash
-cd ui && npm install && npm run build   # writes mozo/workflow/static/
+cd ui && npm install && npm run build   # writes mozo/workflow/static/assets/
 ```
 
 ## Links

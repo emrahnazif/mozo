@@ -35,7 +35,7 @@ from .prepared import PreparedImages, limit_from_environment
 from .registry import (BOXED, CLICKABLE, ENCODES, MODEL_REGISTRY, PREPARES, PROMPTED,
                        get_model_info)
 from .weights import license_of
-from .workflow.api import router as workflow_router
+from .workflow.api import router as workflow_routes
 
 app = FastAPI(
     title="Mozo Model Server",
@@ -62,7 +62,7 @@ app.state.prepared = PreparedImages(limit_from_environment())
 # The one place in mozo that reaches into the workflow runtime. Everything else about that
 # subpackage is invisible from here, and `tests/workflow/test_isolation.py` keeps it that way --
 # importing it costs PixelFlow, which a caller of `get_model` should never pay for.
-app.include_router(workflow_router)
+app.include_router(workflow_routes)
 
 _STATIC = Path(__file__).parent / "static"
 

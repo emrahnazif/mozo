@@ -1,58 +1,80 @@
 <script>
-    import { onMount, onDestroy, setContext } from 'svelte';
-    import { writable, get } from 'svelte/store';
-    import { SvelteFlow, Controls, ControlButton, Background, MiniMap, SvelteFlowProvider } from '@xyflow/svelte';
+    /**
+     * One editor: the canvas, the palette, the properties drawer and -- unless the host drives it
+     * -- the toolbar.
+     *
+     * Everything it draws stays inside its own box: nothing is fixed to the window, so a host can
+     * put it in any element of any size. What a host can ask of it is exported below and wrapped
+     * by `mount` in editor.js: the document in and out, a "change" event, and Test.
+     */
+    import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+    import { get, writable } from 'svelte/store';
+    import { Background, SvelteFlow, SvelteFlowProvider } from '@xyflow/svelte';
 
     import Toolbar from './lib/Toolbar.svelte';
     import CustomNode from './lib/CustomNode.svelte';
     import FlowDropZone from './lib/FlowDropZone.svelte';
-    import DrawerSidebar from './lib/DrawerSidebar.svelte';
-    import NodePalettePanel from './lib/NodePalettePanel.svelte';
+    import Palette from './lib/Palette.svelte';
+    import PropertiesPanel from './lib/PropertiesPanel.svelte';
     import RunProgress from './lib/RunProgress.svelte';
-    import { generateNodeClasses } from './lib/utils.js';
-    import { fetchCatalogue, fileNameFor, fromDocument, process, stream, toDocument } from './lib/api.js';
-    import { openSidebar, closeSidebar, pendingConnection, clearPendingConnection, chosenFile, running, about, noAbout } from './lib/stores.js';
+    import { client, drawable, fileNameFor, fromDocument, toDocument } from './lib/api.js';
+    import { createState, noAbout, provideState } from './lib/state.js';
+
+    /** Where the workflow router is mounted, ending in `/`. */
+    export let base;
+    /** Whether to draw the toolbar. A host that hides it drives the editor through the exports. */
+    export let toolbar = true;
+    /** The workflow to open, as mozo's document format; none is a fresh canvas. */
+    export let document = null;
+
+    const api = client(base);
+    const dispatch = createEventDispatcher();
+    const state = createState();
+    provideState(state);
+    const { catalogue, drawerOpen, chosenFile, running, about } = state;
 
     // Every workflow starts here: pixels have to come from somewhere, and this is the node whose
     // path the runner overrides per image.
-    const createLoadImageNode = () => ({
-        id: 'read_media-1',
-        type: 'default',
-        position: { x: 100, y: 100 },
+    const startingNode = () => ({
+        id: 'read_media-1', type: 'default', position: { x: 100, y: 100 },
         data: { nodeType: 'read_media', parameters: {} },
-        class: 'node-category-input'
     });
 
-    let nodes = writable([createLoadImageNode()]);
-    let edges = writable([]);
-    let selectedNode = writable(null);
-    let availableNodes = writable([]);
-    let executionResults = writable(null);
-    let isExecuting = writable(false);
+    const nodes = writable([startingNode()]);
+    const edges = writable([]);
+    const selectedNode = writable(null);
+    const executionResults = writable(null);
+    const isExecuting = writable(false);
+    //: Whether the server offers a whole-source run. Until the catalogue says, it does not.
+    let processOffered = false;
 
     //: The abort handle of the run in progress, or null. Cancelling is aborting: the connection
     //: closes, the server's generator closes with it, and the run ends having closed its files.
     let controller = null;
 
-    let svelteFlowInstance;
-    //: What the last connection was refused for, shown beside the canvas rather than in an alert.
-    //: A modal stops the editor to say a drag did not take, which the missing edge already said.
+    //: What the last action was refused for, shown over the canvas rather than in an alert. A
+    //: modal stops the editor to say a drag did not take, which the missing edge already said.
     let refusal = null;
     let refusalTimer;
 
-    // Set context for child components - must be during initialization
-    setContext('availableNodes', availableNodes);
+    const nodeTypes = { default: CustomNode };
 
-    // Define custom node types for SvelteFlow
-    const nodeTypes = {
-        default: CustomNode
-    };
+    //: The document as last reported, so "change" fires for a change to the workflow and not for a
+    //: node being selected or measured, which the canvas also writes into its nodes.
+    let reported = JSON.stringify(toDocument([startingNode()], [], noAbout()));
 
     onMount(async () => {
         try {
-            availableNodes.set(await fetchCatalogue());
+            const offered = await api.catalogue();
+            catalogue.set(offered.nodes);
+            processOffered = offered.process;
         } catch (error) {
             say(`Could not load the node catalogue: ${error.message}`);
+        } finally {
+            ready = true;
+            const held = waiting;
+            waiting = null;
+            if (held) open(held);
         }
     });
 
@@ -63,109 +85,99 @@
         refusalTimer = setTimeout(() => (refusal = null), 6000);
     }
 
-    function initializeCanvas() {
-        nodes.set([createLoadImageNode()]);
-        edges.set([]);
-        about.set(noAbout());
+    // --- What a host asks of it ---------------------------------------------------------------
+
+    //: Whether the editor knows its nodes. Until then a document is held, not drawn: its edges have
+    //: no handles yet -- the handles come from the catalogue -- and see `drawable` in api.js for
+    //: what an edge to no handle does.
+    let ready = false;
+    let waiting = document;
+
+    /** The workflow on the canvas, as mozo's document format -- or the one waiting to be drawn. */
+    export function getDocument() {
+        if (waiting) {
+            const held = fromDocument(waiting);
+            return toDocument(held.nodes, held.edges, held.about);
+        }
+        return toDocument(get(nodes), get(edges), get(about));
     }
+
+    /** Open *opened* -- a document in mozo's format -- in place of whatever is on the canvas. */
+    export function setDocument(opened) {
+        if (ready) open(opened);
+        else waiting = opened;
+    }
+
+    /** Draw *opened*, leaving out every edge whose node or port is not here -- see `drawable`. */
+    function open(opened) {
+        const canvas = fromDocument(opened);
+        const { drawn, left } = drawable(canvas.edges, canvas.nodes, $catalogue);
+        if (left.length) {
+            say(`Left out ${left.length === 1 ? 'a connection' : `${left.length} connections`} to a `
+                + 'node or port that is not here: '
+                + left.map(edge => `${edge.source}.${edge.sourceHandle} → ${edge.target}.${edge.targetHandle}`).join(', ')
+                + '.');
+        }
+        nodes.set(canvas.nodes);
+        edges.set(drawn);
+        about.set(canvas.about);
+        selectedNode.set(null);
+        executionResults.set(null);
+        drawerOpen.set(false);
+        reported = JSON.stringify(getDocument());
+    }
+
+    $: announce($nodes, $edges, $about);
+
+    function announce() {
+        // Once a drag ends rather than on every frame of it: a host saving on "change" would
+        // otherwise save sixty times a second.
+        if ($nodes.some(node => node.dragging)) return;
+        const now = getDocument();
+        const serialised = JSON.stringify(now);
+        if (serialised === reported) return;
+        reported = serialised;
+        dispatch('change', now);
+    }
+
+    // --- The canvas ---------------------------------------------------------------------------
 
     function handleNodeDrop(event) {
         const { nodeType, position } = event.detail;
-
-        const category = getNodeCategory(nodeType);
-        const newNode = {
+        nodes.update(n => [...n, {
             id: `${nodeType}-${Date.now()}`,
             type: 'default',
             position,
-            data: {
-                nodeType: nodeType,
-                parameters: getDefaultParameters()
-            },
-            class: generateNodeClasses(nodeType, category),
-            origin: [0.5, 0.0]
-        };
-
-        nodes.update(n => [...n, newNode]);
-
-        // Check if there's a pending connection to auto-connect
-        const pending = $pendingConnection;
-        if (pending) {
-            // Create auto-connection between pending handle and new node
-            createAutoConnection(pending, newNode);
-            clearPendingConnection();
-        }
-    }
-
-    /** A new node sets nothing. Unset means the node's own default, on both sides of the wire. */
-    function getDefaultParameters() {
-        return {};
-    }
-
-    function getNodeCategory(nodeType) {
-        const currentNodes = $availableNodes || {};
-        return currentNodes[nodeType]?.category || 'Other';
+            // A new node sets nothing. Unset means the node's own default, on both sides of the wire.
+            data: { nodeType, parameters: {} },
+            origin: [0.5, 0.0],
+        }]);
     }
 
     function onNodeClick(event) {
-        const node = event.detail.node;
-
-        selectedNode.set(node);
-        // Auto-open properties panel when a node is selected
-        openSidebar('properties');
+        selectedNode.set(event.detail.node);
+        drawerOpen.set(true);
     }
 
     function onPaneClick() {
-        // Close drawer when clicking on empty canvas
-        closeSidebar();
-        // Clear any pending connections
-        clearPendingConnection();
+        drawerOpen.set(false);
     }
 
-    function createAutoConnection(pending, newNode) {
-        const { nodeId: pendingNodeId, handleId: pendingHandleId, handleType: pendingHandleType } = pending;
+    function onKeydown(event) {
+        if (event.key === 'Escape') drawerOpen.set(false);
+    }
 
-        let sourceNode, targetNode, sourceHandle, targetHandle;
+    //: The editor's own box. Its keys are listened for here and not on the window, so Escape on
+    //: the host's page is the host's.
+    let root;
 
-        if (pendingHandleType === 'source') {
-            // Pending node has output handle, new node should provide input
-            sourceNode = pendingNodeId;
-            targetNode = newNode.id;
-            sourceHandle = pendingHandleId;
-            targetHandle = getDefaultInput(newNode.data.nodeType);
-        } else {
-            // Pending node has input handle, new node should provide output
-            sourceNode = newNode.id;
-            targetNode = pendingNodeId;
-            sourceHandle = getDefaultOutput(newNode.data.nodeType);
-            targetHandle = pendingHandleId;
-        }
-
-        // Validate connection before creating
-        if (sourceHandle && targetHandle) {
-            const sourceNodeType = pendingHandleType === 'source' ?
-                $nodes.find(n => n.id === pendingNodeId)?.data?.nodeType :
-                newNode.data.nodeType;
-            const targetNodeType = pendingHandleType === 'target' ?
-                $nodes.find(n => n.id === pendingNodeId)?.data?.nodeType :
-                newNode.data.nodeType;
-
-            if (portsAgree(sourceNodeType, sourceHandle, targetNodeType, targetHandle)) {
-                const newEdge = {
-                    id: `edge-${Date.now()}`,
-                    source: sourceNode,
-                    target: targetNode,
-                    sourceHandle: sourceHandle,
-                    targetHandle: targetHandle
-                };
-
-                edges.update(edges => [...edges, newEdge]);
-            } else {
-                say(`${sourceNodeType}.${sourceHandle} carries `
-                    + `${typeOf($availableNodes?.[sourceNodeType]?.outputs, sourceHandle)}, but `
-                    + `${targetNodeType}.${targetHandle} takes `
-                    + `${typeOf($availableNodes?.[targetNodeType]?.inputs, targetHandle)}.`);
-            }
-        }
+    /**
+     * Take focus into the editor when it is pressed, so its keys reach it. The canvas cancels the
+     * browser's own focusing to drag, so pressing a node would otherwise leave focus on the page.
+     * A form control is left to focus itself.
+     */
+    function focusIn(event) {
+        if (!event.target.closest('input, select, textarea, button, label')) root.focus({ preventScroll: true });
     }
 
     /**
@@ -185,106 +197,54 @@
         // The handles the user actually dragged. Only fall back to the first port when a drag did
         // not name one -- picking the first regardless would make a multi-output node's second
         // port unreachable, and would send a handle nobody chose.
-        return portsAgree(source, connection.sourceHandle || getDefaultOutput(source),
-                          target, connection.targetHandle || getDefaultInput(target));
-    }
-
-    /** Whether what one port carries is what the other takes. */
-    function portsAgree(sourceNodeType, sourceHandle, targetNodeType, targetHandle) {
-        const sourceNodeInfo = $availableNodes?.[sourceNodeType];
-        const targetNodeInfo = $availableNodes?.[targetNodeType];
-
-        if (!sourceNodeInfo || !targetNodeInfo) return false;
-        if (!sourceHandle || !targetHandle) return false;
-
+        const out = connection.sourceHandle || $catalogue[source]?.outputs?.[0]?.name;
+        const into = connection.targetHandle || $catalogue[target]?.inputs?.[0]?.name;
         // Ports are ordered lists of {name, type}, so they are found by name rather than indexed.
-        // Indexing an array by a handle name yields undefined; indexing it by position yields a
-        // port object, and comparing two of those compares references, which are never equal.
-        const source = sourceNodeInfo.outputs?.find(port => port.name === sourceHandle);
-        const target = targetNodeInfo.inputs?.find(port => port.name === targetHandle);
-
-        if (!source || !target) return false;
-        return source.type === target.type;
-    }
-
-    /** What a named port carries, for saying why two of them would not join. */
-    function typeOf(ports, name) {
-        return ports?.find(port => port.name === name)?.type || 'nothing';
-    }
-
-    /** The name of a node's first output port, for a drag that did not name one. */
-    function getDefaultOutput(nodeType) {
-        return $availableNodes?.[nodeType]?.outputs?.[0]?.name || null;
-    }
-
-    /** The name of a node's first input port, for a drag that did not name one. */
-    function getDefaultInput(nodeType) {
-        return $availableNodes?.[nodeType]?.inputs?.[0]?.name || null;
+        const carried = $catalogue[source]?.outputs?.find(port => port.name === out);
+        const taken = $catalogue[target]?.inputs?.find(port => port.name === into);
+        return !!carried && !!taken && carried.type === taken.type;
     }
 
     function updateNodeParameters(nodeId, parameters) {
-        nodes.update(n =>
-            n.map(node =>
-                node.id === nodeId
-                    ? { ...node, data: { ...node.data, parameters } }
-                    : node
-            )
-        );
+        const update = node => node && node.id === nodeId
+            ? { ...node, data: { ...node.data, parameters } } : node;
+        nodes.update(n => n.map(update));
         // And the selection, which the panel reads its current values from. Left stale, the panel
         // spreads the values it was opened with, so setting a second parameter discarded the
         // first.
-        selectedNode.update(node =>
-            node && node.id === nodeId
-                ? { ...node, data: { ...node.data, parameters } }
-                : node
-        );
+        selectedNode.update(update);
     }
 
-    // Helper to strip execution state classes from a node's class string
-    function stripExecutionClasses(classStr) {
-        return classStr
-            .replace(/\s*node-running/g, '')
-            .replace(/\s*node-completed/g, '')
-            .replace(/\s*node-error/g, '')
-            .replace(/\s*node-has-output/g, '');
+    /** Mark one node with what a Test is doing to it, or every node with nothing. */
+    function mark(nodeId, status) {
+        nodes.update(n => n.map(node =>
+            nodeId === null || node.id === nodeId ? { ...node, class: status ? `mz-${status}` : '' } : node));
     }
 
-    // Update a single node's class with execution state
-    function updateNodeClass(nodeId, stateClass) {
-        nodes.update(n => n.map(node => {
-            if (node.id !== nodeId) return node;
-            const baseClass = stripExecutionClasses(node.class);
-            return { ...node, class: `${baseClass} ${stateClass}` };
-        }));
-    }
+    // --- The verbs ----------------------------------------------------------------------------
 
-    async function testWorkflow() {
+    /**
+     * Test the workflow on *file* -- an image or a video -- or on the one chosen on its input
+     * node. Resolves to `{success, results, error}`: every node's output, keyed by node id.
+     */
+    export async function test(file = $chosenFile) {
         isExecuting.set(true);
         executionResults.set({ success: true, results: {} });
-
-        // Reset all node classes before starting
-        nodes.update(n => n.map(node => ({
-            ...node,
-            class: stripExecutionClasses(node.class)
-        })));
+        mark(null, null);
 
         try {
-            await stream(toDocument($nodes, $edges, $about), $chosenFile, (event) => {
-                if (event.done) {
-                    isExecuting.set(false);
-                } else if (event.status === 'running') {
-                    updateNodeClass(event.node, 'node-running');
-                } else if (event.status === 'completed') {
-                    updateNodeClass(event.node, 'node-completed node-has-output');
+            await api.stream(getDocument(), file, (event) => {
+                if (event.status === 'running' || event.status === 'completed') {
+                    mark(event.node, event.status);
+                }
+                if (event.status === 'completed') {
                     executionResults.update(r => ({
-                        ...r,
-                        results: { ...r.results, [event.node]: event.output }
+                        ...r, results: { ...r.results, [event.node]: event.output },
                     }));
                 } else if (event.status === 'failed') {
-                    if (event.node) updateNodeClass(event.node, 'node-error');
+                    if (event.node) mark(event.node, 'failed');
                     executionResults.update(r => ({ ...r, success: false, error: event.error }));
                     say(event.error);
-                    isExecuting.set(false);
                 }
             });
         } catch (error) {
@@ -293,6 +253,7 @@
         } finally {
             isExecuting.set(false);
         }
+        return get(executionResults);
     }
 
     /**
@@ -311,24 +272,21 @@
         const began = performance.now();
 
         try {
-            await process(toDocument($nodes, $edges, $about), $chosenFile, { preview: watched, signal: controller.signal },
-                          (event) => {
+            await api.process(getDocument(), $chosenFile, { preview: watched, signal: controller.signal },
+                              (event) => {
                 if (event.status === 'failed') {
                     say(event.error);
                     running.set(null);
-                    return;
+                } else if (event.done) {
+                    running.update(r => r && { ...r, items: event.items, seconds: event.seconds, done: true });
+                } else {
+                    running.update(r => r && {
+                        ...r,
+                        items: event.item,
+                        seconds: (performance.now() - began) / 1000,
+                        preview: event.preview || r.preview,
+                    });
                 }
-                if (event.done) {
-                    running.update(r => r && { ...r, items: event.items,
-                                               seconds: event.seconds, done: true });
-                    return;
-                }
-                running.update(r => r && {
-                    ...r,
-                    items: event.item,
-                    seconds: (performance.now() - began) / 1000,
-                    preview: event.preview || r.preview,
-                });
             });
         } catch (error) {
             // An abort is the Cancel button working, not a failure to report.
@@ -348,140 +306,108 @@
     }
 
     function exportWorkflow() {
-        const dataStr = JSON.stringify(toDocument($nodes, $edges, $about), null, 2);
-        const dataBlob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(dataBlob);
-
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = fileNameFor($about);
+        const blob = new Blob([JSON.stringify(getDocument(), null, 2)], { type: 'application/json' });
+        const link = Object.assign(window.document.createElement('a'), {
+            href: URL.createObjectURL(blob), download: fileNameFor($about),
+        });
         link.click();
-
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(link.href);
     }
 
-    function importWorkflow(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const canvas = fromDocument(JSON.parse(e.target.result), $availableNodes);
-                nodes.set(canvas.nodes.map(node => ({
-                    ...node, type: 'default',
-                    class: generateNodeClasses(
-                        node.data.nodeType, $availableNodes[node.data.nodeType]?.category || '')
-                })));
-                edges.set(canvas.edges);
-                about.set(canvas.about);
-            } catch (error) {
-                say(`That file is not a workflow: ${error.message}`);
-            }
-        };
-        reader.readAsText(file);
+    async function importWorkflow(file) {
+        try {
+            setDocument(JSON.parse(await file.text()));
+            dispatch('change', getDocument());      // opened by the person, so it is a change
+        } catch (error) {
+            say(`That file is not a workflow: ${error.message}`);
+        }
     }
 
-    function clearWorkflow() {
-        initializeCanvas();
-        selectedNode.set(null);
-        executionResults.set(null);
-    }
-
-    onDestroy(() => clearTimeout(refusalTimer));
-
+    onDestroy(() => {
+        clearTimeout(refusalTimer);
+        controller?.abort();
+    });
 </script>
 
-<SvelteFlowProvider>
+<!-- svelte-ignore a11y-no-noninteractive-tabindex a11y-no-static-element-interactions -->
+<div class="mz-editor" tabindex="-1" bind:this={root} on:keydown={onKeydown} on:pointerdown={focusIn}>
+    <SvelteFlowProvider>
+        {#if toolbar}
             <Toolbar
-                    {testWorkflow}
-                    {runWorkflow}
-                    {cancelRun}
-                    {exportWorkflow}
-                    {importWorkflow}
-                    isExecuting={$isExecuting}
-                    isRunning={!!$running && !$running.done}
+                onTest={() => test()}
+                onRun={processOffered ? runWorkflow : null}
+                onCancel={cancelRun}
+                onExport={exportWorkflow}
+                onImport={importWorkflow}
+                testing={$isExecuting}
+                runningNow={!!$running && !$running.done}
             />
+        {/if}
 
-
-<!-- Left-side node palette (always visible) -->
-<NodePalettePanel {availableNodes} />
-
-<!-- Main app layout without fixed sidebar -->
-<div class="main-content">
-    <div id="studio">
-        <FlowDropZone on:nodedrop={handleNodeDrop}>
-            <SvelteFlow
+        <div class="mz-canvas">
+            <FlowDropZone on:nodedrop={handleNodeDrop}>
+                <SvelteFlow
                     {nodes}
                     {edges}
                     {nodeTypes}
                     proOptions={{ hideAttribution: true }}
-                    bind:this={svelteFlowInstance}
                     on:nodeclick={onNodeClick}
                     on:paneclick={onPaneClick}
                     {isValidConnection}
                     maxZoom={1}
                     fitView
-                    fitViewOptions={{
-                      maxZoom: 1,      // Prevents zooming in beyond 100%
-                      padding: 0.2     // Adds some padding around nodes
-                    }}
-            >
-<!--                <Controls />-->
-                <Background variant="dots" />
-            </SvelteFlow>
-        </FlowDropZone>
-    </div>
+                    fitViewOptions={{ maxZoom: 1, padding: 0.2 }}
+                >
+                    <Background variant="dots" />
+                </SvelteFlow>
+            </FlowDropZone>
+
+            <Palette />
+
+            <PropertiesPanel
+                selectedNode={$selectedNode}
+                {updateNodeParameters}
+                executionResults={$executionResults}
+            />
+
+            <RunProgress />
+
+            {#if refusal}
+                <div class="mz-overlay mz-toast" role="status">
+                    <span>{refusal}</span>
+                    <button class="mz-toast-close" aria-label="Dismiss" on:click={() => (refusal = null)}>×</button>
+                </div>
+            {/if}
+        </div>
+    </SvelteFlowProvider>
 </div>
 
-{#if refusal}
-    <div class="refusal" role="status">
-        {refusal}
-        <button class="delete is-small" aria-label="dismiss" on:click={() => (refusal = null)}></button>
-    </div>
-{/if}
-
-<!-- Drawer sidebar for context-aware panels -->
-<DrawerSidebar
-    {availableNodes}
-    selectedNode={$selectedNode}
-    {updateNodeParameters}
-    executionResults={$executionResults}
-/>
-
-<RunProgress />
-
-</SvelteFlowProvider>
-
 <style>
-    /* While a wire is being dragged, Svelte Flow marks the handle under the pointer `connectingto`
-       and adds `valid` when `isValidConnection` said yes. Saying which is the whole point of being
-       asked before the connection is made rather than after. */
-    :global(.svelte-flow__handle.connectingto) {
-        box-shadow: 0 0 0 3px rgba(214, 54, 56, 0.35);
+    .mz-editor:focus {
+        outline: none;
     }
 
-    :global(.svelte-flow__handle.connectingto.valid) {
-        box-shadow: 0 0 0 3px rgba(72, 199, 116, 0.45);
+    .mz-canvas {
+        position: relative;
+        flex: 1;
+        min-height: 0;
     }
 
-    /* Said at the bottom of the canvas, where a rejected drag ended, and dismissable. Not an
-       alert(): a modal halts everything to report something the missing edge already showed. */
-    .refusal {
-        position: fixed;
+    /* Said at the bottom of the canvas, where a rejected drag ended, and dismissable. */
+    .mz-toast {
         left: 50%;
-        bottom: 1.5rem;
+        bottom: var(--mz-space-6);
         transform: translateX(-50%);
-        z-index: 40;
-        max-width: min(40rem, 90vw);
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 0.6rem 0.9rem;
-        border-radius: 6px;
-        background: #2b2b2b;
-        color: #fff;
-        font-size: 0.85rem;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+        max-width: min(40rem, 90%);
+    }
+
+    .mz-toast-close {
+        border: 0;
+        background: none;
+        color: inherit;
+        font-size: var(--mz-text-md);
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0.7;
     }
 </style>

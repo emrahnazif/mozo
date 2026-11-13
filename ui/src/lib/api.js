@@ -7,25 +7,91 @@
  * is a view rather than a second shape to keep in step.
  */
 
-/** Build a URL, honouring a mount prefix if the page was served under one. */
-export function apiUrl(path) {
-    const config = (typeof window !== 'undefined' && window.APP_CONFIG) || {};
-    return (config.apiBase || '') + path;
+/**
+ * The API under *base*: the address the workflow router is mounted at, ending in `/`.
+ *
+ * `mount` derives it from where the editor's own script was loaded -- `.../workflow/assets/` is
+ * the router's `.../workflow/` -- so the editor finds its API under any prefix with nothing to
+ * configure. Every path here is relative to it.
+ */
+export function client(base) {
+    const url = (path) => new URL(path, base).href;
+
+    /**
+     * Read a server-sent event stream, calling `onEvent` for each one.
+     *
+     * Shared by both verbs because the framing is the same either way; what differs is which
+     * endpoint and what the events say. `signal` is how a run is cancelled: aborting closes the
+     * connection, which closes the generator on the server, which ends the run and closes what it
+     * opened.
+     */
+    async function events(path, form, onEvent, signal) {
+        const response = await fetch(url(path), { method: 'POST', body: form, signal });
+
+        if (!response.ok) {
+            let detail = `the server refused the workflow (${response.status})`;
+            try { detail = (await response.json()).detail || detail; } catch { /* not JSON */ }
+            throw new Error(detail);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (line.startsWith('data: ')) onEvent(JSON.parse(line.slice(6)));
+            }
+        }
+    }
+
+    return {
+        /**
+         * Every node the server offers, keyed by name, and whether it offers a whole-source run.
+         *
+         * The entries are exactly what `nodes` returns: `{name, category, description, inputs,
+         * outputs, parameters}`, where the last three are ordered lists. Nothing is renamed or
+         * reshaped -- a translation here would be the second place for it to disagree from.
+         */
+        async catalogue() {
+            const response = await fetch(url('nodes'));
+            if (!response.ok) throw new Error(`could not load the node catalogue (${response.status})`);
+            const { nodes, process } = await response.json();
+            return { nodes: Object.fromEntries(nodes.map(node => [node.name, node])), process };
+        },
+
+        /**
+         * Test a workflow: one item through the graph, with every node's output drawn on the
+         * canvas. `include: 'all'` because the editor draws every node's result.
+         */
+        stream(document, file, onEvent) {
+            return events('stream', body(document, file, { include: 'all' }), onEvent);
+        },
+
+        /**
+         * Run a workflow over its whole source, calling `onEvent` with `{item}` as each one
+         * finishes. No node outputs come back -- a counter and, at most five times a second, one
+         * small JPEG of `preview`. Pass an `AbortSignal` to cancel; there is nothing else to call.
+         */
+        process(document, file, { preview = '', signal } = {}, onEvent) {
+            return events('process', body(document, file, { preview }), onEvent, signal);
+        },
+    };
 }
 
-/**
- * Every node the server offers, keyed by name.
- *
- * The entries are exactly what `/workflow/nodes` returns: `{name, category, description, inputs,
- * outputs, parameters}`, where the last three are ordered lists. Nothing is renamed or reshaped --
- * the catalogue is derived server-side from the node functions, and a translation here would be
- * the second place for it to disagree from.
- */
-export async function fetchCatalogue() {
-    const response = await fetch(apiUrl('/workflow/nodes'));
-    if (!response.ok) throw new Error(`could not load the node catalogue (${response.status})`);
-    const { nodes } = await response.json();
-    return Object.fromEntries(nodes.map(node => [node.name, node]));
+/** The form body every run endpoint takes: the document, an optional file, optional fields. */
+function body(document, file, fields) {
+    const form = new FormData();
+    form.append('workflow', JSON.stringify(document));
+    for (const [name, value] of Object.entries(fields)) form.append(name, value);
+    if (file) form.append('file', file);
+    return form;
 }
 
 /**
@@ -52,8 +118,8 @@ export function fileNameFor(about) {
 /**
  * The editor's canvas as a workflow document.
  *
- * Svelte Flow carries every node as type `custom` with the real kind in `data.nodeType`, because
- * one component draws them all. mozo's format names the kind at the top level. This is the only
+ * Svelte Flow carries every node as its one `default` type with the real kind in `data.nodeType`,
+ * because one component draws them all. mozo's format names the kind at the top level. This is the only
  * place that conversion happens, in each direction. *about* is `{name, description}`, the two
  * things a workflow says about itself; {@link fromDocument} hands them back the same way.
  */
@@ -76,16 +142,12 @@ export function toDocument(nodes, edges, about = {}) {
 }
 
 /** A workflow document as canvas nodes and edges. The inverse of {@link toDocument}. */
-export function fromDocument(document, catalogue) {
+export function fromDocument(document) {
     const nodes = (document.nodes || []).map(node => ({
         id: node.id,
-        type: 'custom',
+        type: 'default',
         position: node.position || { x: 0, y: 0 },
-        data: {
-            nodeType: node.type,
-            label: catalogue?.[node.type]?.name || node.type,
-            parameters: node.data?.parameters || {},
-        },
+        data: { nodeType: node.type, parameters: node.data?.parameters || {} },
     }));
     const edges = (document.edges || []).map((edge, index) => ({
         id: `${edge.source}-${edge.sourceHandle}-${edge.target}-${edge.targetHandle}-${index}`,
@@ -98,73 +160,19 @@ export function fromDocument(document, catalogue) {
     return { nodes, edges, about };
 }
 
-/** The form body every run endpoint takes: the document, an optional file, optional overrides. */
-function body(document, file, fields) {
-    const form = new FormData();
-    form.append('workflow', JSON.stringify(document));
-    for (const [name, value] of Object.entries(fields || {})) form.append(name, value);
-    if (file) form.append('file', file);
-    return form;
-}
-
-/** Ask whether a document is a workflow. Returns `{valid, order, terminals}` or `{valid, error}`. */
-export async function validate(document) {
-    const response = await fetch(apiUrl('/workflow/validate'), {
-        method: 'POST', body: body(document, null, {}),
-    });
-    return response.json();
-}
-
 /**
- * Read a server-sent event stream, calling `onEvent` for each one.
+ * Split *edges* into those that can be drawn and those that cannot: an edge can be drawn when the
+ * node at each end is among *nodes* and has the port it names, according to *catalogue*.
  *
- * Shared by both verbs because the framing is the same either way; what differs is which endpoint
- * and what the events say. `signal` is how a run is cancelled: aborting closes the connection,
- * which closes the generator on the server, which ends the run and closes what it opened.
+ * Measured, not guessed: Svelte Flow given an edge to a handle that does not exist stops every
+ * store on the page from updating, silently -- the editor that was given it and any other beside
+ * it. An edge to a renamed port in an old file, or a typo in a host's document, would otherwise
+ * leave a page of dead editors and nothing to say why.
  */
-async function events(path, form, onEvent, signal) {
-    const response = await fetch(apiUrl(path), { method: 'POST', body: form, signal });
-
-    if (!response.ok) {
-        let detail = `the server refused the workflow (${response.status})`;
-        try { detail = (await response.json()).detail || detail; } catch { /* not JSON */ }
-        throw new Error(detail);
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-            if (line.startsWith('data: ')) onEvent(JSON.parse(line.slice(6)));
-        }
-    }
-}
-
-/**
- * Test a workflow: one item through the graph, with every node's output drawn on the canvas.
- *
- * `include: 'all'` because the editor draws every node's result -- which is the case the server's
- * default is not tuned for, and the reason it is a choice rather than a fixed rule.
- */
-export function stream(document, file, onEvent) {
-    return events('/workflow/stream', body(document, file, { include: 'all' }), onEvent);
-}
-
-/**
- * Run a workflow over its whole source, calling `onEvent` with `{item}` as each one finishes.
- *
- * No node outputs come back. One pass over a two-hour video through two nodes would be 1.3 TB of
- * canvas images; what arrives instead is a counter and, at most five times a second, one small
- * JPEG of `preview`. Pass an `AbortSignal` to cancel -- there is nothing else to call.
- */
-export function process(document, file, { preview = '', signal } = {}, onEvent) {
-    return events('/workflow/process', body(document, file, { preview }), onEvent, signal);
+export function drawable(edges, nodes, catalogue) {
+    const kinds = new Map(nodes.map(node => [node.id, node.data.nodeType]));
+    const has = (id, side, name) => !!catalogue[kinds.get(id)]?.[side]?.some(port => port.name === name);
+    const drawn = edges.filter(edge => has(edge.source, 'outputs', edge.sourceHandle)
+                                       && has(edge.target, 'inputs', edge.targetHandle));
+    return { drawn, left: edges.filter(edge => !drawn.includes(edge)) };
 }

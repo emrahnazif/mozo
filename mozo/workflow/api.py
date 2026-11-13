@@ -1,7 +1,10 @@
-"""The workflow runtime over HTTP.
+"""The workflow runtime over HTTP, and the editor that drives it.
 
-Four endpoints: what nodes there are, whether a document is valid, run it, run it and watch. They
-are mounted by ``mozo.server``, which is the only place in mozo that names this package.
+What nodes there are, whether a document is valid, run it, run it and watch, run it over a whole
+source -- and the editor page and its files. :func:`workflow_router` makes the routes; ``router``
+is the one ``mozo.server`` mounts. A host application makes its own with the arguments it needs --
+its own model loading, no whole-source runs -- and mounts it under any prefix: the page and the
+editor find their files and the API relative to where they were served from.
 
 Handlers are ``def`` rather than ``async def``, deliberately and for the same reason the model
 endpoints are: a workflow is seconds of blocking CPU or GPU work, so FastAPI runs each in its
@@ -26,182 +29,310 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 
 from .graph import NO_SOURCE, Workflow, WorkflowError
 from .registry import catalogue
 from .wire import PREVIEW_EVERY, preview as wire_preview, serialise
-
-router = APIRouter(prefix="/workflow", tags=["workflow"])
 
 #: The built editor. Its source is ``ui/`` at the repository root, which never ships -- the same
 #: arrangement as ``tools/``, which produces ``weights/``. npm is needed to change the editor and
 #: never to install mozo.
 _EDITOR = Path(__file__).parent / "static"
 
+#: Where the router lives, under whatever prefix it is mounted at.
+_SEGMENT = "workflow"
 
-@router.get("", summary="The workflow editor", include_in_schema=False)
-def editor():
-    """Serve the editor.
-
-    Registered without a trailing slash so that ``/workflow`` is the address, and the assets it
-    asks for are relative to it -- which is what lets the whole thing be mounted under a prefix
-    without the page knowing.
-    """
-    page = _EDITOR / "index.html"
-    if not page.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail="The editor is not built. Run `npm install && npm run build` in ui/.")
-    return FileResponse(page, media_type="text/html")
-
-
-@router.get("/assets/{name}", summary="The editor's own files", include_in_schema=False)
-def asset(name: str):
-    """Serve one of the editor's built files.
-
-    A route rather than a mounted ``StaticFiles``, because mounting is the application's to do and
-    ``mozo/server.py`` has exactly one line about this package. Vite emits flat names, so one
-    segment is the whole of it -- and the resolved path is checked to be inside the directory, so a
-    name full of ``..`` reaches nothing.
-    """
-    path = (_EDITOR / "assets" / name).resolve()
-    if not path.is_file() or (_EDITOR / "assets").resolve() != path.parent:
-        raise HTTPException(status_code=404, detail=f"no such file: {name}")
-    return FileResponse(path)
+#: The editor's page: one element, the editor mounted into it. The script's address is relative,
+#: so the page works under any prefix, behind any proxy; the editor then finds its API from where
+#: its script came from. ``{script}`` is filled per address, because a relative path resolves
+#: differently with and without a trailing slash -- see ``editor`` below.
+_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mozo workflows</title>
+  <style>html, body {{ margin: 0; height: 100%; }} #editor {{ height: 100%; }}</style>
+</head>
+<body>
+  <div id="editor"></div>
+  <script type="module">
+    import {{ mount }} from "{script}";
+    const toolbar = new URLSearchParams(location.search).get("toolbar") !== "0";
+    mount(document.getElementById("editor"), {{ toolbar }});
+  </script>
+</body>
+</html>
+"""
 
 
-@router.get("/nodes", summary="List the nodes a workflow can be built from")
-def list_nodes():
-    """Every node, with its ports and parameters.
+def workflow_router(*, models: Optional[Callable[..., Any]] = None,
+                    process: bool = True) -> APIRouter:
+    """The workflow routes and the editor, ready to mount.
 
-    Derived from the functions that implement them, so what this returns and what runs cannot
-    disagree -- see :mod:`mozo.workflow.node`.
-    """
-    return {"nodes": catalogue()}
+    ``mozo.server`` mounts :data:`router`, made with the defaults. A host application embedding
+    mozo makes its own::
 
-
-@router.post("/validate", summary="Check a workflow without running it")
-def validate(workflow: str = Form(..., description="The workflow document, as JSON")):
-    """Say whether a document is a workflow, and if not, why not."""
-    try:
-        built = _build(workflow)
-    except HTTPException as refusal:
-        return {"valid": False, "error": refusal.detail}
-    return {"valid": True, "order": list(built.order), "terminals": list(built.terminals)}
-
-
-@router.post("/run", summary="Run a workflow")
-def run(
-    workflow: str = Form(..., description="The workflow document, as JSON"),
-    inputs: str = Form("{}", description="Parameter overrides, as a JSON object"),
-    include: Literal["terminals", "all"] = Form(
-        "terminals", description="Which nodes' outputs to send back"),
-    file: Optional[UploadFile] = File(None, description="An image or video to run on, if it is "
-                                                        "not already on the server"),
-):
-    """Run a workflow and send back what it produced.
+        app.include_router(workflow_router(models=manager.get_model, process=False),
+                           prefix="/mozo")
 
     Args:
-        include: ``"terminals"``, the ends of the graph, or ``"all"``, every node.
+        models: How the runs load their models -- a :class:`~mozo.manager.ModelManager`, or any
+            callable shaped like ``get_model``, as :meth:`~mozo.workflow.graph.Workflow.run` takes
+            it. ``None`` is the shared cache behind :func:`mozo.get_model`. A host with its own
+            manager passes it, or every model is a second copy, possibly on another device.
+        process: Whether to offer ``/process``, a run over a whole source. A host that runs
+            workflows as jobs of its own leaves it out, and the editor then offers Test alone.
 
-    Sending everything is what :meth:`Workflow.run` does, because in Python an intermediate result
-    costs a reference. Over HTTP it costs an encode: on one 1920x1281 photograph a five-node
-    workflow takes 27 ms to run and 347 ms to encode, and answers with 21.7 MB of which four fifths
-    is intermediates nobody asked for. At 4K that is 52 MB and half a gigabyte of resident memory
-    per request, in a threadpool forty deep.
-
-    So the default is the ends, and looking inside is a thing you ask for. The editor asks; a batch
-    job over full-resolution frames should not have to.
+    Returns:
+        An ``APIRouter`` at ``/workflow``, to mount under any prefix.
     """
-    built = _build(workflow)
-    terminals = built.terminals
-    # Asked before the file is written down, so a workflow with nowhere to put one is refused
-    # having copied nothing. Deriving the name costs microseconds; spooling costs the whole upload.
-    settled, upload = _prepared(built, inputs, file)
+    router = APIRouter(prefix=f"/{_SEGMENT}", tags=["workflow"])
 
-    results = {}
-    try:
-        for event in _events(built, settled):
-            if event.status == "failed":
-                # A run that failed is not a run that returned nothing. Answering 200 with an empty
-                # results dict is indistinguishable from success to any client that does not go
-                # looking, and the reason the node gave would be thrown away.
-                raise HTTPException(status_code=422, detail=event.error)
-            if event.status == "completed" and (include == "all" or event.node in terminals):
-                # Serialised as it arrives, so a node's output is not held past the one it feeds.
-                # Combined with the engine dropping a wire once its last reader has run, a
-                # five-node chain over a 4K photograph peaks at 70 MB instead of 182 MB.
-                results[event.node] = serialise(built.steps[event.node].spec, event.output)
-    finally:
-        _discard(upload)
+    def page(script: str) -> HTMLResponse:
+        if not (_EDITOR / "assets" / "editor.js").is_file():
+            raise HTTPException(
+                status_code=404,
+                detail="The editor is not built. Run `npm install && npm run build` in ui/.")
+        return HTMLResponse(_PAGE.format(script=script))
 
-    return {"results": results, "terminals": list(terminals)}
+    @router.get("", summary="The workflow editor", include_in_schema=False)
+    def editor():
+        """Serve the editor: a page that mounts it, full size; ``?toolbar=0`` hides its toolbar.
 
+        Served with and without a trailing slash, each with the script path that resolves from
+        it, rather than relying on a redirect between them: a host may turn redirects off, and a
+        proxy may add the slash the redirect takes away.
+        """
+        return page(f"./{_SEGMENT}/assets/editor.js")
 
-@router.post("/stream", summary="Run a workflow, reporting each node as it goes")
-def stream(
-    workflow: str = Form(..., description="The workflow document, as JSON"),
-    inputs: str = Form("{}", description="Parameter overrides, as a JSON object"),
-    include: Literal["terminals", "all"] = Form(
-        "terminals", description="Which nodes' outputs to send back"),
-    file: Optional[UploadFile] = File(None, description="An image or video to run on, if it is "
-                                                        "not already on the server"),
-):
-    """Run a workflow as server-sent events, one per node starting and finishing.
+    @router.get("/", include_in_schema=False)
+    def editor_slashed():
+        """The editor at ``.../workflow/``."""
+        return page("./assets/editor.js")
 
-    The document is built and the overrides are settled before the response begins, so a document
-    that is not a workflow -- or an override naming no parameter -- is a 400 rather than an error
-    delivered inside a stream that has already claimed success.
+    @router.get("/assets/{name}", summary="The editor's own files", include_in_schema=False)
+    def asset(name: str):
+        """Serve one of the editor's built files.
 
-    Args:
-        include: What ``/run`` means by it, and for the same measured reason. Watching a workflow
-            go by is not a reason to be sent every intermediate at full resolution.
-    """
-    built = _build(workflow)
-    terminals = built.terminals
+        A route rather than a mounted ``StaticFiles``, because mounting is the application's to do
+        and ``mozo/server.py`` has exactly one line about this package. Flat names, so one segment
+        is the whole of it -- and the resolved path is checked to be inside the directory, so a name
+        full of ``..`` reaches nothing.
 
-    # Settled here rather than inside ``events`` so that a refused override is still a 400 before
-    # the response begins, which is what this endpoint promises. The spooled file outlives this
-    # function, which is why the generator is what removes it.
-    settled, upload = _prepared(built, inputs, file)
-    started = _events(built, settled)
+        The names are stable -- ``editor.js`` is what a host imports -- so the browser is told to
+        ask again each time rather than keep a copy: a cached editor would outlive a mozo upgrade.
+        """
+        path = (_EDITOR / "assets" / name).resolve()
+        if not path.is_file() or (_EDITOR / "assets").resolve() != path.parent:
+            raise HTTPException(status_code=404, detail=f"no such file: {name}")
+        return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
-    def events():
+    @router.get("/nodes", summary="List the nodes a workflow can be built from")
+    def list_nodes():
+        """Every node, with its ports and parameters, and whether ``/process`` is offered here.
+
+        Derived from the functions that implement them, so what this returns and what runs cannot
+        disagree -- see :mod:`mozo.workflow.node`. ``process`` is how the editor knows to offer Run.
+        """
+        return {"nodes": catalogue(), "process": process}
+
+    @router.post("/validate", summary="Check a workflow without running it")
+    def validate(workflow: str = Form(..., description="The workflow document, as JSON")):
+        """Say whether a document is a workflow, and if not, why not."""
         try:
-            for event in started:
-                reported = {"node": event.node, "status": event.status}
-                if event.status == "completed" and (include == "all" or event.node in terminals):
-                    reported["output"] = serialise(built.steps[event.node].spec, event.output)
-                if event.error:
-                    reported["error"] = event.error
-                yield _event(reported)
+            built = _build(workflow)
+        except HTTPException as refusal:
+            return {"valid": False, "error": refusal.detail}
+        return {"valid": True, "order": list(built.order), "terminals": list(built.terminals)}
 
+    @router.post("/run", summary="Run a workflow")
+    def run(
+        workflow: str = Form(..., description="The workflow document, as JSON"),
+        inputs: str = Form("{}", description="Parameter overrides, as a JSON object"),
+        include: Literal["terminals", "all"] = Form(
+            "terminals", description="Which nodes' outputs to send back"),
+        file: Optional[UploadFile] = File(None, description="An image or video to run on, if it is "
+                                                            "not already on the server"),
+    ):
+        """Run a workflow and send back what it produced.
+
+        Args:
+            include: ``"terminals"``, the ends of the graph, or ``"all"``, every node.
+
+        Sending everything is what :meth:`Workflow.run` does, because in Python an intermediate
+        result costs a reference. Over HTTP it costs an encode: on one 1920x1281 photograph a
+        five-node workflow takes 27 ms to run and 347 ms to encode, and answers with 21.7 MB of
+        which four fifths is intermediates nobody asked for. At 4K that is 52 MB and half a gigabyte
+        of resident memory per request, in a threadpool forty deep.
+
+        So the default is the ends, and looking inside is a thing you ask for. The editor asks; a
+        batch job over full-resolution frames should not have to.
+        """
+        built = _build(workflow)
+        terminals = built.terminals
+        # Asked before the file is written down, so a workflow with nowhere to put one is refused
+        # having copied nothing. Deriving the name costs microseconds; spooling costs the whole
+        # upload.
+        settled, upload = _prepared(built, inputs, file)
+
+        results = {}
+        try:
+            for event in _events(built, settled, models):
                 if event.status == "failed":
-                    # The failure is the end. Saying "done" after it would leave a consumer to
-                    # decide which of the two the server meant.
-                    return
-        except Exception as error:  # a bad override, or something a node could not recover from
-            yield _event({"status": "failed", "error": str(error)})
-        else:
-            yield _event({"done": True})
+                    # A run that failed is not a run that returned nothing. Answering 200 with an
+                    # empty results dict is indistinguishable from success to any client that does
+                    # not go looking, and the reason the node gave would be thrown away.
+                    raise HTTPException(status_code=422, detail=event.error)
+                if event.status == "completed" and (include == "all" or event.node in terminals):
+                    # Serialised as it arrives, so a node's output is not held past the one it
+                    # feeds. Combined with the engine dropping a wire once its last reader has run,
+                    # a five-node chain over a 4K photograph peaks at 70 MB instead of 182 MB.
+                    results[event.node] = serialise(built.steps[event.node].spec, event.output)
         finally:
-            _discard(upload)      # however the response ended, including a client hanging up
+            _discard(upload)
 
-    return _sse(events())
+        return {"results": results, "terminals": list(terminals)}
+
+    @router.post("/stream", summary="Run a workflow, reporting each node as it goes")
+    def stream(
+        workflow: str = Form(..., description="The workflow document, as JSON"),
+        inputs: str = Form("{}", description="Parameter overrides, as a JSON object"),
+        include: Literal["terminals", "all"] = Form(
+            "terminals", description="Which nodes' outputs to send back"),
+        file: Optional[UploadFile] = File(None, description="An image or video to run on, if it is "
+                                                            "not already on the server"),
+    ):
+        """Run a workflow as server-sent events, one per node starting and finishing.
+
+        The document is built and the overrides are settled before the response begins, so a
+        document that is not a workflow -- or an override naming no parameter -- is a 400 rather
+        than an error delivered inside a stream that has already claimed success.
+
+        Args:
+            include: What ``/run`` means by it, and for the same measured reason. Watching a
+            workflow
+                go by is not a reason to be sent every intermediate at full resolution.
+        """
+        built = _build(workflow)
+        terminals = built.terminals
+
+        # Settled here rather than inside ``events`` so that a refused override is still a 400
+        # before the response begins, which is what this endpoint promises. The spooled file
+        # outlives this function, which is why the generator is what removes it.
+        settled, upload = _prepared(built, inputs, file)
+        started = _events(built, settled, models)
+
+        def events():
+            try:
+                for event in started:
+                    reported = {"node": event.node, "status": event.status}
+                    if event.status == "completed" and (include == "all" or event.node in terminals):
+                        reported["output"] = serialise(built.steps[event.node].spec, event.output)
+                    if event.error:
+                        reported["error"] = event.error
+                    yield _event(reported)
+
+                    if event.status == "failed":
+                        # The failure is the end. Saying "done" after it would leave a consumer to
+                        # decide which of the two the server meant.
+                        return
+            except Exception as error:  # a bad override, or something a node could not recover from
+                yield _event({"status": "failed", "error": str(error)})
+            else:
+                yield _event({"done": True})
+            finally:
+                _discard(upload)      # however the response ended, including a client hanging up
+
+        return _sse(events())
+
+    if process:
+        @router.post("/process", summary="Run a workflow over everything its source produces")
+        def process_source(
+            workflow: str = Form(..., description="The workflow document, as JSON"),
+            inputs: str = Form("{}", description="Parameter overrides, as a JSON object"),
+            preview: str = Form("", description="Node id to send a thumbnail of, or empty for none"),
+            file: Optional[UploadFile] = File(None, description="An image or video to run on, if it is "
+                                                                "not already on the server"),
+        ):
+            """Run a workflow over its whole source, reporting progress as it goes.
+
+            **The other verb.** ``/stream`` is one pass over one item with every node's output at
+            full size -- what the editor draws on the canvas while a graph is being wired. This is
+            one pass over everything the source produces, which for a video is two hundred thousand
+            items and for a folder is however many files are in it.
+
+            They cannot be one endpoint, and the reason is measured rather than aesthetic.
+            ``/stream`` sends one event per node per item, each image a lossless PNG data URI: on a
+            315-frame clip through two nodes that is 2.33 GB and fifteen seconds of encoding, and on
+            a two-hour run it is 1.3 TB. So this one sends a counter, which is bytes, and a small
+            JPEG no more often than :data:`~mozo.workflow.wire.PREVIEW_EVERY`.
+
+            **Cancelling is hanging up.** There is no state here to cancel: closing the connection
+            closes the generator, which ends the run, which closes what the run opened -- a video
+            sink writes its index and the file plays. Measured: a client that left at item 50
+            stopped the run at item 42.
+
+            A refused override is reported as a failed event rather than as a 400, unlike
+            ``/stream``: :meth:`~mozo.workflow.graph.Workflow.process` settles its overrides on the
+            first item, so there is nothing to catch before the response begins. What *can* be
+            refused first is refused first -- a document that is not a workflow, a workflow with no
+            source, a preview naming no node.
+
+            Args:
+                preview: Which node's output to show. Empty sends counters only, which is the
+                cheapest this
+                    can be and is right for a headless caller.
+            """
+            built = _build(workflow)
+            if built.source is None:
+                raise HTTPException(status_code=400, detail=NO_SOURCE)
+            if preview and preview not in built.steps:
+                raise HTTPException(status_code=400, detail=f"no node {preview!r} to preview")
+
+            settled, upload = _prepared(built, inputs, file)
+            watched = built.steps[preview].spec if preview else None
+
+            def events():
+                done, last, began = 0, 0.0, time.monotonic()
+                try:
+                    for _item, results in built.process(models=models, **settled):
+                        done += 1
+                        report = {"item": done}
+                        now = time.monotonic()
+                        if watched is not None and now - last >= PREVIEW_EVERY:
+                            last = now
+                            shown = wire_preview(watched, results.get(preview))
+                            if shown is not None:
+                                report["preview"] = shown
+                        yield _event(report)
+                    yield _event({"done": True, "items": done,
+                                  "seconds": round(time.monotonic() - began, 2)})
+                except Exception as error:      # a node that failed, or a source that broke under us
+                    yield _event({"status": "failed", "error": str(error)})
+                finally:
+                    # Reached however this ended, the case that matters being a client that hung up:
+                    # the generator is closed, ``process`` unwinds, and the sinks close the files
+                    # they opened.
+                    _discard(upload)
+
+            return _sse(events())
+
+    return router
 
 
-def _events(built: Workflow, settled: dict):
+def _events(built: Workflow, settled: dict, models):
     """Start *built* running one item, turning a refused override into a 400 before it executes.
 
     ``stream`` settles the overrides before it returns its iterator, so this catches a bad one here
     rather than part-way through a response that has already claimed success.
     """
     try:
-        return built.stream(**settled)
+        return built.stream(models=models, **settled)
     except KeyError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -290,74 +421,10 @@ def _discard(upload: Optional[Path]) -> None:
         upload.unlink(missing_ok=True)
 
 
-@router.post("/process", summary="Run a workflow over everything its source produces")
-def process(
-    workflow: str = Form(..., description="The workflow document, as JSON"),
-    inputs: str = Form("{}", description="Parameter overrides, as a JSON object"),
-    preview: str = Form("", description="Node id to send a thumbnail of, or empty for none"),
-    file: Optional[UploadFile] = File(None, description="An image or video to run on, if it is "
-                                                        "not already on the server"),
-):
-    """Run a workflow over its whole source, reporting progress as it goes.
-
-    **The other verb.** ``/stream`` is one pass over one item with every node's output at full
-    size -- what the editor draws on the canvas while a graph is being wired. This is one pass over
-    everything the source produces, which for a video is two hundred thousand items and for a
-    folder is however many files are in it.
-
-    They cannot be one endpoint, and the reason is measured rather than aesthetic. ``/stream`` sends
-    one event per node per item, each image a lossless PNG data URI: on a 315-frame clip through two
-    nodes that is 2.33 GB and fifteen seconds of encoding, and on a two-hour run it is 1.3 TB. So
-    this one sends a counter, which is bytes, and a small JPEG no more often than
-    :data:`~mozo.workflow.wire.PREVIEW_EVERY`.
-
-    **Cancelling is hanging up.** There is no state here to cancel: closing the connection closes
-    the generator, which ends the run, which closes what the run opened -- a video sink writes its
-    index and the file plays. Measured: a client that left at item 50 stopped the run at item 42.
-
-    A refused override is reported as a failed event rather than as a 400, unlike ``/stream``:
-    :meth:`~mozo.workflow.graph.Workflow.process` settles its overrides on the first item, so there
-    is nothing to catch before the response begins. What *can* be refused first is refused first --
-    a document that is not a workflow, a workflow with no source, a preview naming no node.
-
-    Args:
-        preview: Which node's output to show. Empty sends counters only, which is the cheapest this
-            can be and is right for a headless caller.
-    """
-    built = _build(workflow)
-    if built.source is None:
-        raise HTTPException(status_code=400, detail=NO_SOURCE)
-    if preview and preview not in built.steps:
-        raise HTTPException(status_code=400, detail=f"no node {preview!r} to preview")
-
-    settled, upload = _prepared(built, inputs, file)
-    watched = built.steps[preview].spec if preview else None
-
-    def events():
-        done, last, began = 0, 0.0, time.monotonic()
-        try:
-            for _item, results in built.process(**settled):
-                done += 1
-                report = {"item": done}
-                now = time.monotonic()
-                if watched is not None and now - last >= PREVIEW_EVERY:
-                    last = now
-                    shown = wire_preview(watched, results.get(preview))
-                    if shown is not None:
-                        report["preview"] = shown
-                yield _event(report)
-            yield _event({"done": True, "items": done,
-                          "seconds": round(time.monotonic() - began, 2)})
-        except Exception as error:      # a node that failed, or a source that broke under us
-            yield _event({"status": "failed", "error": str(error)})
-        finally:
-            # Reached however this ended, the case that matters being a client that hung up: the
-            # generator is closed, ``process`` unwinds, and the sinks close the files they opened.
-            _discard(upload)
-
-    return _sse(events())
-
-
 def _event(payload: dict) -> str:
     """One server-sent event."""
     return f"data: {json.dumps(payload)}\n\n"
+
+
+#: The routes ``mozo.server`` mounts: the shared model cache, every endpoint.
+router = workflow_router()

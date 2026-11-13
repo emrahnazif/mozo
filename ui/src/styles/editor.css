@@ -1,0 +1,350 @@
+/*
+  The editor's styles: its tokens, a reset, and the few controls every part of it shares.
+
+  Everything is the editor's own. Classes carry the `mz-` prefix and every rule is scoped under the
+  editor's root, so nothing here reaches the page around it; mounted in a shadow root, the page's
+  styles cannot reach in either. See `mount` in editor.js.
+
+  The tokens follow babasu's, renamed: a host restyles the editor by setting any `--mz-*` on the
+  element it mounted into, dark mode included. Colours use light-dark(), so the editor follows
+  `color-scheme` -- the system's by default, or whatever the host sets on that element.
+*/
+
+/* What the page around a shadow root would otherwise hand down: its font, its colour, its line
+   height. Inherited properties cross the boundary; resetting them here is what keeps a host's
+   serif out of the palette. First, so the tokens below are not reset with everything else. */
+:host {
+  all: initial;
+  display: block;
+  position: relative;
+}
+
+/* On the element the editor was mounted into -- the shadow host, or in development the element
+   itself -- and nowhere inside it, so a host's own value on that element is the
+   one everything inherits. That is how `--mz-color-bg: ...` or `color-scheme: dark` there wins. */
+:host,
+.mz-host {
+  color-scheme: light dark;
+
+  --mz-color-bg: light-dark(#ffffff, #0a0a0a);
+  --mz-color-canvas: light-dark(#f5f5f5, #171717);
+  --mz-color-surface: light-dark(#ffffff, #1c1c1c);
+  --mz-color-text: light-dark(#0a0a0a, #fafafa);
+  --mz-color-text-muted: light-dark(#737373, #a3a3a3);
+  --mz-color-border: light-dark(#e5e5e5, #262626);
+  --mz-color-accent-bg: light-dark(#f5f5f5, #262626);
+  --mz-color-primary: light-dark(#0a0a0a, #fafafa);
+  --mz-color-primary-text: light-dark(#ffffff, #0a0a0a);
+  --mz-color-destructive: light-dark(#dc2626, #b91c1c);
+  --mz-color-destructive-text: #ffffff;
+  --mz-color-highlight: light-dark(#0ea5e9, #38bdf8);
+  --mz-color-success: light-dark(#16a34a, #22c55e);
+
+  --mz-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mz-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --mz-text-xs: 0.75rem;
+  --mz-text-sm: 0.875rem;
+  --mz-text-md: 1rem;
+  --mz-leading-tight: 1.15;
+  --mz-leading-normal: 1.5;
+  --mz-weight-medium: 500;
+  --mz-weight-semibold: 600;
+
+  --mz-space-1: 0.25rem;
+  --mz-space-2: 0.5rem;
+  --mz-space-3: 0.75rem;
+  --mz-space-4: 1rem;
+  --mz-space-6: 1.5rem;
+
+  --mz-radius-md: 6px;
+  --mz-radius-lg: 10px;
+  --mz-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.08);
+  --mz-shadow-overlay: 0 10px 30px rgb(0 0 0 / 0.15);
+
+  --mz-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --mz-duration-fast: 150ms;
+  --mz-duration-slow: 300ms;
+
+  --mz-toolbar-height: 48px;
+}
+
+
+.mz-editor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--mz-color-bg);
+  color: var(--mz-color-text);
+  font-family: var(--mz-font-sans);
+  font-size: var(--mz-text-sm);
+  line-height: var(--mz-leading-normal);
+  -webkit-font-smoothing: antialiased;
+}
+
+.mz-editor *,
+.mz-editor *::before,
+.mz-editor *::after {
+  box-sizing: border-box;
+}
+
+.mz-editor :where(p, pre, h1, h2, h3) {
+  margin: 0;
+}
+
+.mz-editor :where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mz-editor *,
+  .mz-editor *::before,
+  .mz-editor *::after {
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
+  }
+}
+
+/* --- Shared controls ------------------------------------------------------------------------ */
+
+.mz-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--mz-space-2);
+  height: 2rem;
+  padding: 0 var(--mz-space-3);
+  border: 1px solid var(--mz-color-border);
+  border-radius: var(--mz-radius-md);
+  background: var(--mz-color-surface);
+  font-size: var(--mz-text-sm);
+  font-weight: var(--mz-weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--mz-duration-fast) var(--mz-ease-out);
+}
+
+.mz-button:hover:not(:disabled) {
+  background: var(--mz-color-accent-bg);
+}
+
+.mz-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mz-button:focus-visible,
+.mz-input:focus-visible,
+.mz-select:focus-visible,
+.mz-textarea:focus-visible {
+  outline: 2px solid var(--mz-color-highlight);
+  outline-offset: 1px;
+}
+
+.mz-button.mz-primary {
+  border-color: var(--mz-color-primary);
+  background: var(--mz-color-primary);
+  color: var(--mz-color-primary-text);
+}
+
+.mz-button.mz-primary:hover:not(:disabled) {
+  background: var(--mz-color-primary);
+  opacity: 0.85;
+}
+
+.mz-button.mz-destructive {
+  border-color: var(--mz-color-destructive);
+  background: var(--mz-color-destructive);
+  color: var(--mz-color-destructive-text);
+}
+
+.mz-button.mz-full {
+  width: 100%;
+}
+
+/* A button that reads as a link, for an action that undoes rather than commits. */
+.mz-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mz-color-highlight);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.mz-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+
+.mz-input,
+.mz-select,
+.mz-textarea {
+  display: block;
+  width: 100%;
+  padding: var(--mz-space-1) var(--mz-space-2);
+  border: 1px solid var(--mz-color-border);
+  border-radius: var(--mz-radius-md);
+  background: var(--mz-color-bg);
+  font-size: var(--mz-text-sm);
+}
+
+.mz-input,
+.mz-select {
+  height: 2rem;
+}
+
+.mz-textarea {
+  resize: vertical;
+}
+
+.mz-input:disabled {
+  opacity: 0.5;
+}
+
+.mz-label {
+  display: block;
+  margin-bottom: var(--mz-space-1);
+  font-weight: var(--mz-weight-medium);
+}
+
+.mz-muted {
+  color: var(--mz-color-text-muted);
+}
+
+.mz-hint {
+  margin-top: var(--mz-space-1);
+  color: var(--mz-color-text-muted);
+  font-size: var(--mz-text-xs);
+}
+
+.mz-title {
+  font-weight: var(--mz-weight-semibold);
+}
+
+/* A floating card over the canvas: the palette, the properties drawer. */
+.mz-card {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--mz-color-border);
+  border-radius: var(--mz-radius-lg);
+  background: var(--mz-color-surface);
+  box-shadow: var(--mz-shadow-overlay);
+}
+
+/* Rows divided by a line, the last without one: the palette's nodes, the drawer's fields. */
+.mz-rows > * + * {
+  border-top: 1px solid var(--mz-color-border);
+}
+
+/* A node's icon, name and one line about it: on the canvas and in the palette alike. */
+.mz-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mz-space-2);
+  padding: var(--mz-space-2) var(--mz-space-3);
+}
+
+.mz-entry-icon {
+  display: flex;
+  margin-top: 2px;
+  color: var(--mz-color-text-muted);
+}
+
+.mz-entry-about {
+  color: var(--mz-color-text-muted);
+  font-size: var(--mz-text-xs);
+}
+
+/* Something said over the canvas: a refusal, a run's progress. */
+.mz-overlay {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--mz-space-3);
+  padding: var(--mz-space-2) var(--mz-space-3);
+  border-radius: var(--mz-radius-md);
+  background: var(--mz-color-primary);
+  color: var(--mz-color-primary-text);
+  box-shadow: var(--mz-shadow-overlay);
+}
+
+/* --- The canvas ----------------------------------------------------------------------------- */
+
+.mz-editor .svelte-flow {
+  --xy-background-color: var(--mz-color-canvas);
+  --xy-background-pattern-color: var(--mz-color-border);
+  --xy-edge-stroke: var(--mz-color-text-muted);
+  --xy-edge-stroke-selected: var(--mz-color-highlight);
+  --xy-connectionline-stroke: var(--mz-color-highlight);
+  --xy-node-color: var(--mz-color-text);
+  --xy-node-border: 1px solid var(--mz-color-border);
+  --xy-node-background-color: var(--mz-color-surface);
+  --xy-node-border-radius: var(--mz-radius-lg);
+  --xy-node-boxshadow-hover: var(--mz-shadow-raised);
+  --xy-node-boxshadow-selected: 0 0 0 2px var(--mz-color-highlight);
+  background: var(--mz-color-canvas);
+}
+
+.mz-editor .svelte-flow__node-default {
+  width: auto;
+  max-width: 22rem;
+  padding: 0;
+  text-align: left;
+}
+
+/* A node's state during a Test, on the node's own wrapper. */
+.mz-editor .svelte-flow__node.mz-running {
+  box-shadow: 0 0 0 2px var(--mz-color-highlight);
+}
+
+.mz-editor .svelte-flow__node.mz-completed {
+  box-shadow: 0 0 0 2px var(--mz-color-success);
+}
+
+.mz-editor .svelte-flow__node.mz-failed {
+  box-shadow: 0 0 0 2px var(--mz-color-destructive);
+}
+
+/* --- Ports ---------------------------------------------------------------------------------- */
+
+/* A handle is coloured by the type travelling through it. The server allows a connection only
+   between ports of the same type, so two handles of the same colour is exactly what "these can be
+   wired together" looks like. */
+.mz-editor .svelte-flow__handle {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid var(--mz-color-surface);
+  transition: width var(--mz-duration-fast) var(--mz-ease-out),
+              height var(--mz-duration-fast) var(--mz-ease-out);
+}
+
+.mz-editor .svelte-flow__handle:hover,
+.mz-editor .svelte-flow__handle.mz-connected {
+  width: 1rem;
+  height: 1rem;
+}
+
+.mz-editor .mz-port-image { background: #f9a8b4; }           /* pictures */
+.mz-editor .mz-port-detections { background: #93c5fd; }      /* boxes, masks, keypoints, read text */
+.mz-editor .mz-port-classifications { background: #86efac; } /* scores, no boxes */
+.mz-editor .mz-port-depth { background: #fde68a; }           /* a float depth map, not a picture */
+.mz-editor .mz-port-embedding { background: #d8b4fe; }       /* an N x D float array */
+
+/* While a wire is being dragged, the handle under the pointer is marked `connectingto`, and
+   `valid` when the connection would be allowed: the answer arrives before the drop, not after. */
+.mz-editor .svelte-flow__handle.connectingto {
+  box-shadow: 0 0 0 3px rgb(220 38 38 / 0.35);
+}
+
+.mz-editor .svelte-flow__handle.connectingto.valid {
+  box-shadow: 0 0 0 3px rgb(22 163 74 / 0.45);
+}

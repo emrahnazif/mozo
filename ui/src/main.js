@@ -1,8 +1,5 @@
-import './app.css'
-import App from './App.svelte'
+// The dev server's page: the editor, against a mozo server on :8000 (see `server.proxy` in
+// vite.config.js).
+import { mount } from './editor.js';
 
-const app = new App({
-  target: document.getElementById('app'),
-})
-
-export default app
+mount(document.getElementById('app'), { base: `${location.origin}/workflow/` });

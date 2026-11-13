@@ -8,10 +8,6 @@
    * from drifting apart.
    */
   export let category = '';
-  export let size = 20;
-  export let class_ = '';
-
-  $: iconSize = `${size}px`;
 
   const ICONS = {
     // Input — a picture arriving
@@ -47,15 +43,7 @@
   $: paths = ICONS[category] || FALLBACK;
 </script>
 
-<svg class={class_} width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none"
-     xmlns="http://www.w3.org/2000/svg">
+<!-- Sized by `.mz-icon`, coloured by whatever holds it. -->
+<svg class="mz-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
   {@html paths}
 </svg>
-
-<style>
-  svg {
-    display: inline-block;
-    color: #666;
-    transition: color 0.15s ease;
-  }
-</style>

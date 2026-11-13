@@ -350,7 +350,7 @@ class TestTheModelServerIsUnaffected:
         from mozo.server import app
 
         added = {path for path in _every_path(app.routes) if "workflow" in path}
-        assert added == {"/workflow", "/workflow/assets/{name}", "/workflow/nodes",
+        assert added == {"/workflow", "/workflow/", "/workflow/assets/{name}", "/workflow/nodes",
                          "/workflow/process", "/workflow/run", "/workflow/stream",
                          "/workflow/validate"}
 

@@ -7,59 +7,52 @@
      * picture in a corner. The picture is a JPEG a fraction the size of the ones the canvas gets,
      * arriving at most five times a second however fast the run goes.
      */
-    import { running } from './stores.js';
+    import { useState } from './state.js';
+
+    const { running } = useState();
 
     $: rate = $running?.seconds ? Math.round($running.items / $running.seconds) : null;
 </script>
 
 {#if $running}
-    <aside class="run" aria-live="polite">
+    <aside class="mz-overlay mz-run" aria-live="polite">
         {#if $running.preview}
             <img src={$running.preview} alt="the run in progress" />
         {/if}
-        <div class="tally">
+        <div class="mz-tally">
             <strong>{$running.items.toLocaleString()}</strong>
             <span>{$running.done ? 'items' : 'items so far'}</span>
-            {#if rate}<span class="rate">{rate.toLocaleString()}/s</span>{/if}
-            {#if $running.node}<span class="node">showing {$running.node}</span>{/if}
+            {#if rate}<span class="mz-faint">{rate.toLocaleString()}/s</span>{/if}
+            {#if $running.node}<span class="mz-faint mz-node-name">showing {$running.node}</span>{/if}
         </div>
     </aside>
 {/if}
 
 <style>
-    .run {
-        position: fixed;
-        bottom: 1rem;
-        left: 1rem;
-        z-index: 30;
-        background: rgba(20, 20, 22, 0.92);
-        color: #f4f4f5;
-        border-radius: 6px;
-        padding: 0.5rem;
-        display: flex;
-        gap: 0.75rem;
-        align-items: center;
-        max-width: min(28rem, calc(100vw - 2rem));
-        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+    .mz-run {
+        bottom: var(--mz-space-4);
+        right: var(--mz-space-4);      /* the palette runs down the left */
+        max-width: min(28rem, calc(100% - 2 * var(--mz-space-4)));
+        padding: var(--mz-space-2);
     }
 
-    .run img {
+    .mz-run img {
         display: block;
         width: 10rem;
-        max-width: 40vw;
-        border-radius: 3px;
+        max-width: 40%;
+        border-radius: var(--mz-radius-md);
     }
 
-    .tally {
+    .mz-tally {
         display: flex;
         flex-direction: column;
         gap: 0.1rem;
-        font-size: 0.8rem;
+        font-size: var(--mz-text-xs);
         /* Digits that change every frame must not shuffle the layout under them. */
         font-variant-numeric: tabular-nums;
     }
 
-    .tally strong { font-size: 1.15rem; }
-    .rate, .node { opacity: 0.65; }
-    .node { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mz-tally strong { font-size: 1.15rem; }
+    .mz-faint { opacity: 0.65; }
+    .mz-node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

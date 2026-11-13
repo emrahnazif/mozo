@@ -2,8 +2,6 @@
     import { useSvelteFlow } from '@xyflow/svelte';
     import { createEventDispatcher } from 'svelte';
 
-    export let onNodeDrop;
-
     const { screenToFlowPosition } = useSvelteFlow();
     const dispatch = createEventDispatcher();
 
@@ -24,25 +22,16 @@
             y: event.clientY,
         });
 
-        // Dispatch the drop event with the correct position
-        dispatch('nodedrop', {
-            nodeType,
-            position
-        });
-
-        // Also call the parent handler if provided
-        if (onNodeDrop) {
-            onNodeDrop({ nodeType, position });
-        }
+        dispatch('nodedrop', { nodeType, position });
     }
 </script>
 
-<div class="flow-drop-zone" role="region" aria-label="Canvas drop zone" on:drop={onDrop} on:dragover={onDragOver}>
+<div class="mz-drop-zone" role="region" aria-label="Canvas drop zone" on:drop={onDrop} on:dragover={onDragOver}>
     <slot />
 </div>
 
 <style>
-    .flow-drop-zone {
+    .mz-drop-zone {
         width: 100%;
         height: 100%;
     }

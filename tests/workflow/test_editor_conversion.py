@@ -22,7 +22,7 @@ API = ROOT / "ui" / "src" / "lib" / "api.js"
 
 #: A canvas as Svelte Flow holds it: every node typed `custom`, the real kind in `data.nodeType`.
 CANVAS = """
-import { toDocument, fromDocument, fileNameFor } from '%s';
+import { toDocument, fromDocument, fileNameFor, drawable } from '%s';
 
 const nodes = [
   { id: 'load-1', type: 'custom', position: { x: 10, y: 20 },
@@ -52,6 +52,14 @@ console.log(JSON.stringify({
   named,
   namedAgain: toDocument(namedBack.nodes, namedBack.edges, namedBack.about),
   fileNames: [fileNameFor(about), fileNameFor({ name: '' }), fileNameFor({ name: 'Ünïcode / ok?' })],
+  drawable: drawable([
+    ...edges,
+    { source: 'load-1', sourceHandle: 'picture', target: 'det-1', targetHandle: 'image' },
+    { source: 'ghost', sourceHandle: 'image', target: 'det-1', targetHandle: 'image' },
+  ], back.nodes, {
+    read_media: { outputs: [{ name: 'image' }], inputs: [] },
+    yolov26: { inputs: [{ name: 'image' }], outputs: [{ name: 'detections' }] },
+  }),
 }));
 """ % API
 
@@ -103,6 +111,13 @@ class TestTheConversion:
         assert list(named)[:2] == ["name", "description"]
         assert (named["name"], named["description"]) == ("Blur faces", "Find faces, blur them.")
         assert converted["namedAgain"] == named
+
+    def test_an_edge_to_a_port_or_node_that_is_not_there_is_left_out(self, converted):
+        """Drawn, it would stop every store on the page from updating -- see ``drawable``."""
+        split = converted["drawable"]
+        assert [edge["sourceHandle"] for edge in split["drawn"]] == ["image"]
+        assert [(edge["source"], edge["sourceHandle"]) for edge in split["left"]] == [
+            ("load-1", "picture"), ("ghost", "image")]
 
     def test_the_exported_file_is_named_after_the_workflow(self, converted):
         assert converted["fileNames"] == ["blur-faces.json", "workflow.json", "n-code-ok.json"]

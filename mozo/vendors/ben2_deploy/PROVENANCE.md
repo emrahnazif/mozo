@@ -76,7 +76,7 @@ on the checkpoint itself.
 terms restrict commercial use pending an agreement with its authors. mozo takes the publisher's
 MIT grant on the weights as stated and does not track the data behind them — that obligation was
 Prama's, discharged before publication. This paragraph is the end of the chain, recorded as §1.2
-of `plans/vendoring.md` requires rather than left as silence.
+of `VENDORING.md` requires rather than left as silence.
 
 The model card points commercial users at a sales address for a different, unpublished model.
 That is an offer of another artifact, not a restriction on this one.
@@ -173,7 +173,7 @@ ratio in this model divides evenly. Checked at all fifteen (shape, target) pairs
 `torch.equal`, zero delta at each. Upstream's operator is kept for any case where the division
 would not be exact, so the substitution is never a guess.
 
-This is §6 of `plans/vendoring.md` landing the opposite way from EasyOCR, where the only
+This is §6 of `VENDORING.md` landing the opposite way from EasyOCR, where the only
 substitution that traced was a mean over the same axis and *was* different in float, so it was
 reverted.
 

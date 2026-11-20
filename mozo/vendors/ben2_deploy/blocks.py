@@ -105,7 +105,7 @@ def _pool(x: torch.Tensor, target: tuple[int, int]) -> torch.Tensor:
     ``tools/verify/ben2.py`` checks it at every one. The decoder makes fifteen pooling calls over
     twelve distinct ``(shape, target)`` pairs, the last rung repeating the one before it.
 
-    This is §6 of ``plans/vendoring.md`` going the other way from EasyOCR, where the only
+    This is §6 of ``VENDORING.md`` going the other way from EasyOCR, where the only
     substitution that traced was a mean over the same axis and *was* different in float (the pool
     divides by three, the mean multiplies by a reciprocal), so it was reverted. Here the two are
     bit-identical, so the fast path is taken whenever it applies and upstream's operator is kept

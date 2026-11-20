@@ -6,7 +6,7 @@
 
 This runs once, on a machine you control, and never ships. **It writes nothing into
 ``weights/``**, which makes it unlike every other tool in this directory -- and that is the point.
-§6 of ``plans/vendoring.md`` says a measured "no" is a finding and an unmeasured one is a gap, so
+§6 of ``VENDORING.md`` says a measured "no" is a finding and an unmeasured one is a gap, so
 the negative result lives in a script anyone can re-run rather than in a paragraph anyone can
 doubt.
 

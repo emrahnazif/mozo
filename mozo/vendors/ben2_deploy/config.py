@@ -7,7 +7,7 @@
 
 Upstream has no config: ``BEN_Base.__init__`` hardcodes every number inline, and the Swin
 constructor's defaults are Swin-T's, overridden at the one call site. Collecting them here is
-what lets the strict load check them -- §5 of ``plans/vendoring.md``, "geometry that looks
+what lets the strict load check them -- §5 of ``VENDORING.md``, "geometry that looks
 derivable usually is not".
 
 **The input resolution is not a preference, it is the architecture.** ``BEN_Base.forward`` splits

@@ -24,7 +24,7 @@ grid, the box decode and a two-stage top-k are part of the forward pass, where t
 non-maximum suppression outside it -- so the share the head takes is the number worth having, and
 no sibling bench reports it.
 
-Two measurement traps, both inherited from `vendoring.md` §8 and both real:
+Two measurement traps, both inherited from `VENDORING.md` §8 and both real:
 
 - **Synchronise the device.** Metal queues asynchronously, so an unsynchronised timer measures
   submission and not work. SigLIP 2 first reported itself 23% slower on MPS for exactly this

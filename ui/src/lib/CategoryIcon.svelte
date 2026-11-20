@@ -26,6 +26,8 @@
     Read: '<path d="M4 7V5h16v2M9 19h6M12 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
     // Depth — near and far
     Depth: '<path d="M12 3l9 5-9 5-9-5 9-5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M3 13l9 5 9-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    // Track — following an object from frame to frame
+    Track: '<path d="M3 18c3-1 4-6 7-7s5 2 8-1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 3"/><circle cx="19" cy="9" r="2.5" stroke="currentColor" stroke-width="2"/>',
     // Transform — geometry
     Transform: '<path d="M21 2v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3 22v-6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
     // Adjust — sliders

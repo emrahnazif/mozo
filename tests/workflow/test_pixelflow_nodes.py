@@ -43,7 +43,7 @@ def _inputs(spec, image, detections) -> dict:
 #: The nodes this file is responsible for: everything mozo ships that runs without weights. Chosen
 #: by what they are rather than by naming the two modules they happen to live in today, so a third
 #: drawing module cannot slip past a sweep that still reads green.
-DRAWN = shipped(without=("model", "io"))
+DRAWN = shipped(without=("model", "io", "track"))  # track: tests/workflow/test_track.py
 
 
 @pytest.fixture(scope="module")

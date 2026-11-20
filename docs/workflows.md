@@ -131,6 +131,15 @@ use `mozo.workflow.annotation_line(detections, label=..., width=..., height=...)
 Stop a run by closing its iterator, or leaving the `for` loop: no further item starts, a model
 call already running finishes, and the run's threads exit right after it.
 
+### Tracking
+
+`track` gives each object the same `tracker_id` from frame to frame, so it's counted once however
+many frames it's in: wire a detector's detections into it, over a video's frames. The tracker
+(ByteTrack by default; SORT, OC-SORT, C-BIoU) is pixelflow's, kept in the node's state for the run,
+and told the run's rate and each frame's time, so a strided read is tracked at the rate it's read
+at. `lost_after` is in seconds for the same reason: how long an object may go unseen before one
+seen again is a new one.
+
 ## What a workflow is
 
 ```json
@@ -290,7 +299,6 @@ your application registers with `@node` are in its palette, because the palette 
 
 ## What is not there
 
-- **Tracking.** Stateful across frames, and mozo has no concept of a video.
 - **Zones**, and clicking for **SAM 2** / **EdgeTAM** / **SAM 3**. Both are pixel coordinates, and
   the editor has no way yet to express a click. Boxes already work: `sam2_boxes`, `edgetam_boxes`
   and `sam3_boxes` segment the boxes another node found. A tool that clicks calls the model

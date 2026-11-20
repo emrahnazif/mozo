@@ -1,0 +1,38 @@
+granite_embedding_r2_deploy
+Copyright 2024 Answer.AI, LightOn, and contributors, and the HuggingFace Inc. team
+Copyright IBM Corp.
+
+This product includes software derived from transformers/models/modernbert
+(https://github.com/huggingface/transformers), the ModernBERT architecture
+described in "Smarter, Better, Faster, Longer: A Modern Bidirectional Encoder
+for Fast, Memory Efficient, and Long Context Finetuning and Inference"
+(Warner et al., 2024, arXiv:2412.13663), licensed under the Apache License 2.0;
+see the LICENSE file in this directory.
+
+It runs IBM's Granite Embedding R2 models, described in "Granite Embedding R2
+Models" (2025, arXiv:2508.21085). IBM publishes no inference code of its own; the
+checkpoints are ModernBertModel state dicts, and the transformers implementation
+is the one whose numbers they reproduce. See PROVENANCE.md.
+
+ON THE WEIGHTS
+--------------
+ibm-granite/granite-embedding-small-english-r2 is Apache-2.0, stated in the
+model card's metadata, and served ungated. Nothing here is inferred.
+
+THE VOCABULARY
+--------------
+assets/granite_bpe.json.gz is derived from tokenizer.json as published in
+ibm-granite/granite-embedding-small-english-r2 at commit
+2ab6fa8ea2d674564defd37171ae19079b864b33 -- 50,280 pieces, 50,009 merge rules and
+116 added tokens, re-encoded so that merges are pairs of ids rather than pairs of
+strings. Its vocabulary, merges and added tokens are identical to
+answerdotai/ModernBERT-base's (Apache-2.0). The asset also carries character
+classes and NFC boundaries read out of the reference tokenizer by probing it;
+see PROVENANCE.md.
+
+NOT INCLUDED
+------------
+The masked-language-model, classification, token-classification and
+question-answering heads, the FlashAttention-2 path and its unpadding, training,
+and the tokenizer's silent truncation. See PROVENANCE.md for the full list and
+for why.

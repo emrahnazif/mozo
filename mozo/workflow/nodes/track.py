@@ -47,5 +47,10 @@ def track(detections: Detections, run: Context, state: State, tracker: Tracker =
         while a new track isn't confirmed yet.
     """
     if "tracker" not in state:
-        state["tracker"] = TRACKERS[tracker](lost_track_buffer=round(lost_after * 30), frame_rate=run.fps)
+        frames = round(lost_after * 30)  # pixelflow counts the buffer in frames at 30 fps
+        # Zero frames would give every object a new id every frame, which is no tracking at all.
+        if frames < 1:
+            raise ValueError(f"lost_after is in seconds and must be at least one frame (1/30), "
+                             f"got {lost_after}")
+        state["tracker"] = TRACKERS[tracker](lost_track_buffer=frames, frame_rate=run.fps)
     return state["tracker"].update(detections, timestamp=run.time)

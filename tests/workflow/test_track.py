@@ -63,3 +63,9 @@ def test_an_object_gone_longer_than_lost_after_comes_back_as_a_new_one():
     before = {i for frame in ids[:4] for i in frame if i is not None}
     after = {i for frame in ids[-3:] for i in frame if i is not None}
     assert after and not after & before
+
+
+@pytest.mark.parametrize("lost_after", [0, -1, 0.01])
+def test_a_lost_after_under_one_frame_is_refused(lost_after):
+    with pytest.raises(ValueError, match="lost_after"):
+        _run(_moving(1), lost_after=lost_after)

@@ -15,7 +15,7 @@ To add a family: add an entry below, and give its adapter the same ``VARIANTS``.
 
 from __future__ import annotations
 
-__all__ = ["BOXED", "CLICKABLE", "ENCODES", "EXECUTES", "MODEL_REGISTRY", "NEEDS", "PREPARES",
+__all__ = ["BOXED", "CLICKABLE", "ENCODE_ONLY", "ENCODES", "EXECUTES", "MODEL_REGISTRY", "NEEDS", "PREPARES",
            "PROMPTED", "get_model_info"]
 
 from typing import Any
@@ -57,15 +57,25 @@ CLICKABLE = frozenset({"edgetam", "sam2", "sam3"})
 #: Read before anything is loaded, for the same reason PROMPTED is: ``/encode``'s refusal has to
 #: come before the image decode and the multi-gigabyte download, not after. ``/predict`` can afford
 #: a late 501 because a test proves every registered task has a branch there, so it never fires;
-#: on ``/encode`` the reverse holds, and two families in fourteen have one.
+#: on ``/encode`` the reverse holds, because only the families that embed have one.
 #:
 #: A dict rather than a set because the kinds differ: CLIP takes both, a re-identification embedder
 #: would take images only, and ``/models`` should be able to say which without loading anything.
 #: The task type cannot carry this -- two families can classify while only one of them embeds.
 ENCODES: dict[str, frozenset[str]] = {
     "clip": frozenset({"image", "text"}),
+    "granite_embedding_r2": frozenset({"text"}),
     "siglip2": frozenset({"image", "text"}),
 }
+
+#: Task types whose model answers nothing about an image: it returns vectors, and ``/encode`` is
+#: the whole of what it does. ``/predict`` takes an image and returns an answer, so it refuses these
+#: before decoding or loading anything and points at ``/encode`` instead -- rather than demanding a
+#: picture the model would ignore, downloading the weights, and only then giving up.
+#:
+#: Named here for the reason PROMPTED is: the endpoint has to refuse before the load, and a test
+#: holds every registered task to having somewhere to go.
+ENCODE_ONLY = frozenset({"text_embedding"})
 
 #: Families whose model can be prepared: given an image ahead of its prompts, so it runs the
 #: expensive, image-only half now and each prompt afterwards runs only the cheap half. Their
@@ -83,8 +93,8 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 #: The adapters read it from here, so there is one statement of it.
 EXECUTES: dict[str, tuple[str, ...]] = {
     family: ("torch",)
-    for family in ("ben2", "clip", "easyocr", "edgetam", "grounding_dino", "moebius", "owlv2",
-                   "sam2", "siglip2")
+    for family in ("ben2", "clip", "easyocr", "edgetam", "granite_embedding_r2", "grounding_dino",
+                   "moebius", "owlv2", "sam2", "siglip2")
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -188,6 +198,21 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'Apache 2.0.'
         ),
         'variants': ['edgetam'],
+    },
+
+    'granite_embedding_r2': {
+        'adapter_class': 'GraniteEmbeddingR2Predictor',
+        'module': 'mozo.adapters.granite_embedding_r2',
+        'task_type': 'text_embedding',
+        'description': (
+            'Granite Embedding R2 by IBM — English text embeddings. Text in, one vector out, and '
+            'texts that mean the same thing land close together: search documentation, notes or '
+            'what OCR read off an image by meaning rather than by keyword. Text only — it has no '
+            'image tower, so its vectors do not share a space with CLIP\'s or SigLIP 2\'s. 47.7M '
+            'parameters, 384-d vectors, up to 8,192 tokens a text. Served through /encode only. '
+            'Code and weights are both Apache-2.0.'
+        ),
+        'variants': ['small'],
     },
 
     'grounding_dino': {

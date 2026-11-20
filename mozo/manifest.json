@@ -501,6 +501,31 @@
         }
       }
     },
+    "granite_embedding_r2/small": {
+      "latest": "2026-11-20",
+      "revisions": {
+        "2026-11-20": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "granite_embedding_r2/small/2026-11-20/LICENSE",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "size": 11358
+            },
+            "NOTICE": {
+              "path": "granite_embedding_r2/small/2026-11-20/NOTICE",
+              "sha256": "d6314d76354eacd2d186cc24fc895414b09fab15b18ae977c2e30d8da4cd7c41",
+              "size": 1089
+            },
+            "torch-fp32": {
+              "path": "granite_embedding_r2/small/2026-11-20/torch-fp32.pth",
+              "sha256": "50ee06aba0433a8f01c2a7caa76106aafab797895d807ebc4e794ac5be63dee7",
+              "size": 190672949
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
     "grounding_dino/base": {
       "latest": "2026-08-23",
       "revisions": {

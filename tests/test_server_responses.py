@@ -173,8 +173,10 @@ def test_every_registered_task_type_has_a_dispatch_arm():
     source = inspect.getsource(server.predict)
     registered = {entry["task_type"] for entry in MODEL_REGISTRY.values()}
     # PROMPTED and BOXED are dispatched as sets rather than by name, so their members are served
-    # by a ``task in ...`` arm and will not appear as string literals.
-    served = set(re.findall(r'task == "([a-z_]+)"', source)) | server.PROMPTED | server.BOXED
+    # by a ``task in ...`` arm and will not appear as string literals. ENCODE_ONLY tasks are
+    # served by a refusal pointing at /encode, which is their whole answer here.
+    served = (set(re.findall(r'task == "([a-z_]+)"', source))
+              | server.PROMPTED | server.BOXED | server.ENCODE_ONLY)
 
     assert registered <= served, (
         f"registered but not served: {sorted(registered - served)}. Add an arm to "
@@ -202,3 +204,32 @@ def test_every_encoding_family_can_encode_what_it_advertises():
                 f"ENCODES says {family} embeds {kind}, but "
                 f"{entry['adapter_class']}.encode_{kind} does not exist"
             )
+
+
+def test_every_family_that_only_embeds_can_embed():
+    """``/predict`` sends an encode-only family to ``/encode``, which must then accept it."""
+    from mozo.registry import ENCODE_ONLY, ENCODES, MODEL_REGISTRY
+
+    for family, entry in MODEL_REGISTRY.items():
+        if entry["task_type"] in ENCODE_ONLY:
+            assert ENCODES.get(family), f"{family} is encode-only but encodes nothing"
+
+
+class TestAFamilyThatOnlyEmbeds:
+    """``/predict`` sends an encode-only family to ``/encode``, before loading anything."""
+
+    def test_predict_points_at_encode_whether_or_not_a_file_came(self, client):
+        for files in ({}, {"file": ("x.jpg", FIXTURE.read_bytes(), "image/jpeg")}):
+            response = client.post("/predict/granite_embedding_r2/small",
+                                   params={"text": "a cat"}, files=files)
+            assert response.status_code == 501
+            assert "/encode/granite_embedding_r2/small" in response.json()["detail"]
+
+    def test_an_unknown_variant_is_still_a_404(self, client):
+        assert client.post("/predict/granite_embedding_r2/huge").status_code == 404
+
+    def test_encode_refuses_an_image_for_it(self, client):
+        response = client.post("/encode/granite_embedding_r2/small",
+                               files={"file": ("x.jpg", FIXTURE.read_bytes(), "image/jpeg")})
+        assert response.status_code == 400
+        assert "text" in response.json()["detail"]

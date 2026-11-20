@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/mozo)](https://pypi.org/project/mozo/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-### 81 computer vision models, and the workflows that run them.
+### 82 models, and the workflows that run them.
 
 One `pip install`. No dependency hell. Runs models, executes workflows, and builds them.
 
@@ -15,7 +15,7 @@ few in one environment and something breaks. The usual escape is a container per
 paying for that forever.
 
 Mozo ships none of them. Every model's inference path is vendored into mozo itself and verified
-**bit-identical** to the original implementation — so one environment runs all 81, and gives
+**bit-identical** to the original implementation — so one environment runs all 82, and gives
 you the original's exact numbers rather than something close.
 
 ```bash
@@ -88,6 +88,17 @@ probabilities — [details](docs/models.md#clip).
 |---|---|---|---|---|
 | `clip` | `base` `base-16` `large` `large-336` | MIT | phrases, ≤77 tokens each | a score per phrase, or 512/768-d vectors |
 | `siglip2` | `base-224` `base-256` `so400m-384` `so400m16-256` `giant-384` | Apache-2.0 | phrases, ≤64 tokens each | a probability per phrase, or 768/1152/1536-d vectors |
+
+### Text embeddings
+
+English text in, one vector out, and texts that mean the same thing land close together: search
+documentation, notes, or what EasyOCR read off an image, by meaning rather than by keyword. Text
+only — these vectors do not share a space with CLIP's or SigLIP 2's, so they cannot search
+pictures by words. Served through `/encode` alone — [details](docs/models.md#granite-embedding-r2).
+
+| Family | Variants | Weights licence | Input | Output |
+|---|---|---|---|---|
+| `granite_embedding_r2` | `small` | Apache-2.0 | text, ≤8,192 tokens each | 384-d vectors |
 
 ### Promptable segmentation
 
@@ -193,7 +204,7 @@ Trimmed for reading. The real response carries every PixelFlow field on every de
 The catalogue is answerable without loading anything:
 
 ```bash
-curl http://localhost:8000/models          # all 81, no torch import, no weights
+curl http://localhost:8000/models          # all 82, no torch import, no weights
 curl http://localhost:8000/models/loaded   # what is resident right now
 ```
 
@@ -253,7 +264,7 @@ results = Workflow.load("blur_faces.json").run(source="street.jpg")
 mozo run blur_faces.json --file street.jpg
 ```
 
-50 nodes: every model family, SAM 2, EdgeTAM and SAM 3 segmenting the boxes another node found, RF-DETR
+50 nodes: every model family that answers about an image, SAM 2, EdgeTAM and SAM 3 segmenting the boxes another node found, RF-DETR
 from a checkpoint of your own, tracking objects across a video's frames, the image transforms and
 annotations PixelFlow provides, and the ends that read images and annotations and write results. A
 node is an ordinary Python function — its signature *is* its
@@ -277,7 +288,7 @@ tolerance.** Exact equality, because a tolerance hides precisely the drift a che
 
 The gates in `tools/verify/` compare every intermediate stage against the original implementation,
 not just the final answer: 1,275 comparisons for EasyOCR, 226 for OWLv2, 138 for Grounding DINO,
-every one identical. Fourteen of the seventeen families ship one; all seventeen have their parity measured
+every one identical. Fifteen of the eighteen families ship one; all eighteen have their parity measured
 and recorded in
 `mozo/vendors/<family>_deploy/PROVENANCE.md`, with the upstream commit it was built from.
 
@@ -342,8 +353,9 @@ curl -X POST "http://localhost:8000/predict/depth_anything_v2/indoor-small" \
 16-bit rather than 8, because six of the nine variants predict metres and quantising those to 256
 levels would discard the measurement.
 
-CLIP is the one family with a second route. `/predict` classifies; `/encode` returns the vectors
-instead of an answer, for images or for phrases but not both in one call:
+CLIP and SigLIP 2 have a second route. `/predict` classifies; `/encode` returns the vectors
+instead of an answer, for images or for phrases but not both in one call. Granite Embedding R2 has
+only the second: it answers nothing about an image, so `/predict` points you at `/encode`.
 
 ```bash
 # Score an image against phrases you make up
@@ -353,6 +365,9 @@ curl -X POST "http://localhost:8000/predict/clip/base?text=a%20forklift&text=a%2
 # The vectors themselves, to put in a vector database of your own
 curl -X POST "http://localhost:8000/encode/clip/base" -F "file=@aisle.jpg"
 curl -X POST "http://localhost:8000/encode/clip/base?text=a%20forklift&text=a%20person"
+
+# Text alone, for searching documents by meaning
+curl -X POST "http://localhost:8000/encode/granite_embedding_r2/small?text=how%20do%20I%20count%20people%3F"
 ```
 
 The response carries `model` and `revision` alongside the embeddings, and those are not decoration:
@@ -498,7 +513,7 @@ things about it are yours to arrange:
 ## What mozo does not do
 
 - **No training and no fine-tuning.** Bring a checkpoint; mozo runs it.
-- **It is not a model hub.** The catalogue is a curated 81, chosen because each one could be
+- **It is not a model hub.** The catalogue is a curated 82, chosen because each one could be
   extracted and verified. Growth is deliberate and slow.
 
 ## Extending
@@ -548,7 +563,7 @@ cd ui && npm install && npm run build   # writes mozo/workflow/static/assets/
 
 Mozo's own code is **Apache-2.0**, and so is every vendored extraction under `mozo/vendors/`.
 
-The weights are separate works travelling with it. Of the 81 published variants, **43 are
+The weights are separate works travelling with it. Of the 82 published variants, **44 are
 Apache-2.0**, 30 are **AGPL-3.0** (every YOLO variant), 5 are **MIT** (CLIP and BEN2), 2 are
 **CC-BY-NC-4.0** (Depth Anything `base` and `large`), and 1 carries Meta's **SAM License**
 (SAM 3). The full licence and a NOTICE
@@ -565,13 +580,14 @@ Complying with either is the operator's responsibility. `MOZO_ENABLE` is how an 
 to take it on — a server that never offers a model never fetches or serves its weights:
 
 ```bash
-MOZO_ENABLE=ben2,clip,easyocr,edgetam,grounding_dino,moebius,owlv2,rfdetr,sam2,siglip2,vitpose,\
-depth_anything_v2/small,depth_anything_v2/indoor-small,depth_anything_v2/indoor-base,\
+MOZO_ENABLE=ben2,clip,easyocr,edgetam,granite_embedding_r2,grounding_dino,moebius,owlv2,\
+rfdetr,sam2,siglip2,vitpose,depth_anything_v2/small,depth_anything_v2/indoor-small,\
+depth_anything_v2/indoor-base,\
 depth_anything_v2/indoor-large,depth_anything_v2/outdoor-small,\
 depth_anything_v2/outdoor-base,depth_anything_v2/outdoor-large
 ```
 
-That is the 48 Apache-2.0 and MIT variants, and it stays 48 through an upgrade that adds
+That is the 49 Apache-2.0 and MIT variants, and it stays 49 through an upgrade that adds
 families — which a list of what to *exclude* would not. Depth Anything is named variant by variant
 because it is the one family whose licence is not uniform: seven of its nine are Apache-2.0 and
 two are CC-BY-NC-4.0.

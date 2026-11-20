@@ -32,8 +32,8 @@ from .depth import encode as encode_depth
 from .text import comma_separated
 from .image import encode_image, load_image
 from .prepared import PreparedImages, limit_from_environment
-from .registry import (BOXED, CLICKABLE, ENCODES, MODEL_REGISTRY, PREPARES, PROMPTED,
-                       get_model_info)
+from .registry import (BOXED, CLICKABLE, ENCODE_ONLY, ENCODES, MODEL_REGISTRY, PREPARES,
+                       PROMPTED, get_model_info)
 from .weights import license_of
 from .workflow.api import router as workflow_routes
 
@@ -506,6 +506,20 @@ def predict(
     Returns:
         Detections as JSON, or a depth map as a 16-bit PNG -- see :func:`_depth_response`.
     """
+    # A family that only embeds has no answer to give here, so it is sent to /encode before
+    # anything else -- even the missing-file 422 below, which would otherwise tell a caller with a
+    # phrase and no picture to upload a picture the model would ignore. Only for a family the
+    # registry knows: an unknown name still meets the 422 first, as it always has.
+    if MODEL_REGISTRY.get(family, {}).get("task_type") in ENCODE_ONLY:
+        _catalogue_entry(family, variant)  # an undeployed family or unknown variant is still a 404
+        raise HTTPException(
+            status_code=501,
+            detail=f"{family} returns vectors, not an answer about an image, so it has no "
+                   f"/predict. Use /encode/{family}/{variant} with "
+                   + " or ".join({"text": "?text=", "image": "an uploaded image"}[kind]
+                                 for kind in sorted(ENCODES.get(family, ()), reverse=True))
+                   + ".")
+
     # Before anything else, and in FastAPI's own words, because it is what this endpoint answered
     # before ``?sha256=`` made the file optional: a request with no image was refused by request
     # validation -- 422, ahead of every other check, unknown model names included. A client

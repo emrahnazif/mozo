@@ -82,7 +82,7 @@ def test_the_readme_headline_states_the_published_count():
     readme = (ROOT / "README.md").read_text()
     variants = published_variants()
 
-    headline = re.search(r"^### (\d+) computer vision models", readme, re.M)
+    headline = re.search(r"^### (\d+) models", readme, re.M)
     assert headline, "the README no longer opens with a model count"
     assert int(headline.group(1)) == variants, (
         f"README headline says {headline.group(1)}, manifest publishes {variants}"
@@ -94,7 +94,7 @@ def test_the_readme_headline_states_the_published_count():
 #: suite for an unrelated edit, which is worse than not checking -- a test nobody trusts gets
 #: deleted. Reword the README and this list is what you update.
 COUNT_CONTEXTS = (
-    r"### (\d+) computer vision models",
+    r"### (\d+) models",
     r"runs all (\d+)",
     r"# all (\d+), no torch import",
     r"a curated (\d+)",

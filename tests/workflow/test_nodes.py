@@ -478,10 +478,10 @@ class TestTheAlphaChannelRule:
         assert get("draw_boxes")._shaped({"image": rgb})["image"] is rgb
 
     def test_save_image_defaults_to_a_format_that_can_carry_alpha(self):
-        from mozo.image import ALPHA_FORMATS
+        from mozo.image import encode_image
 
         default = next(p.default for p in get("save_image").parameters if p.name == "format")
-        assert default in ALPHA_FORMATS, (
+        assert encode_image(self._rgba(), default), (
             f"save_image defaults to {default}, which cannot carry the alpha channel the one "
             f"node with alpha=True exists to write")
 

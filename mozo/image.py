@@ -11,12 +11,9 @@ decisions. :func:`load_image` is what a file or a request body becomes; :func:`e
 goes back out. The encoder was private inside the workflow's HTTP layer until the model endpoints
 started borrowing it by its private name, which is how a shared fact announces it is homed wrong.
 
-**The encoder is PixelFlow's for three channels and mozo's for four.** A cut-out is an image and
-leaves by this door like any other, but ``pf.encode_image`` refuses a fourth channel, so the RGBA
-path is written out below. That is a widening of one function rather than a second encoder
-elsewhere, which is the thing this module exists to prevent -- and it is safe for a reason specific
-to alpha: the ambiguity a hand-written encoder forgets is RGB-versus-BGR, and there is exactly one
-channel order for RGBA.
+**The encoder is PixelFlow's, for three channels and four.** A cut-out is an image and leaves by
+this door like any other: ``pf.encode_image`` takes RGBA too, and refuses it for a format that
+cannot keep transparency rather than choosing a background on the caller's behalf.
 
 **The decoder is PixelFlow's.** That is the same argument aimed one layer down rather than a
 retreat from it: ``pf.read_image`` decodes for every consumer of the library whose stated contract
@@ -90,27 +87,17 @@ def load_image(image: Union[str, os.PathLike, bytes, np.ndarray]) -> np.ndarray:
 
 
 def encode_image(image: np.ndarray, extension: str = ".png") -> bytes:
-    """Encode an RGB array as bytes -- the way back out, and the mirror of :func:`load_image`.
+    """Encode an RGB or RGBA array as bytes: the way back out, the mirror of :func:`load_image`.
 
     PixelFlow's, for the reason the decoder is: ``cv2.imencode`` alone is only half the operation,
     and the half it leaves out is the RGB-to-BGR conversion that goes with it. Written by hand that
-    step is remembered in most places and forgotten in one, which is exactly the failure this module
-    exists to make unconstructible -- and forgetting it here produces a picture that looks plausible
-    and has its channels swapped.
+    step is remembered in most places and forgotten in one, and forgetting it produces a picture
+    that looks plausible and has its channels swapped.
 
     **Four channels are accepted here and nowhere else in this module.** A cut-out is an image --
-    every viewer on the receiving end already knows what its fourth channel means -- so it leaves
-    through the same door rather than through a second encoder. That does not weaken the contract
-    :func:`load_image` states, and the asymmetry is not an oversight: the reason this module
-    exists is that a three-channel array carries no record of whether it is RGB or BGR, and
-    *that* ambiguity is what a hand-written encoder forgets. Alpha has no such ambiguity. There is
-    one channel order for RGBA and one for BGRA, and the swap between them is this function's job
-    in both cases.
-
-    PNG is what everything in mozo defaults to and the only format a cut-out reaches here through;
-    :data:`ALPHA_FORMATS` is what is *accepted*. Asking for JPEG with an alpha channel present is
-    refused rather than flattened, because flattening picks a background colour on the caller's
-    behalf and that is a decision, not a conversion.
+    every viewer on the receiving end knows what its fourth channel means. That does not weaken the
+    contract :func:`load_image` states: what this module guards against is that a three-channel
+    array carries no record of whether it is RGB or BGR, and alpha has no such ambiguity.
 
     Args:
         image: ``HxWx3`` RGB ``uint8`` as :func:`load_image` returns, or ``HxWx4`` RGBA where the
@@ -118,24 +105,17 @@ def encode_image(image: np.ndarray, extension: str = ".png") -> bytes:
         extension: The format, with or without the dot. PNG by default because an annotated image
             is mostly thin lines and mask edges, which is what JPEG is worst at, and a result that
             has been quietly smeared is worse than a larger response. A caller that wants a cheap
-            preview rather than a result asks for ``".jpg"`` and says so.
+            preview rather than a result asks for ``".jpg"`` and says so. An RGBA image needs a
+            format that keeps transparency: ``.png``, ``.webp``, ``.tif`` or ``.tiff``.
 
     Returns:
         bytes: The encoded image.
 
     Raises:
-        ValueError: If *image* is not ``HxWx3`` or ``HxWx4`` ``uint8``, if a format that cannot
-            carry alpha is asked for with a four-channel image, or if the encode fails.
+        ValueError: If *image* is not ``HxWx3`` or ``HxWx4`` ``uint8``, if a format with no
+            transparency is asked for with a four-channel image, or if the encode fails.
     """
-    if has_alpha(image):
-        return _encode_rgba(image, extension)
     return pf.encode_image(image, extension)
-
-
-#: Formats that can carry an alpha channel. Not a complete list of what OpenCV writes -- a list of
-#: what mozo will hand a cut-out to. PNG is what everything here defaults to; the rest are accepted
-#: because a caller who asks for them has not asked for anything lossy or lossless-but-flat.
-ALPHA_FORMATS = frozenset({".png", ".webp", ".tiff", ".tif"})
 
 
 def has_alpha(image: object) -> bool:
@@ -147,27 +127,6 @@ def has_alpha(image: object) -> bool:
     answers.
     """
     return isinstance(image, np.ndarray) and image.ndim == 3 and image.shape[2] == 4
-
-
-def _encode_rgba(image: np.ndarray, extension: str) -> bytes:
-    """Encode an ``HxWx4`` RGBA array. The only place in mozo that encodes four channels."""
-    if image.dtype != np.uint8:
-        raise ValueError(f"expected an RGBA uint8 HxWx4 image, got dtype {image.dtype}")
-
-    suffix = extension if extension.startswith(".") else f".{extension}"
-    if suffix.lower() not in ALPHA_FORMATS:
-        raise ValueError(
-            f"{suffix} cannot carry an alpha channel, and this image has one. Ask for .png, or "
-            f"drop the alpha yourself if you meant to composite it.")
-
-    # The RGB-to-BGR swap this module exists to keep in one place, with alpha left where it is.
-    # Through cv2 rather than ``image[:, :, [2, 1, 0, 3]]``: the fancy-index gather is bit-identical
-    # and 17x slower -- 11.0 ms against 0.63 ms on a 4K frame -- because it reads the source with a
-    # stride of four instead of letting OpenCV do a planar shuffle.
-    ok, buffer = cv2.imencode(suffix, cv2.cvtColor(image, cv2.COLOR_RGBA2BGRA))
-    if not ok:
-        raise ValueError(f"could not encode the image as {suffix}")
-    return buffer.tobytes()
 
 
 def as_rgb(image: np.ndarray) -> np.ndarray:

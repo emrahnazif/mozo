@@ -46,7 +46,7 @@ from typing import Optional
 
 import pixelflow as pf
 
-from mozo.image import encode_image, has_alpha, load_image as decode
+from mozo.image import load_image as decode
 
 from ..node import Context, Detections, FilePath, Image, Source, State
 from ..registry import node, source
@@ -247,14 +247,9 @@ def save_image(image: Image, run: Context, path: str = "output",
         raise ValueError(
             f"{run.frames or 'unboundedly many'} images to write but one filename, {path!r}. "
             f"Give a folder and each is written under its own name.")
-    if has_alpha(image):
-        # ``pf.save_image`` takes three channels, and this is the one node that may be handed
-        # four. Encoding through mozo's own function and writing the bytes keeps the RGB-to-BGR
-        # decision in the one place that owns it rather than making a second copy of it here.
-        # A format that cannot carry alpha is refused there, by name.
-        target.write_bytes(encode_image(image, target.suffix))
-    else:
-        pf.save_image(str(target), image)
+    # Three channels or four: this is the one node handed a cut-out (``alpha=True``), and
+    # ``pf.save_image`` writes it, refusing by name a format that cannot keep transparency.
+    pf.save_image(str(target), image)
 
 
 @node(category="Output", ordered=True)

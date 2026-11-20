@@ -283,7 +283,7 @@ class TestTheAlphaChannel:
         conversion, so it is refused by name instead."""
         from mozo.image import encode_image
 
-        with pytest.raises(ValueError, match=r"\.jpg cannot carry an alpha channel"):
+        with pytest.raises(ValueError, match=r"'\.jpg'.*no transparency"):
             encode_image(np.zeros((4, 4, 4), dtype=np.uint8), ".jpg")
 
     def test_as_rgb_drops_alpha_and_leaves_rgb_alone(self):

@@ -1,18 +1,9 @@
-# Mozo v1.1.0: Answers in Pixels
-
 ## Unreleased
 
-- **`Workflow.process(context=True)` also yields each item's Context**, as
-  `(item, results, run)`: code that stores results itself can read `run.frame`, `run.time`
-  and `run.frames` the way a node does. The editor's run counter now shows "42 of 315" for a
-  video, because `/process` events carry `of`, `frame` and `time`.
-- **`save_image` now writes PNG by default** (was JPEG). Annotated frames are thin lines and
-  mask edges, which is what JPEG is worst at, and it makes the node agree with
-  `mozo.image.encode_image`, which already defaulted to PNG. It is also the only common
-  default that can carry an alpha channel, so `ben2`'s cut-outs save with their transparency
-  intact. Pass `format=".jpg"` where size matters more than edges.
-- **New family `ben2`** — background removal, returning an RGBA cut-out. An image port now
-  carries three channels or four; a node is handed three unless it sets `alpha=True`.
+# Mozo v1.10.0: Text You Can Search
+
+## What's New in v1.10.0
+
 - **New family `granite_embedding_r2`** — English text embeddings, mozo's first text-only
   family: text in, one 384-d unit vector out, so documentation, notes or what EasyOCR read off
   an image can be searched by meaning. IBM's `small` model, Apache-2.0 code and weights, up to
@@ -21,6 +12,28 @@
   `encode_text`. Bit-identical to `transformers` at every stage, and the same text gets the same
   vector on every Python from 3.10 to 3.14. Its vectors do not share a space with CLIP's or
   SigLIP 2's.
+- **`Workflow.process(context=True)` also yields each item's Context**, as
+  `(item, results, run)`: code that stores results itself can read `run.frame`, `run.time`
+  and `run.frames` the way a node does. The editor's run counter now shows "42 of 315" for a
+  video, because `/process` events carry `of`, `frame` and `time`.
+
+---
+
+# Mozo v1.1.1
+
+## What's New in v1.1.1
+
+- **`save_image` now writes PNG by default** (was JPEG). Annotated frames are thin lines and
+  mask edges, which is what JPEG is worst at, and it makes the node agree with
+  `mozo.image.encode_image`, which already defaulted to PNG. It is also the only common
+  default that can carry an alpha channel, so `ben2`'s cut-outs save with their transparency
+  intact. Pass `format=".jpg"` where size matters more than edges.
+- **New family `ben2`** — background removal, returning an RGBA cut-out. An image port now
+  carries three channels or four; a node is handed three unless it sets `alpha=True`.
+
+---
+
+# Mozo v1.1.0: Answers in Pixels
 
 ## What's New in v1.1.0
 

@@ -9,6 +9,14 @@
   intact. Pass `format=".jpg"` where size matters more than edges.
 - **New family `ben2`** — background removal, returning an RGBA cut-out. An image port now
   carries three channels or four; a node is handed three unless it sets `alpha=True`.
+- **New family `granite_embedding_r2`** — English text embeddings, mozo's first text-only
+  family: text in, one 384-d unit vector out, so documentation, notes or what EasyOCR read off
+  an image can be searched by meaning. IBM's `small` model, Apache-2.0 code and weights, up to
+  8,192 tokens a text; a longer text is refused rather than truncated. Served through
+  `/encode` only — `/predict` answers 501 and points there — and from Python as
+  `encode_text`. Bit-identical to `transformers` at every stage, and the same text gets the same
+  vector on every Python from 3.10 to 3.14. Its vectors do not share a space with CLIP's or
+  SigLIP 2's.
 
 ## What's New in v1.1.0
 

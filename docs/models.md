@@ -801,3 +801,99 @@ They are separate vendors with separate weights, separate tokenizers and separat
 carries both. CLIP is what a great deal of existing tooling pins, and a vector from one means
 nothing against a vector from the other. Choose SigLIP 2 when you want a score you can threshold;
 choose CLIP when you need CLIP's own embedding space.
+
+## Granite Embedding R2
+
+mozo's first text-only family. English text in, one 384-d vector out, and texts that mean the
+same thing land close together — so documentation, notes, or what EasyOCR read off an image can be
+searched by meaning: "invoice total" finds "amount due". IBM's
+`granite-embedding-small-english-r2`, 47.7M parameters, Apache-2.0 code and weights.
+
+```python
+import mozo
+
+model = mozo.get_model("granite_embedding_r2/small")
+vectors = model.encode_text(["How do I count people crossing a line?",
+                             "Track each person and record when they cross the line."])
+vectors.shape            # (2, 384), unit length
+vectors[0] @ vectors[1]  # the cosine
+```
+
+Over HTTP it is `/encode` and nothing else: it answers nothing about an image, so `/predict`
+refuses it and says where to go instead.
+
+```bash
+curl -X POST "http://localhost:8000/encode/granite_embedding_r2/small?text=how%20do%20I%20count%20people%3F"
+```
+
+The usual shape is the same as CLIP's: split your documents into chunks, embed each chunk once and
+keep the vectors in a vector database, then embed a question and let the database find the nearest
+chunks. mozo is the model and nothing else.
+
+### Text only, and not CLIP's space
+
+Granite was never trained alongside images. Its vectors mean nothing against CLIP's or SigLIP 2's,
+so it cannot search pictures by words. For that, use CLIP or SigLIP 2; for open-vocabulary
+detection, the same — only a text encoder trained with images helps a detector. Granite is for text
+against text.
+
+### Chunking is yours, and too long is refused
+
+Up to 8,192 tokens a text, `[CLS]` and `[SEP]` included. A longer one raises a `ValueError` naming
+its length rather than being cut short: a chunk shortened without saying so is a different chunk.
+Upstream truncates silently, or runs past the limit on positions the model never saw.
+
+How big to make chunks is a question of quality, not cost. One 384-d vector summarises the whole
+chunk: larger chunks match broad questions to whole sections, smaller ones pin a precise passage.
+For documentation, 1,024 to 2,048 tokens split at headings — so a chunk is a section — is a sound
+place to start; measure recall on a few dozen real questions of your own before settling.
+
+Cost matters less than it looks: per token, a chunk of a thousand or two costs about what a short
+one does, and only the full 8,192 costs several times more. The shape of that curve depends on the
+device, so measure where you deploy; what has been measured, and where, is in the vendor's
+`PROVENANCE.md`.
+
+### A vector does not depend on what it was encoded beside
+
+Texts are never padded, because a padded batch is not bit-identical to its rows run alone. On the
+CPU, texts of exactly the same length share a forward pass — measured identical to running each
+alone. Elsewhere each text runs alone. So the same text always gets the same vector, whatever
+arrived with it.
+
+One consequence: for many short texts — search queries — the CPU can be the faster device, because
+only there do they share a forward pass. On an Apple M1 Max it was several times faster than the
+GPU for a batch of short queries.
+
+### The scores are cosine similarities
+
+The vectors leave L2-normalised, so a dot product is a cosine. It is not a probability, and it has
+no calibrated zero: compare scores against each other, or against a threshold you calibrate on your
+own data.
+
+### An index is tied to the weights that built it
+
+A vector from one variant or revision means nothing against a vector from another, so a stored
+index is tied to both, and changing either means re-embedding the corpus. `/encode` returns
+`model` and `revision` with every response for exactly that reason, and the adapter has
+`.revision`.
+
+### The same text gets the same tokens on every Python
+
+The tokenizer needs Unicode's answers — is this a letter, how does this compose — and those change
+between versions: Python 3.10 ships Unicode 13, 3.14 ships 16, and the reference tokenizer neither.
+Left alone, a document's vector would depend on which Python wrote it. So the tokenizer carries the
+reference's own tables, and was checked identical to it — every codepoint, runs of combining marks,
+random mixtures and every line of these docs — under each of Python 3.10, 3.11, 3.12, 3.13 and
+3.14.
+
+### Parity
+
+Bit-exact against `transformers`' `ModernBertModel` on the CPU, at every stage — token ids, the
+embeddings, all twelve layers, the final norm and the unit vector — with `torch.equal` and no
+tolerance. The version that saved the checkpoint (4.51.3) and the one mozo gates against (5.8.0)
+agree on every stage, though 5.x rewrote the model. It runs at the reference's speed.
+
+Two traps that would pass review. The checkpoint is stored in bfloat16, and `transformers` 5 loads
+it that way by default — 3e-03 away from float32, a failure that looks like the extraction's. And
+the sliding-attention window is ±64 tokens, while the attention module carries 65: that number is
+read only by FlashAttention, and copying it into the mask changes every text longer than 65 tokens.

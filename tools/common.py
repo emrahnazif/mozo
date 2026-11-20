@@ -21,6 +21,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import statistics
+import time
 import urllib.request
 from pathlib import Path
 
@@ -90,6 +93,38 @@ def person_boxes(images: list[Path], device: str = "cpu") -> dict[Path, np.ndarr
     }
 
 
+def synchronise(device: str) -> None:
+    """Block until *device* has actually finished its queued work.
+
+    Metal and CUDA queue work asynchronously, so a timer that stops when Python returns measures
+    how fast work was submitted. Every benchmark that times a device needs this.
+    """
+    import torch
+
+    if device == "mps":
+        torch.mps.synchronize()
+    elif device == "cuda":
+        torch.cuda.synchronize()
+
+
+def median_ms(work, device: str, runs: int = 10, warmup: int = 3) -> float:
+    """Median wall time of *work*, in milliseconds, with *device* drained after every call.
+
+    Median rather than mean, so one outlier does not move the number a support matrix is built
+    from; *warmup* calls first, untimed, so allocator growth does not either.
+    """
+    for _ in range(warmup):
+        work()
+        synchronise(device)
+    timings = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        work()
+        synchronise(device)
+        timings.append((time.perf_counter() - start) * 1000)
+    return statistics.median(timings)
+
+
 def digest(path: Path, algorithm: str = "sha256") -> str:
     """Return the hex digest of a file, read in chunks rather than loaded."""
     running = hashlib.new(algorithm)
@@ -142,6 +177,29 @@ def download_verified(url: str, target: Path, expected: str, *, algorithm: str =
     print(f"  {label:<{width}} ok, {target.stat().st_size / 1e6:.1f} MB"
           f"{', ' + detail if detail else ''}", flush=True)
     return actual
+
+
+def hub_json(url: str, timeout: int = 60):
+    """GET one JSON document from the Hugging Face Hub.
+
+    A timeout because the downloads beside it have one: a metadata call that hangs forever stalls
+    a publishing run exactly as a stalled download would.
+    """
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        return json.load(response)
+
+
+def hub_lfs_sha256s(repo: str, revision: str = "main") -> dict[str, str]:
+    """Filename -> sha256, for the files in *repo* at *revision* that the Hub records one for.
+
+    Only LFS-tracked files carry a content hash; the small ones carry a git blob id, which is a
+    hash of different bytes and useless for verifying a download. So a file that is not LFS is
+    simply absent, and looking it up raises a ``KeyError`` naming it rather than letting it
+    through unverified. Pass a commit as *revision* to pin what is verified against.
+    """
+    listing = hub_json(f"https://huggingface.co/api/models/{repo}/revision/{revision}?blobs=true")
+    return {entry["rfilename"]: entry["lfs"]["sha256"]
+            for entry in listing["siblings"] if entry.get("lfs")}
 
 
 def require_licence(revision_dir: Path, licence: str, source_url: str) -> None:

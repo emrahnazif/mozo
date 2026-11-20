@@ -300,9 +300,13 @@ def workflow_router(*, models: Optional[Callable[..., Any]] = None,
             def events():
                 done, last, began = 0, 0.0, time.monotonic()
                 try:
-                    for _item, results in built.process(models=models, **settled):
+                    for _item, results, run in built.process(models=models, context=True,
+                                                             **settled):
                         done += 1
-                        report = {"item": done}
+                        # Where in the file, and out of how many: a video's frame and time, and
+                        # the source's own count, so a progress bar needn't guess.
+                        report = {"item": done, "of": run.frames, "frame": run.frame,
+                                  "time": run.time}
                         now = time.monotonic()
                         if watched is not None and now - last >= PREVIEW_EVERY:
                             last = now

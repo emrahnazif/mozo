@@ -539,7 +539,10 @@ def run_pipelined(workflow, items, over: Optional[tuple], settings: dict, worker
                 if driving:
                     extra[driving] = item            # the source produced it; say so
                 outcome = {**extra, **outcome}
-            yield from deliver(item, None if failure else outcome, failure, on_error)
+            # The item's place in the run, for a caller of ``process`` that asked for it. ``emit``
+            # was this item's turn, so it is its index.
+            place = run.at(emit - 1) if run is not None else None
+            yield from deliver(item, None if failure else outcome, failure, on_error, place)
 
     try:
         while True:

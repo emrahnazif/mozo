@@ -21,7 +21,11 @@
         {/if}
         <div class="mz-tally">
             <strong>{$running.items.toLocaleString()}</strong>
-            <span>{$running.done ? 'items' : 'items so far'}</span>
+            {#if $running.of && !$running.done}
+                <span>of {$running.of.toLocaleString()}</span>
+            {:else}
+                <span>{$running.done ? 'items' : 'items so far'}</span>
+            {/if}
             {#if rate}<span class="mz-faint">{rate.toLocaleString()}/s</span>{/if}
             {#if $running.node}<span class="mz-faint mz-node-name">showing {$running.node}</span>{/if}
         </div>

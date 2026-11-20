@@ -183,6 +183,14 @@ def explode(image: Image) -> Image:
     raise RuntimeError("as promised")
 
 
+@node(category="Test")
+def explode_on_odd(image: Image, run: Context) -> Image:
+    """Fail every other item, so the items after a failure have something to keep straight."""
+    if run.index % 2:
+        raise RuntimeError("odd")
+    return image
+
+
 def shipped(*, without: tuple = ()) -> tuple:
     """The nodes mozo ships, told apart from the test nodes above by where they were declared.
 

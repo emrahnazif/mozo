@@ -242,15 +242,20 @@ def _named(item) -> str:
     return f"a {shape[1]}x{shape[0]} image" if shape and len(shape) == 3 else type(item).__name__
 
 
-def deliver(item, outcome, failure: Optional[Event], on_error: Optional[Any]) -> Iterator:
+def deliver(item, outcome, failure: Optional[Event], on_error: Optional[Any],
+            place: Optional[Context] = None) -> Iterator:
     """Hand one finished item to the caller, the one way both engines hand it over.
 
     Serial and pipelined must agree here or ``workers`` would change what a failure looks like.
     It lives beside :class:`Event` rather than in either engine, so the serial path does not have
     to import the concurrent one to give an answer back.
+
+    *place* is the item's own view of the run, for :meth:`Workflow.process`: given, the item is
+    handed over as ``(item, outcome, place)``. The engine that ran the item is the one that knows
+    which it was, so it says, rather than the caller counting.
     """
     if failure is None:
-        yield item, outcome
+        yield (item, outcome) if place is None else (item, outcome, place)
     elif on_error is None:
         raise RuntimeError(f"{_named(item)}: {failure.error}")
     else:
@@ -652,16 +657,17 @@ class Workflow:
             settled = {**folded, driving: {port: item}} if driving else folded
             reported = {**folded_results, driving: item} if driving else folded_results
             results, failure = {}, None
-            for event in self._steps(settings, settled, reported,
-                                     run.at(index) if run is not None else None):
+            place = run.at(index) if run is not None else None
+            for event in self._steps(settings, settled, reported, place):
                 if event.status == "completed":
                     results[event.node] = event.output
                 elif event.status == "failed":
                     failure = event
-            yield from deliver(item, results, failure, on_error)
+            yield from deliver(item, results, failure, on_error, place)
 
     def process(self, *, workers: int = 2, on_error=None, model_workers: int = 1,
-                stats: Optional[dict] = None, models=None, **overrides) -> Iterator[tuple]:
+                stats: Optional[dict] = None, models=None, context: bool = False,
+                **overrides) -> Iterator[tuple]:
         """Run once per item the source yields, yielding ``(item, results)`` as each finishes.
 
         A run is one pass over whatever the workflow's source produces: one image or every
@@ -678,9 +684,14 @@ class Workflow:
         Args:
             workers: As :meth:`run_many` means it.
             on_error: As :meth:`run_many` means it.
+            context: Also yield each item's :class:`~mozo.workflow.node.Context`, the one its
+                nodes read: ``run.frame`` and ``run.time`` say where in the file the item is,
+                ``run.frames`` how many the source expects. For a caller that keeps results
+                itself and has to know which frame they belong to.
 
         Yields:
-            ``(item, results)`` in the order the source produced them.
+            ``(item, results)`` in the order the source produced them, or
+            ``(item, results, run)`` with ``context=True``.
 
         Raises:
             ValueError: If the workflow has no source, naming what it would need. A workflow whose
@@ -710,8 +721,14 @@ class Workflow:
             # after is the run.
             run.seal()
             items = () if first is _NOTHING else chain((first,), produced)
-            yield from self._many(items, None, settings, on_error, workers, model_workers, stats,
-                                  driving=source_id, run=run)
+            # Each engine hands over ``(item, results, place)``, the item's own view of the run.
+            delivered = self._many(items, None, settings, on_error, workers, model_workers, stats,
+                                   driving=source_id, run=run)
+            if context:
+                yield from delivered
+            else:
+                for item, results, _place in delivered:
+                    yield item, results
         finally:
             _forget(states)
 

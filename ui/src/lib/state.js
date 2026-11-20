@@ -25,7 +25,7 @@ export function createState() {
          */
         chosenFile: writable(null),
         /**
-         * A run in progress, or null between runs: `{items, seconds, preview, node, done}`. Not the
+         * A run in progress, or null between runs: `{items, of, seconds, preview, node, done}`. Not the
          * results -- a run over ten thousand items has none a canvas could hold.
          */
         running: writable(null),

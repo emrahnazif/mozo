@@ -268,7 +268,7 @@
         const watched = $selectedNode?.id || $nodes.filter(node => !fed.has(node.id)).pop()?.id || '';
 
         controller = new AbortController();
-        running.set({ items: 0, seconds: 0, preview: null, node: watched, done: false });
+        running.set({ items: 0, of: null, seconds: 0, preview: null, node: watched, done: false });
         const began = performance.now();
 
         try {
@@ -283,6 +283,7 @@
                     running.update(r => r && {
                         ...r,
                         items: event.item,
+                        of: event.of,
                         seconds: (performance.now() - began) / 1000,
                         preview: event.preview || r.preview,
                     });

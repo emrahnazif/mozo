@@ -199,6 +199,32 @@ class TestOneNodeReadsBothKinds:
         assert sorted(path.stem for path in written.iterdir()) == [
             f"clip_{frame:06d}" for frame in range(0, CLIP_FRAMES, 3)]
 
+    @pytest.mark.parametrize("workers", [1, 2])
+    def test_the_caller_can_ask_for_each_items_context(self, clip, workers):
+        """``context=True``: the caller reads the frame and the count the nodes read."""
+        workflow = Workflow.from_dict(document(
+            {"load": ("read_media", {"source": str(clip), "stride": 3})}, []))
+        runs = [run for _, _, run in workflow.process(workers=workers, context=True)]
+        assert [run.frame for run in runs] == list(range(0, CLIP_FRAMES, 3))
+        assert {run.frames for run in runs} == {len(runs)}
+        assert [run.time for run in runs] == pytest.approx(
+            [frame / CLIP_FPS for frame in range(0, CLIP_FRAMES, 3)])
+
+    @pytest.mark.parametrize("workers", [1, 2])
+    def test_a_failed_item_does_not_shift_the_contexts_after_it(self, clip, workers):
+        """Items given to ``on_error`` still take their place, so each run is its own item's."""
+        workflow = Workflow.from_dict(document(
+            {"load": ("read_media", {"source": str(clip)}), "odd": ("explode_on_odd", {})},
+            [("load", "image", "odd", "image")]))
+        failed: list = []
+        frames = [run.frame for _, _, run in workflow.process(
+            workers=workers, context=True, on_error=lambda item, event: failed.append(item))]
+        assert failed and frames == list(range(0, CLIP_FRAMES, 2))
+
+    def test_without_asking_it_still_yields_pairs(self, clip):
+        workflow = Workflow.from_dict(document({"load": ("read_media", {"source": str(clip)})}, []))
+        assert {len(pair) for pair in workflow.process()} == {2}
+
     def test_an_annotations_line_carries_the_frame_only_when_there_is_one(self):
         import pixelflow as pf
 

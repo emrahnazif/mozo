@@ -146,6 +146,16 @@ A video frame's file name in `save_image` and its line in `save_annotations` use
 number, and the annotations line carries `frame` and `time` too, so results match the original
 video.
 
+Code that keeps results itself, outside a node, can ask for the same Context with each item:
+
+```python
+for frame, results, run in workflow.process(context=True):
+    store(run.frame, run.time, results)        # where in the video
+    progress(done=run.index + 1, total=run.frames)
+```
+
+Without `context=True`, `process` yields `(item, results)` as before.
+
 ### Tracking
 
 `track` gives each object the same `tracker_id` from frame to frame, so it's counted once however

@@ -14,7 +14,7 @@ import tempfile
 import pytest
 
 import mozo
-from conftest import CLIP_FRAMES, FIXTURE, document, require_present
+from conftest import CLIP_FPS, CLIP_FRAMES, FIXTURE, document, require_present
 import workflow_nodes  # noqa: F401 -- imported to register the port-type test nodes
 
 
@@ -246,6 +246,12 @@ class TestRunningTheWholeSource:
     def test_every_item_is_counted(self, client, clip):
         events = _events(client, "process", _clip_document(clip))
         assert [e["item"] for e in events if "item" in e] == list(range(1, CLIP_FRAMES + 1))
+
+    def test_each_count_says_where_in_the_video_and_out_of_how_many(self, client, clip):
+        counted = [e for e in _events(client, "process", _clip_document(clip)) if "item" in e]
+        assert [e["frame"] for e in counted] == list(range(CLIP_FRAMES))
+        assert {e["of"] for e in counted} == {CLIP_FRAMES}
+        assert counted[1]["time"] == pytest.approx(1 / CLIP_FPS)
 
     def test_it_says_what_it_did_at_the_end(self, client, clip):
         last = _events(client, "process", _clip_document(clip))[-1]

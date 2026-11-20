@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`Workflow.process(context=True)` also yields each item's Context**, as
+  `(item, results, run)`: code that stores results itself can read `run.frame`, `run.time`
+  and `run.frames` the way a node does. The editor's run counter now shows "42 of 315" for a
+  video, because `/process` events carry `of`, `frame` and `time`.
 - **`save_image` now writes PNG by default** (was JPEG). Annotated frames are thin lines and
   mask edges, which is what JPEG is worst at, and it makes the node agree with
   `mozo.image.encode_image`, which already defaulted to PNG. It is also the only common

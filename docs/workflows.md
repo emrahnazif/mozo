@@ -131,6 +131,21 @@ use `mozo.workflow.annotation_line(detections, label=..., width=..., height=...)
 Stop a run by closing its iterator, or leaving the `for` loop: no further item starts, a model
 call already running finishes, and the run's threads exit right after it.
 
+### Video
+
+`read_media` reads every frame of a video by default. `stride=5` takes every fifth frame;
+`rate=2` takes two frames a second instead, chosen by the frames' own times, so a phone video
+whose frame rate changes as it plays is still sampled evenly. Use one or the other, not both.
+Either way the run declares the rate it yields, so `save_video` and `track` stay right.
+
+A node that takes `run: Context` can ask which frame of the file the item is: `run.frame`, from 0,
+correct with `stride`, `start` and `rate` (`run.index` is only the item's place in the run).
+`run.time` is that frame's time in the file, in seconds, so with `start` it does not begin at 0;
+`track` takes it as each frame's timestamp. For an image or a folder, `run.frame` is `None`.
+A video frame's file name in `save_image` and its line in `save_annotations` use the frame
+number, and the annotations line carries `frame` and `time` too, so results match the original
+video.
+
 ### Tracking
 
 `track` gives each object the same `tracker_id` from frame to frame, so it's counted once however

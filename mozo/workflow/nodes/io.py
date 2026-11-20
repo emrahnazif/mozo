@@ -73,7 +73,8 @@ IMAGE_SUFFIXES = frozenset({
 
 @source(category="Input")
 def read_media(run: Context, source: Optional[Source] = None, stride: int = 1,
-               start: int = 0, count: Optional[int] = None) -> Image:
+               start: int = 0, count: Optional[int] = None,
+               rate: Optional[float] = None) -> Image:
     """Read an image or a video: one frame for the first, every frame for the second.
 
     Every workflow starts here. It is a source, so it is asked once for a sequence and what it
@@ -100,6 +101,10 @@ def read_media(run: Context, source: Optional[Source] = None, stride: int = 1,
             for an image, which is one frame however you step through it.
         start: Skip this many frames first.
         count: Stop after this many frames. Unset reads to the end.
+        rate: Take this many frames a second instead of every *stride*-th: the first frame of
+            each ``1/rate`` seconds, by the frames' own times, so a phone video whose frame rate
+            changes as it plays is sampled evenly where a stride is not. Declared as the rate.
+            Not with *stride*. Ignored for an image.
     """
     # Blank as well as unset: a form field sends "" where a Python caller sends None, and both mean
     # the same thing. Asked of the two things that can be blank rather than of the value, because
@@ -127,7 +132,7 @@ def read_media(run: Context, source: Optional[Source] = None, stride: int = 1,
         return
 
     if path is not None and path.suffix.lower() in VIDEO_SUFFIXES:
-        reader = pf.VideoReader(str(path), stride=stride, start=start)
+        reader = pf.VideoReader(str(path), stride=stride, start=start, rate=rate)
         try:
             # What it will yield, not what the file holds. PixelFlow already divides its count by
             # the stride; ``count`` is this node's own limit, so correcting for it is this node's
@@ -137,7 +142,9 @@ def read_media(run: Context, source: Optional[Source] = None, stride: int = 1,
             run.declare(name=str(path), fps=reader.fps, width=reader.width,
                         height=reader.height, is_live=reader.is_live,
                         frames=min(filter(None, (reader.frames, count)), default=None))
-            yield from islice(reader, count)
+            for frame in islice(reader, count):
+                run.mark(reader.frame_number, reader.frame_time / 1000)
+                yield frame
         finally:
             reader.close()
         return
@@ -366,12 +373,13 @@ def save_annotations(image: Image, detections: Detections, run: Context, state: 
     # One write of the whole line, flushed. The flush is what makes the claim above true: without
     # it the last few kilobytes live in a buffer that a killed process never gets to empty.
     handle.write(annotation_line(detections, label=run.label, width=width, height=height,
-                                 index=run.index, time=run.time))
+                                 index=run.index, time=run.time, frame=run.frame))
     handle.flush()
 
 
 def annotation_line(detections: Detections, *, label: str, width: int, height: int,
-                    index: int = 0, time: Optional[float] = None) -> str:
+                    index: int = 0, time: Optional[float] = None,
+                    frame: Optional[int] = None) -> str:
     """One line of the annotations file, exactly as :func:`save_annotations` writes it.
 
     The format's one definition: the node writes through it, and so can anything else that wants
@@ -385,8 +393,8 @@ def annotation_line(detections: Detections, *, label: str, width: int, height: i
                          "confidence": 0.9, "masks": [{"format": "png", "data": "..."}]}]}
 
     ``detections`` holds :meth:`pixelflow.Detections.to_dict`'s entries, minus the keys holding
-    nothing; ``time`` appears only when given. :func:`read_annotations` matches a line to an image
-    by ``label`` and checks ``width`` and ``height`` against it.
+    nothing; ``time`` and ``frame`` appear only when given. :func:`read_annotations` matches a line
+    to an image by ``label`` and checks ``width`` and ``height`` against it.
 
     Args:
         detections: What was found in the image.
@@ -395,7 +403,8 @@ def annotation_line(detections: Detections, *, label: str, width: int, height: i
         width: The image's width in pixels -- the one its boxes were measured against.
         height: Its height in pixels.
         index: Its place in the run.
-        time: Seconds from the start of the run, for a video frame.
+        time: The frame's time in seconds, for a video frame.
+        frame: The frame's number in the video file, from 0.
 
     Examples:
         >>> with open("boxes.jsonl", "w") as out:                       # doctest: +SKIP
@@ -406,6 +415,8 @@ def annotation_line(detections: Detections, *, label: str, width: int, height: i
                              for found in detections.to_dict()]}
     if time is not None:
         record["time"] = time
+    if frame is not None:
+        record["frame"] = frame
     return json.dumps(record) + "\n"
 
 

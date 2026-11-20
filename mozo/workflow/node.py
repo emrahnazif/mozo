@@ -32,6 +32,7 @@ from __future__ import annotations
 import inspect
 import types
 import typing
+from array import array
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -181,14 +182,31 @@ class Context:
     * **This item's place**, which the engine knows because it already numbers items:
       :attr:`index`, and :attr:`time` derived from it. A tracker or a counter needs these, and they
       cannot be constants of the run because they are what changes.
+    * **This item's place in the file**, for a video: :attr:`frame` and its :attr:`time`, which
+      only the reader knows. The source records them with :meth:`mark` before yielding each frame
+      -- the one thing written after the facts are sealed.
     """
 
-    __slots__ = ("_facts", "_sealed", "_index")
+    __slots__ = ("_facts", "_sealed", "_index", "_marks")
 
     def __init__(self, **facts: Any) -> None:
         self._facts: dict = dict(facts)
         self._sealed = False
         self._index = 0
+        #: ``(frame numbers, times)``, one entry per item, where the source marks them. Arrays
+        #: rather than lists: 16 bytes a frame rather than about 100, for a film.
+        self._marks: Optional[tuple] = None
+
+    def mark(self, frame: int, time: float) -> None:
+        """Record the next item's frame number in the file and its time there, in seconds.
+
+        Called by a source before it yields each item, so every node reading that item finds it.
+        Allowed after the facts are sealed, because it is about the item, not the run.
+        """
+        if self._marks is None:
+            self._marks = (array("q"), array("d"))
+        self._marks[0].append(frame)
+        self._marks[1].append(time)
 
     def declare(self, **facts: Any) -> None:
         """Say what this run is, from the source that is the only thing that knows.
@@ -214,6 +232,7 @@ class Context:
         view._facts = self._facts          # shared, not copied -- it is sealed and read-only
         view._sealed = True
         view._index = index
+        view._marks = self._marks          # shared too: the source appends one per item
         return view
 
     @property
@@ -281,11 +300,29 @@ class Context:
         if labels:
             return labels[self._index]
         stem = Path(self.name).stem if self.name else "item"
-        return f"{stem}_{self._index:06d}"
+        # A video frame by its number in the file, so a label matches the frame it names whatever
+        # the stride, start or rate the file was read at.
+        frame = self.frame
+        return f"{stem}_{self._index if frame is None else frame:06d}"
+
+    @property
+    def frame(self) -> Optional[int]:
+        """This item's frame number in the source file, from 0, for a video. None otherwise.
+
+        Not :attr:`index`, the item's place in the run: read with ``stride=5``, item 3 is frame 15.
+        """
+        return None if self._marks is None else self._marks[0][self._index]
 
     @property
     def time(self) -> Optional[float]:
-        """Seconds from the start of the run to this item, where the rate is known."""
+        """This item's time in seconds, where there is one.
+
+        For a video, the frame's own time in the file, so it stays right in a phone video whose
+        frame rate changes as it plays. Otherwise the index over the declared rate, and None
+        where there is no rate.
+        """
+        if self._marks is not None:
+            return self._marks[1][self._index]
         fps = self.fps
         return None if not fps else self._index / fps
 

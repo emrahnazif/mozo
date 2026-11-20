@@ -161,6 +161,7 @@ class TestOneNodeReadsBothKinds:
         run = Context()
         frame = next(get("read_media").run(run, source=str(FIXTURE)))
         assert run.fps is None and run.frames == 1 and run.is_live is False
+        assert run.frame is None  # an image has no frame, rather than passing its index off as one
         assert (run.height, run.width) == frame.shape[:2]
 
     def test_a_video_declares_the_rate_it_yields_at(self, clip):
@@ -169,6 +170,44 @@ class TestOneNodeReadsBothKinds:
         frames = list(get("read_media").run(run, source=str(clip), stride=2))
         assert run.fps == CLIP_FPS / 2
         assert len(frames) == (CLIP_FRAMES + 1) // 2
+
+    @pytest.mark.parametrize("read", [{"stride": 3}, {"start": 2}, {"rate": 5},
+                                      {"start": 1, "stride": 2}])
+    def test_each_item_knows_its_frame_in_the_file(self, clip, read):
+        """Not its index: the reader's own frame number, and that frame's own time."""
+        import pixelflow as pf
+
+        run = Context()
+        count = len(list(get("read_media").run(run, source=str(clip), **read)))
+        with pf.VideoReader(str(clip), **read) as video:
+            expected = [(video.frame_number, video.frame_time / 1000) for _ in video]
+        items = [run.at(index) for index in range(count)]
+        assert [(item.frame, item.time) for item in items] == expected
+        if "rate" in read:
+            assert run.fps == read["rate"]
+        assert [item.label for item in items] == [f"clip_{frame:06d}" for frame, _ in expected]
+
+    @pytest.mark.parametrize("workers", [1, 2])
+    def test_a_strided_video_saves_under_its_frame_numbers(self, tmp_path, clip, workers):
+        """Through a whole run, so both engines' contexts carry the frame to the sink."""
+        written = tmp_path / "frames"
+        list(Workflow.from_dict(document(
+            {"load": ("read_media", {"source": str(clip), "stride": 3}),
+             "save": ("save_image", {"path": str(written)})},
+            [("load", "image", "save", "image")])).process(workers=workers))
+        assert sorted(path.stem for path in written.iterdir()) == [
+            f"clip_{frame:06d}" for frame in range(0, CLIP_FRAMES, 3)]
+
+    def test_an_annotations_line_carries_the_frame_only_when_there_is_one(self):
+        import pixelflow as pf
+
+        from mozo.workflow import annotation_line
+
+        line = json.loads(annotation_line(pf.Detections(), label="clip_000003", width=1,
+                                          height=1, time=0.3, frame=3))
+        assert (line["frame"], line["time"]) == (3, 0.3)
+        assert "frame" not in json.loads(annotation_line(pf.Detections(), label="a", width=1,
+                                                         height=1))
 
 
 class TestAFolderInAFolderOut:

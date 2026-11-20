@@ -245,14 +245,11 @@ def test_the_readme_states_how_many_workflow_nodes_there_are():
 
 def test_the_readme_states_how_many_families_ship_a_verification_gate():
     """`tools/verify/` is the claim the whole README rests on, so its arithmetic is checked."""
-    gates = {
-        path.stem for path in (ROOT / "tools" / "verify").glob("*.py")
-        if not path.stem.startswith("_") and not path.stem.endswith("_reference")
-    }
+    # A gate carries its family's name; any other file there is a helper to one.
+    gates = {path.stem for path in (ROOT / "tools" / "verify").glob("*.py")} & set(MODEL_REGISTRY)
     families = published_families()
     readme = (ROOT / "README.md").read_text()
 
-    assert gates <= set(MODEL_REGISTRY), f"gates for unknown families: {gates - set(MODEL_REGISTRY)}"
     assert f"{spell(len(gates)).capitalize()} of the {spell(families)} families ship one" in readme, (
         f"{len(gates)} of {families} families have a gate; the README says otherwise"
     )

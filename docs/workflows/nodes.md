@@ -7,7 +7,8 @@ keywords: mozo, workflow nodes, node catalogue, workflow editor, pipeline
 -->
 
 Every node a workflow can use, in the editor's categories. Inputs and outputs are port names; a
-port's type is its name (`image`, `detections`, `classifications`, `depth`). A parameter with no
+port's type is its name (`image`, `detections`, `classifications`, `depth`). An output marked
+(many) gives several values per item, and every node after it runs once per value. A parameter with no
 value shown has no default: it is either optional or, for a file, chosen when you build the
 workflow.
 
@@ -109,7 +110,7 @@ what runs.
 | `flip_vertical_with_detections` | image, detections → image, detections | none | Mirror the image top to bottom, and the detections with it. |
 | `crop_with_detections` | image, detections → image, detections | `left`=0, `top`=0, `right`, `bottom` | Cut a rectangle out, keeping the detections that fall inside it. |
 | `align_by_keypoints` | image, detections → image, detections | `first`=left_eye, `second`=right_eye, `target_angle`=0.0, `detection_index`=0 | Rotate so that two named keypoints sit at a chosen angle: how a face is straightened. |
-| `crop_around_detections` | image, detections → image | `padding`=0.0 | Cut out one image per detection. |
+| `crop_around_detections` | image, detections → image (many) | `padding`=0.0 | Cut out one image per detection. |
 | `pad_detections` | detections → detections | `padding`=0.1, `reference`=shorter | Grow every box by a fraction of its own size. |
 | `bbox_from_keypoints` | detections → detections | `keypoints` | Redraw each box to enclose its keypoints. Unset uses all of them. |
 

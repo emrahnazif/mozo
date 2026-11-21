@@ -145,6 +145,30 @@ class TestSeveralOutputs:
             {"name": "detections", "type": "detections"},
         ]
 
+    def test_a_list_return_is_an_output_giving_many(self):
+        def crops(image: Image) -> list[Image]:
+            """Crops."""
+
+        def pair(image: Image) -> tuple[list[Image], Detections]:
+            """Pair."""
+
+        assert described(crops).to_dict()["outputs"] == [
+            {"name": "image", "type": "image", "many": True}]
+        assert [port.many for port in described(pair).outputs] == [True, False]
+
+    def test_a_list_of_something_that_cannot_travel_is_refused(self):
+        def odd(image: Image) -> list[int]:
+            """Odd."""
+
+        with pytest.raises(TypeError, match="cannot travel"):
+            described(odd)
+
+    def test_crop_around_detections_says_it_gives_one_image_per_detection(self):
+        from mozo.workflow import get
+
+        assert get("crop_around_detections").to_dict()["outputs"] == [
+            {"name": "image", "type": "image", "many": True}]
+
 
 class TestRunningASpec:
     """What calling a spec hands back, which is what the engine wires up."""

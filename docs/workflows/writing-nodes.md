@@ -52,6 +52,11 @@ The port types are `Image`, `Detections`, `Classifications` and `Depth`, all fro
 A node with two outputs names them with `outputs=["image", "detections"]` in the decorator and
 returns a tuple.
 
+A node that turns one item into several, such as one crop per detection, returns a list and says
+so with `-> list[Image]`. Every node after it then runs once per value. The catalogue marks that
+output `"many": true`, so whoever builds a workflow can see that one item becomes many before
+running it.
+
 A parameter's annotation decides the editor's widget:
 
 | Annotation | Widget |

@@ -46,6 +46,6 @@
 
 {#each outputs as port, index (port.name)}
   <Handle type="source" position={Position.Bottom} id={port.name}
-          class="mz-port-{port.type} {feeding.has(port.name) ? 'mz-connected' : ''}"
+          class="mz-port-{port.type} {port.many ? 'mz-many' : ''} {feeding.has(port.name) ? 'mz-connected' : ''}"
           style={along(index, outputs.length)} />
 {/each}

@@ -339,6 +339,10 @@
 .mz-editor .mz-port-depth { background: #fde68a; }           /* a float depth map, not a picture */
 .mz-editor .mz-port-embedding { background: #d8b4fe; }       /* an N x D float array */
 
+/* An output giving several values per call, one item each downstream (`"many": true`): a dashed
+   ring, so one picture becoming one per detection shows before anything runs. */
+.mz-editor .svelte-flow__handle.mz-many { border-style: dashed; border-color: var(--mz-color-text); }
+
 /* While a wire is being dragged, the handle under the pointer is marked `connectingto`, and
    `valid` when the connection would be allowed: the answer arrives before the drop, not after. */
 .mz-editor .svelte-flow__handle.connectingto {

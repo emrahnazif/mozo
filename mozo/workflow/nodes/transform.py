@@ -147,11 +147,13 @@ def align_by_keypoints(image: Image, detections: Detections, first: str = "left_
 
 
 @node(category="Transform")
-def crop_around_detections(image: Image, detections: Detections, padding: float = 0.0) -> Image:
+def crop_around_detections(image: Image, detections: Detections,
+                           padding: float = 0.0) -> list[Image]:
     """Cut out one image per detection.
 
     Produces a batch from a single image, which every node downstream then runs once per crop --
-    the engine's fan-out reads a list on a port as many values on one wire.
+    the engine's fan-out reads a list on a port as many values on one wire. ``list[Image]`` says
+    so in the catalogue, where ``Image`` read as one picture.
     """
     return transforms.crop_around_detections(image, detections, padding=padding)
 

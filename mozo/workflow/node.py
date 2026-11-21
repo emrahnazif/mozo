@@ -454,6 +454,14 @@ class Port:
 
     name: str
     type: PortType
+    #: Does one call put several values on this port, one item each downstream?
+    #:
+    #: Declared as ``-> list[Image]``. Only an output can say it: a node that cuts one picture
+    #: into one per detection hands every node after it a list, and the engine runs each of those
+    #: once per value. The wire's type is still ``image``, so connecting it to an image input is
+    #: right; what the flag adds is that a reader of the catalogue -- a person, an app, an agent --
+    #: can see before running that one item becomes many.
+    many: bool = False
 
 
 @dataclass(frozen=True)
@@ -874,38 +882,47 @@ class NodeSpec:
 def _produced(node: str, returns: Any, names: Sequence[str] | None) -> tuple:
     """The output ports a return annotation declares.
 
-    ``None`` is a node that only consumes. A port type is the ordinary one-output node. A ``tuple``
+    ``None`` is a node that only consumes. A port type is the ordinary one-output node, and a
+    ``list`` of one is an output giving several values per call (:attr:`Port.many`). A ``tuple``
     of port types is a node that produces several things at once -- which exists because PixelFlow's
     detection-aware transforms do: rotating an image and its boxes together yields both, and making
     a caller choose one would be the model being wrong rather than the design being simple.
     """
     if returns is type(None):
         declared = ()
-    elif returns in _PORTS:
+    elif returns in _PORTS or typing.get_origin(returns) is list:
         declared = (returns,)
     elif typing.get_origin(returns) is tuple:
         declared = typing.get_args(returns)
     else:
         raise TypeError(
             f"{node}: returns {returns!r}, which is not a port type. A node returns something that "
-            f"can travel along a connection, a tuple of those, or None.")
+            f"can travel along a connection, a list of one, a tuple of those, or None.")
 
-    unknown = [item for item in declared if item not in _PORTS]
+    # ``list[Image]`` is an image port giving many. One argument exactly: ``list[A, B]`` is not
+    # two ports, and anything else stays as written so the check below names it.
+    ports = [(typing.get_args(item)[0], True)
+             if typing.get_origin(item) is list and len(typing.get_args(item)) == 1
+             else (item, False) for item in declared]
+    unknown = [item for item, _ in ports if item not in _PORTS]
     if unknown:
         raise TypeError(f"{node}: returns {unknown}, which cannot travel along a connection")
 
-    chosen = list(names) if names else [_PORTS[item].value for item in declared]
-    if len(chosen) != len(declared):
-        raise TypeError(f"{node}: names {len(chosen)} outputs but returns {len(declared)}")
+    chosen = list(names) if names else [_PORTS[item].value for item, _ in ports]
+    if len(chosen) != len(ports):
+        raise TypeError(f"{node}: names {len(chosen)} outputs but returns {len(ports)}")
     if len(set(chosen)) != len(chosen):
         raise TypeError(f"{node}: two outputs named the same: {chosen}")
 
-    return tuple(Port(name, _PORTS[item]) for name, item in zip(chosen, declared))
+    return tuple(Port(name, _PORTS[item], many) for name, (item, many) in zip(chosen, ports))
 
 
 def _port_dict(port: Port) -> dict:
-    """One port, as the editor reads it."""
-    return {"name": port.name, "type": port.type.value}
+    """One port, as the editor reads it. ``many`` appears only when it applies."""
+    described = {"name": port.name, "type": port.type.value}
+    if port.many:
+        described["many"] = True
+    return described
 
 
 def _parameter_dict(parameter: Parameter) -> dict:

@@ -1,5 +1,11 @@
 ## Unreleased
 
+- **A workflow node can say it gives many values.** A node returning `-> list[Image]` is
+  catalogued with `"many": true` on that output, and the editor draws its port with a dashed ring.
+  `crop_around_detections` is the first: its output read as one image, though it gives one per
+  detection. Connecting it to an image input works as before, and every node after it runs once
+  per crop.
+
 # Mozo v1.11.0: Docs That Come With It
 
 ## What's New in v1.11.0

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=62.3", "wheel"]  # 62.3: "**" in package-data globs
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -87,8 +87,7 @@ mozo = "mozo.cli:cli"
 "Release Notes" = "https://github.com/emrahnazif/mozo/releases"
 "Bug Tracker" = "https://github.com/emrahnazif/mozo/issues"
 
-[tool.setuptools.packages.find]
-include = ["mozo*"]
+# Which packages ship is in setup.py: discovery of mozo*, plus docs/ mapped in as mozo.docs.
 
 # Version lives in mozo/__init__.py — single source of truth.
 [tool.setuptools.dynamic]
@@ -111,5 +110,15 @@ mozo = ["static/*", "manifest.json", "workflow/static/*", "workflow/static/asset
 # each new family will be forgotten again; a rule that applies to all of them cannot be.
 "*" = ["LICENSE", "NOTICE", "PROVENANCE.md", "assets/*"]
 
+# The docs pages and their index, for coding agents to read offline at the installed version. Not
+# docs/assets/ (excluded below): screenshots grow every install, agents read the text, and every
+# image has alt text.
+"mozo.docs" = ["**/*.md", "llms.txt"]
+
 # Data a package's code reads that is not covered by the convention above.
 "mozo.vendors.rfdetr_deploy.models.backbone" = ["dinov2_configs/*.json"]
+
+# The "*" rule above ships every package's assets/, which for the vendors is data their code reads.
+# The docs' assets/ is screenshots for the website, not for an install.
+[tool.setuptools.exclude-package-data]
+"mozo.docs" = ["assets/*"]

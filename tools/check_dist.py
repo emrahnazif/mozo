@@ -64,6 +64,17 @@ def required_paths() -> list[str]:
     return found
 
 
+#: The docs pages, kept at the repository root for the website and mapped into the wheel as
+#: ``mozo/docs`` so an agent in a user's project reads the version that is installed.
+DOCS_DIR = ROOT / "docs"
+
+
+def docs_pages() -> list[str]:
+    """Every page and the index, as the wheel must carry them under ``mozo/docs``."""
+    return [f"mozo/docs/{path.relative_to(DOCS_DIR).as_posix()}"
+            for path in [*sorted(DOCS_DIR.rglob("*.md")), DOCS_DIR / "llms.txt"]]
+
+
 def wheel_contents(wheel: Path) -> set[str]:
     """Paths inside *wheel*, which are already package-relative (``mozo/...``)."""
     with zipfile.ZipFile(wheel) as archive:
@@ -113,13 +124,21 @@ def main() -> int:
         problems.append(f"sdist is named {sdist.name}, not mozo-{version}.tar.gz")
 
     required = required_paths()
-    for label, contents in (("wheel", wheel_contents(wheel)), ("sdist", sdist_contents(sdist))):
+    shipped = wheel_contents(wheel)
+    for label, contents in (("wheel", shipped), ("sdist", sdist_contents(sdist))):
         missing = [path for path in required if path not in contents]
         if missing:
             problems.append(
                 f"{len(missing)} run-time file(s) missing from the {label}:\n    "
                 + "\n    ".join(missing)
             )
+
+    pages = docs_pages()
+    for found, what in (([path for path in pages if path not in shipped], "missing from the wheel"),
+                        (sorted(p for p in shipped if p.startswith("mozo/docs/assets/")),
+                         "in the wheel, which ships the docs' text only")):
+        if found:
+            problems.append(f"{len(found)} docs file(s) {what}:\n    " + "\n    ".join(found))
 
     if problems:
         print("\n".join(problems), file=sys.stderr)
@@ -131,7 +150,8 @@ def main() -> int:
             )
         return 1
 
-    print(f"mozo {version}: {len(required)} run-time files present in both the wheel and the sdist.")
+    print(f"mozo {version}: {len(required)} run-time files present in both the wheel and the sdist, "
+          f"and {len(pages)} docs files in the wheel.")
     return 0
 
 

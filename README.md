@@ -310,7 +310,13 @@ Everything below the surface is at **[emrah.fr/mozo](https://emrah.fr/mozo/)**, 
 | [Deployment](docs/deployment/production.md) | configuration, production, runtimes, verification, licences |
 | [Reference](docs/reference/python-api.md) | every public function, route and command |
 
-For agents, [`docs/llms.txt`](docs/llms.txt) lists every page with a one-line summary.
+**The docs ship with the package**, so they always match the version you installed and need no
+network: the pages are markdown files in `mozo/docs/`, with an index for coding agents at
+`mozo/docs/llms.txt` that lists every page with a one-line summary. To find the folder:
+
+```bash
+python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_spec('mozo').origin) + '/docs')"
+```
 
 ## What mozo does not do
 

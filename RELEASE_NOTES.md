@@ -1,5 +1,9 @@
 ## Unreleased
 
+- **The docs ship inside the package.** After `pip install mozo` every page is a markdown file in
+  `mozo/docs/`, with an index at `mozo/docs/llms.txt`, so a coding agent in your project reads the
+  docs for the version you installed, offline, rather than the website's. Text only: the website's
+  images are left out of the wheel. The README says how to find the folder.
 - **`MOZO_ENABLE` now holds workflows to the same list.** A workflow sent to `/workflow/run`,
   `/stream` or `/process` that names a model the server does not offer fails at that node with the
   same reason `/predict` gives, before anything is downloaded. Before, a server narrowed to

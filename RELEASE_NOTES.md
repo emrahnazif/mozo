@@ -1,5 +1,11 @@
 ## Unreleased
 
+- **`MOZO_ENABLE` now holds workflows to the same list.** A workflow sent to `/workflow/run`,
+  `/stream` or `/process` that names a model the server does not offer fails at that node with the
+  same reason `/predict` gives, before anything is downloaded. Before, a server narrowed to
+  permissive weights would still fetch and serve YOLO the moment a workflow named it. A node running
+  a checkpoint of your own is not refused.
+
 # Mozo v1.10.0: Text You Can Search
 
 ## What's New in v1.10.0

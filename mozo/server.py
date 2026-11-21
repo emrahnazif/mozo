@@ -35,7 +35,7 @@ from .prepared import PreparedImages, limit_from_environment
 from .registry import (BOXED, CLICKABLE, ENCODE_ONLY, ENCODES, MODEL_REGISTRY, PREPARES,
                        PROMPTED, get_model_info)
 from .weights import license_of
-from .workflow.api import router as workflow_routes
+from .workflow.api import workflow_router
 
 app = FastAPI(
     title="Mozo Model Server",
@@ -58,11 +58,6 @@ app.state.model_manager = _shared
 # than upload it again. Not the models' own caches -- see :mod:`mozo.prepared`. One per process,
 # shared by every model, so an image prepared for SAM 2 can be clicked with SAM 3 as well.
 app.state.prepared = PreparedImages(limit_from_environment())
-
-# The one place in mozo that reaches into the workflow runtime. Everything else about that
-# subpackage is invisible from here, and `tests/workflow/test_isolation.py` keeps it that way --
-# importing it costs PixelFlow, which a caller of `get_model` should never pay for.
-app.include_router(workflow_routes)
 
 _STATIC = Path(__file__).parent / "static"
 
@@ -198,6 +193,32 @@ def _catalogue_entry(family: str, variant: str) -> dict[str, Any]:
         raise _undeployed(f"{family}/{variant}",
                           variant in MODEL_REGISTRY[family]["variants"], list(offered))
     return MODEL_REGISTRY[family]
+
+
+def _workflow_model(family: str, variant: str, **kwargs: Any) -> Any:
+    """Load a model for a workflow node, refusing what this deployment does not offer.
+
+    A workflow names its models in the document a caller sends, so without this ``/workflow/run``
+    would load whatever it was asked for: a server narrowed to permissive weights would still
+    fetch and serve YOLO the moment a workflow named it. Loading is the one point every node
+    passes through, so the refusal sits here and arrives before any weights are fetched -- the
+    run fails at that node with the same reason ``/predict`` gives.
+
+    A checkpoint of the caller's own is not refused. ``MOZO_ENABLE`` decides which of the weights
+    mozo publishes a server hands out; weights it did not publish are not among them.
+    """
+    if "checkpoint_path" not in kwargs:
+        try:
+            _catalogue_entry(family, variant)
+        except HTTPException as refusal:
+            raise PermissionError(refusal.detail) from None
+    return app.state.model_manager.get_model(family, variant, **kwargs)
+
+
+# The one place in mozo that reaches into the workflow runtime. Everything else about that
+# subpackage is invisible from here, and `tests/workflow/test_isolation.py` keeps it that way --
+# importing it costs PixelFlow, which a caller of `get_model` should never pay for.
+app.include_router(workflow_router(models=_workflow_model))
 
 
 @app.get("/", summary="Health check")

@@ -21,9 +21,25 @@ exposure this exists to prevent, which is why it does not justify killing the pr
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 
 import pytest
+
+from conftest import document
+
+
+def forbid_loading(monkeypatch, client) -> None:
+    """Make the model loader itself fatal, so a test proves a refusal came before any load.
+
+    Residency cannot tell the two apart: an undeployed model whose weights were never downloaded
+    fails to load and leaves the same empty manager behind as one that was correctly refused.
+    """
+    def explode(*args, **kwargs):
+        raise AssertionError("a request reached the model loader after being refused")
+
+    monkeypatch.setattr(client.app.state.model_manager, "get_model", explode)
 
 
 def refuse(client, payload, family: str, variant: str) -> str:
@@ -189,16 +205,11 @@ class TestRefusals:
         licence grounds must not be fetched or built in the course of refusing it. A 404 raised
         after the download would still be a 404, and would still have put the weights on disk.
 
-        Asserted by making the loader itself fatal rather than by watching what stays resident.
-        Residency cannot tell the two apart: an undeployed model whose weights were never
-        downloaded fails to load and leaves the same empty manager behind as one that was
-        correctly refused, so that check would pass whether the guard fired or not.
+        Asserted by making the loader itself fatal rather than by watching what stays resident --
+        see :func:`forbid_loading`.
         """
-        def explode(*args, **kwargs):
-            raise AssertionError("a request reached the model loader after being refused")
-
         deploy("clip")
-        monkeypatch.setattr(client.app.state.model_manager, "get_model", explode)
+        forbid_loading(monkeypatch, client)
         refuse(client, payload, "yolov8", "nano")
         assert client.post("/encode/siglip2/base-224", params={"text": "a cat"}).status_code == 404
 
@@ -247,3 +258,56 @@ class TestRefusals:
         deploy("depth_anything_v2/small,clip")
         assert _catalogue_entry("depth_anything_v2", "small")["task_type"] == "depth_estimation"
         assert _catalogue_entry("clip", "large-336")["adapter_class"] == "ClipPredictor"
+
+
+#: The smallest workflow that loads a published model: an image into YOLOv8.
+DETECT = document({"read": ("read_media", {}), "find": ("yolov8", {"variant": "nano"})},
+                  [("read", "image", "find", "image")])
+
+
+@pytest.fixture
+def loader(monkeypatch):
+    """The server's workflow loader, over a manager that echoes what it was asked to load."""
+    from mozo.server import _workflow_model, app
+
+    monkeypatch.setattr(app.state.model_manager, "get_model",
+                        lambda family, variant, **kwargs: (family, variant, kwargs))
+    return _workflow_model
+
+
+class TestWorkflows:
+    """``/workflow/run`` names its models in the document it is sent, so it is a second way in.
+
+    Narrowing ``/predict`` alone would leave a server configured to decline AGPL weights fetching
+    and serving them the moment a workflow asked, which is the exposure the variable exists to
+    prevent. Every node loads through one function, so that is where the refusal is checked.
+    """
+
+    def test_a_workflow_cannot_load_an_undeployed_model(self, deploy, monkeypatch, client,
+                                                        payload):
+        """Refused before the loader is reached, as ``/predict`` is, and with its reason."""
+        deploy("clip")
+        forbid_loading(monkeypatch, client)
+        response = client.post("/workflow/run", data={"workflow": json.dumps(DETECT)},
+                               files={"file": ("image.jpg", payload, "image/jpeg")})
+        assert response.status_code == 422
+        assert "not deployed on this server" in response.json()["detail"]
+        assert "Served here: ['clip']" in response.json()["detail"]
+
+    def test_a_narrowed_family_refuses_its_other_variants_in_a_workflow(self, deploy, loader):
+        deploy("yolov8/small")
+        with pytest.raises(PermissionError, match=re.escape("Served here: ['small']")):
+            loader("yolov8", "nano")
+
+    def test_what_is_deployed_is_loaded(self, deploy, loader):
+        """Asked of the gate rather than by running a model: what is in question is which loads
+        get through, and the manager it hands them to."""
+        deploy("yolov8")
+        assert loader("yolov8", "nano", device="cpu") == ("yolov8", "nano", {"device": "cpu"})
+
+    def test_a_checkpoint_of_your_own_is_not_refused(self, deploy, loader):
+        """The variable decides which of mozo's published weights a server hands out. A
+        checkpoint the caller supplies was never one of them."""
+        deploy("clip")
+        assert loader("rfdetr", "nano", checkpoint_path="mine.pth") == (
+            "rfdetr", "nano", {"checkpoint_path": "mine.pth"})

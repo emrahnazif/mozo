@@ -295,9 +295,11 @@ def test_the_licence_files_on_this_machine_say_what_the_manifest_says():
                 assert generator.identify_licence(path) == revision["license"], f"{model_id}@{name}"
 
 
-def test_the_readme_s_permissive_deployment_offers_what_it_claims(deploy):
-    """The README shows a ``MOZO_ENABLE`` line for serving only the permissively licensed weights,
-    and says how many that is. It is the one example whose being wrong is not a documentation bug.
+@pytest.mark.parametrize("document", ["README.md", "docs/deployment/weights-and-licences.md"])
+def test_the_permissive_deployment_offers_what_it_claims(deploy, document):
+    """The README and the docs' licence page each show a ``MOZO_ENABLE`` line for serving only the
+    permissively licensed weights, and say how many that is. Two copies on purpose: the README has
+    to stand alone on PyPI, and the docs page is where an operator looks it up. It is the one example whose being wrong is not a documentation bug.
 
     An operator pastes it to avoid taking on AGPL section 13 obligations, so a variant that slips
     through is served under a licence they were reading this section specifically to decline. And
@@ -308,22 +310,22 @@ def test_the_readme_s_permissive_deployment_offers_what_it_claims(deploy):
     prose states, that nothing non-permissive is offered, and that nothing permissive was dropped
     by accident along the way.
     """
-    readme = (ROOT / "README.md").read_text()
-    example = re.search(r"```bash\nMOZO_ENABLE=(.*?)\n```", readme, re.S)
-    assert example, "the README no longer shows a MOZO_ENABLE example -- update this test"
-    stated = re.search(r"That is the (\d+) Apache-2\.0 and MIT variants", readme)
-    assert stated, "the README no longer states what that line offers -- update this test"
+    shown = (ROOT / document).read_text()
+    example = re.search(r"```bash\nMOZO_ENABLE=(.*?)\n```", shown, re.S)
+    assert example, f"{document} no longer shows a MOZO_ENABLE example -- update this test"
+    stated = re.search(r"That is the (\d+) Apache-2\.0 and MIT variants", shown)
+    assert stated, f"{document} no longer states what that line offers -- update this test"
 
     deployment = deploy(example.group(1).replace("\\\n", ""))
     offered = {(family, v) for family, variants in deployment.items() for v in variants}
 
     assert len(offered) == int(stated.group(1)), (
-        f"the README's MOZO_ENABLE line offers {len(offered)} variants, and says {stated.group(1)}"
+        f"{document}'s MOZO_ENABLE line offers {len(offered)} variants, and says {stated.group(1)}"
     )
 
     restricted = non_permissive()
     leaked = {model: restricted[model] for model in offered & set(restricted)}
-    assert not leaked, f"the README's MOZO_ENABLE line offers non-permissive weights: {leaked}"
+    assert not leaked, f"{document}'s MOZO_ENABLE line offers non-permissive weights: {leaked}"
 
     everything = {(family, v) for family, entry in MODEL_REGISTRY.items()
                   for v in entry["variants"]}

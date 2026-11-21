@@ -4,8 +4,9 @@
     python tools/docs_llms.py            # rewrite docs/llms.txt
     python tools/docs_llms.py --check    # exit 1 if it is out of date
 
-Generated rather than written, because every line of it already exists somewhere: each entry is
-a page's title and the ``summary`` from its header, and the sections are the site's menu -- the
+Generated rather than written, because every line of it already exists somewhere. Each entry is a
+page's title, its address on the site, the ``summary`` from its header and its file, which is also
+inside the installed package as ``mozo/docs/<file>``. The sections are the site's menu: the
 top-level pages first, then each folder, in the order DOCS-GUIDE.md says the site sorts them. A
 hand-kept copy goes stale the moment a summary is edited or a page renamed, and the agent reading
 it is the one reader who cannot tell. ``tests/test_docs.py`` runs ``--check``.
@@ -36,8 +37,16 @@ curl -X POST http://localhost:8000/predict/rfdetr/medium -F file=@photo.jpg
 ```
 
 Weights download on first use, are verified by sha256 and cached in ~/.cache/mozo. Detection \
-results are PixelFlow objects (https://emrah.fr/pixelflow/). Each page below is also available as \
-markdown in the repository under docs/."""
+results are PixelFlow objects (https://emrah.fr/pixelflow/).
+
+These pages ship inside the installed package, matching its version: after `pip install mozo` \
+they are markdown files in `mozo/docs/`, next to this file. A link inside a page such as \
+`/docs/models/rfdetr.md` is the file \
+`mozo/docs/models/rfdetr.md`. To find the folder without importing mozo:
+
+```bash
+python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_spec('mozo').origin) + '/docs')"
+```"""
 
 
 def header(page: Path) -> tuple[str, dict[str, str]]:
@@ -63,7 +72,8 @@ def render() -> str:
     lines = ["# Mozo", "", f"> {header(DOCS / 'index.md')[1]['summary']}", "", PREAMBLE, ""]
     for name, pages in sections:
         lines += [f"## {name}", ""]
-        lines += [f"- [{title}]({url(page)}): {fields['summary']}"
+        lines += [f"- [{title}]({url(page)}): {fields['summary']} "
+                  f"File: `{page.relative_to(DOCS).as_posix()}`"
                   for page in pages for title, fields in [header(page)]]
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"

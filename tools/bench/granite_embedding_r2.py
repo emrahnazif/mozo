@@ -43,7 +43,7 @@ os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 
 from common import median_ms, synchronise  # noqa: E402
 from fetch.granite_embedding_r2 import COMMITS, repository  # noqa: E402
-from verify.granite_embedding_r2 import prefix_within  # noqa: E402
+from verify.granite_embedding_r2 import docs_text, prefix_within  # noqa: E402
 
 from mozo.vendors.granite_embedding_r2_deploy import SPECS, Encoder  # noqa: E402
 from mozo.vendors.granite_embedding_r2_deploy.tokenizer import Tokenizer, _word  # noqa: E402
@@ -62,8 +62,7 @@ def documents(tokenizer) -> dict[int, str]:
     Built once: the search re-tokenizes, and one tokenizer word cache warmed by it is cleared before
     anything about the tokenizer is timed.
     """
-    words = " ".join((ROOT / "docs" / name).read_text(encoding="utf-8")
-                     for name in ("models.md", "workflows.md")).split(" ")
+    words = docs_text().split(" ")
     out = {}
     for tokens in LENGTHS:
         text = prefix_within(tokenizer, words, tokens)

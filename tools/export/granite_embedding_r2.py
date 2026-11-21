@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 
 from bench.granite_embedding_r2 import interleaved  # noqa: E402
+from verify.granite_embedding_r2 import docs_text  # noqa: E402
 
 from mozo.runtimes import providers_for  # noqa: E402
 from mozo.vendors.granite_embedding_r2_deploy import SPECS, Encoder  # noqa: E402
@@ -132,8 +133,7 @@ def main() -> int:
     print(f"ONNX Runtime providers: {plain.get_providers()}")
 
     # Real text, as the ids the tokenizer gives it, cut to exact lengths with its own markers.
-    words = " ".join((ROOT / "docs" / name).read_text(encoding="utf-8")
-                     for name in ("models.md", "workflows.md"))
+    words = docs_text()
     first, *body, last = encoder.tokenizer.encode(words)
     if len(body) < 2 * max(PARITY_LENGTHS):
         raise SystemExit(f"the docs give {len(body)} tokens; the parity check needs "

@@ -103,6 +103,13 @@ def versions() -> str:
                     for name, want in PINNED.items())
 
 
+def docs_text() -> str:
+    """Every page of mozo's docs, joined: the real English the gate, the bench and the export
+    check share, read in one place so a reorganised ``docs/`` moves all three together."""
+    return "\n".join(path.read_text(encoding="utf-8")
+                     for path in sorted((ROOT / "docs").rglob("*.md")))
+
+
 def prefix_within(tokenizer, words: list[str], budget: int) -> str:
     """The longest run of *words*, from the start, that tokenizes to at most *budget* ids.
 
@@ -125,7 +132,7 @@ def texts(tokenizer) -> dict[str, str]:
     out = {f"awkward {i}": text for i, text in enumerate(AWKWARD)}
     for length in (63, 64, 65, 66, 127, 128, 129, 130):
         out[f"{length} tokens"] = "hello" + " hello" * (length - 3)
-    words = (ROOT / "docs" / "models.md").read_text(encoding="utf-8").split(" ")
+    words = docs_text().split(" ")
     out["docs page"] = prefix_within(tokenizer, words, 1500)
     out["docs at the context"] = prefix_within(tokenizer, words, CONTEXT)
     return out
@@ -136,8 +143,7 @@ def tokenizer_corpus(sweep: bool) -> list[str]:
     of Unicode, and with *sweep*, every codepoint in contexts that cross each class boundary plus
     bases followed by runs of combining marks -- the shape that exercises NFC's reordering and
     composition, where interpreters disagree."""
-    corpus = [line for path in sorted((ROOT / "docs").glob("*.md"))
-              for line in path.read_text(encoding="utf-8").split("\n")]
+    corpus = docs_text().split("\n")
     rng = random.Random(0)
     pool = (list(" \t\n\r\x0b\x0c\x85\xa0\u1680\u2000\u2028\u2029\u3000aA\u00e9\u00df0٠\u00bd'!?[]<>|")
             + ["[MASK]", "[SEP]", "<|endoftext|>", "[unused7]", "  ", " " * 23, "'ll", "\u0301",

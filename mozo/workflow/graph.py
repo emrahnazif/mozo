@@ -112,6 +112,19 @@ def _closing(events: Iterator, states: list) -> Iterator:
         _forget(states)
 
 
+def _position(position: Any) -> dict:
+    """A node's saved position, or ``{}`` where it gives no ``x`` and ``y`` to draw it at.
+
+    The editor's own test (``placed`` in ``ui/src/lib/api.js``), so the two agree: a node with a
+    partial position is laid out there and saved without one here, rather than carried as junk.
+    """
+    if isinstance(position, dict) and all(
+            isinstance(position.get(axis), (int, float)) and not isinstance(position.get(axis), bool)
+            for axis in ("x", "y")):
+        return dict(position)
+    return {}
+
+
 @dataclass(frozen=True)
 class Step:
     """One node in one workflow: which kind it is, and what its parameters are set to."""
@@ -120,7 +133,8 @@ class Step:
     spec: NodeSpec
     parameters: dict
     #: Where the editor drew it. Meaningless to execution, carried so that loading and saving a
-    #: workflow does not silently rearrange someone's canvas.
+    #: workflow does not silently rearrange someone's canvas. Empty for a node written by code or
+    #: by hand: it is saved without one, and the editor lays such nodes out when it opens them.
     position: dict = field(default_factory=dict)
 
     def arguments(self, settings: dict) -> dict:
@@ -178,7 +192,7 @@ class Step:
         return {
             "id": self.id,
             "type": self.spec.name,
-            "position": self.position,
+            **({"position": self.position} if self.position else {}),
             "data": {"parameters": self.parameters},
         }
 
@@ -207,7 +221,7 @@ class Step:
             id=data["id"],
             spec=spec,
             parameters=dict(parameters),
-            position=dict(data.get("position") or {}),
+            position=_position(data.get("position")),
         )
 
 

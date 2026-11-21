@@ -5,6 +5,10 @@
   `crop_around_detections` is the first: its output read as one image, though it gives one per
   detection. Connecting it to an image input works as before, and every node after it runs once
   per crop.
+- **The editor opens workflows that have no node positions.** A workflow written in code or by
+  hand stacked every node in one spot, with no edges drawn and nothing draggable. The editor now
+  lays such nodes out top to bottom by their edges, and a saved workflow leaves out the empty
+  `"position": {}` it used to write for them.
 
 # Mozo v1.11.0: Docs That Come With It
 

@@ -460,6 +460,18 @@ class TestTheFileFormat:
         Workflow.from_dict(document({"a": ("make", {})}, [])).save(path)
         assert set(json.loads(path.read_text())) == {"nodes", "edges"}
 
+    def test_a_node_with_no_position_is_saved_without_one(self):
+        """Not as ``{}``: the editor lays out a node with none, and ``{}`` reads as a position."""
+        saved = Workflow.from_dict(document({"a": ("make", {})}, [])).to_dict()
+        assert "position" not in saved["nodes"][0]
+
+    @pytest.mark.parametrize("position", [{}, {"x": 5}, {"x": None, "y": 2}, "left"])
+    def test_a_position_without_an_x_and_a_y_is_saved_without_one(self, position):
+        """What the editor would lay out anyway, so carrying it would only be junk in the file."""
+        saved = document({"a": ("make", {})}, [])
+        saved["nodes"][0]["position"] = position
+        assert "position" not in Workflow.from_dict(saved).to_dict()["nodes"][0]
+
     def test_a_missing_file_says_so(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             Workflow.load(tmp_path / "nothing.json")

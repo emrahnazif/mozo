@@ -42,7 +42,24 @@ const about = { name: '  Blur faces ', description: 'Find faces, blur them.' };
 const named = toDocument(nodes, edges, about);
 const namedBack = fromDocument(named, {});
 
+// Written by code: no positions, or empty ones, and a branch -- read feeds both find and blur.
+const loose = fromDocument({
+  nodes: [{ id: 'read', type: 'read_media' }, { id: 'find', type: 'yolov26', position: {} },
+          { id: 'blur', type: 'blur_regions' }, { id: 'save', type: 'save_image' }],
+  edges: [{ source: 'read', sourceHandle: 'image', target: 'find', targetHandle: 'image' },
+          { source: 'read', sourceHandle: 'image', target: 'blur', targetHandle: 'image' },
+          { source: 'find', sourceHandle: 'detections', target: 'blur', targetHandle: 'detections' },
+          { source: 'blur', sourceHandle: 'image', target: 'save', targetHandle: 'image' }],
+});
+const mixed = fromDocument({
+  nodes: [{ id: 'kept', type: 'read_media', position: { x: 40, y: 0 } },
+          { id: 'new', type: 'save_image' }],
+  edges: [{ source: 'kept', sourceHandle: 'image', target: 'new', targetHandle: 'image' }],
+});
+
 console.log(JSON.stringify({
+  loose: Object.fromEntries(loose.nodes.map(n => [n.id, n.position])),
+  mixed: Object.fromEntries(mixed.nodes.map(n => [n.id, n.position])),
   document,
   stable: JSON.stringify(document) === JSON.stringify(again),
   positions: back.nodes[0].position,
@@ -95,6 +112,14 @@ class TestTheConversion:
 
     def test_the_canvas_layout_survives(self, converted):
         assert converted["positions"] == {"x": 10, "y": 20}
+
+    def test_nodes_without_a_position_are_laid_out_top_to_bottom_by_the_edges(self, converted):
+        """A document written by code has none, and Svelte Flow cannot draw or drag such a node."""
+        assert converted["loose"] == {"read": {"x": 0, "y": 0}, "find": {"x": 0, "y": 150},
+                                      "blur": {"x": 0, "y": 300}, "save": {"x": 0, "y": 450}}
+
+    def test_a_placed_node_keeps_its_position_and_the_rest_go_beside_it(self, converted):
+        assert converted["mixed"] == {"kept": {"x": 40, "y": 0}, "new": {"x": 340, "y": 150}}
 
     def test_the_parameters_survive(self, converted):
         assert converted["parameters"] == {"variant": "seg-nano"}

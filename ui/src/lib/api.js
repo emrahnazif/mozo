@@ -141,12 +141,61 @@ export function toDocument(nodes, edges, about = {}) {
     };
 }
 
+/** Does *position* say where to draw a node? `{}` and a missing one do not. */
+const placed = position => Number.isFinite(position?.x) && Number.isFinite(position?.y);
+
+/** The space {@link layout} leaves between columns and between rows. */
+const COLUMN = 300;
+const ROW = 150;
+
+/**
+ * Where to draw every node of *document* that has no position, by node id.
+ *
+ * A document written by code or by hand has none, and Svelte Flow given a node without `x` and
+ * `y` draws it nowhere it can be dragged from and routes none of its edges. Positions are layout,
+ * not meaning, so they are made up here rather than required: top to bottom by the edges, one row
+ * per step from the start (the longest path to it), the nodes of a row side by side. Placed nodes
+ * keep their position; when there are some, the rest are laid out to their right.
+ */
+function layout(document) {
+    const nodes = document.nodes || [];
+    const loose = nodes.filter(node => !placed(node.position));
+    if (!loose.length) return new Map();
+    const xs = nodes.filter(node => !loose.includes(node)).map(node => node.position.x);
+    const left = xs.length ? Math.max(...xs) + COLUMN : 0;
+
+    const ids = new Set(nodes.map(node => node.id));
+    const edges = (document.edges || []).filter(edge => ids.has(edge.source) && ids.has(edge.target));
+    const row = new Map(nodes.map(node => [node.id, 0]));
+    // At most one pass per node: a longest path cannot be longer, and a cycle (refused by mozo
+    // anyway) stops here rather than looping.
+    for (let pass = 0; pass < nodes.length; pass++) {
+        let moved = false;
+        for (const edge of edges) {
+            if (row.get(edge.target) <= row.get(edge.source)) {
+                row.set(edge.target, row.get(edge.source) + 1);
+                moved = true;
+            }
+        }
+        if (!moved) break;
+    }
+
+    const taken = new Map();
+    return new Map(loose.map(node => {
+        const step = row.get(node.id);
+        const column = taken.get(step) || 0;
+        taken.set(step, column + 1);
+        return [node.id, { x: left + column * COLUMN, y: step * ROW }];
+    }));
+}
+
 /** A workflow document as canvas nodes and edges. The inverse of {@link toDocument}. */
 export function fromDocument(document) {
+    const laid = layout(document);
     const nodes = (document.nodes || []).map(node => ({
         id: node.id,
         type: 'default',
-        position: node.position || { x: 0, y: 0 },
+        position: laid.get(node.id) ?? node.position,
         data: { nodeType: node.type, parameters: node.data?.parameters || {} },
     }));
     const edges = (document.edges || []).map((edge, index) => ({

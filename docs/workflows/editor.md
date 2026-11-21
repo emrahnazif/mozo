@@ -59,6 +59,8 @@ mozo run blur_faces.json
 
 A node has an `id`, a `type` (the node's name) and its `parameters`. An edge connects one node's
 output port to another's input port. The editor also writes each node's `position` on the canvas.
+It is optional: the editor lays out nodes that have none, top to bottom by the edges, so a
+workflow written in code or by hand opens ready to edit.
 `name` and `description` are optional, and are what someone choosing between workflows reads.
 
 ## Connections are typed

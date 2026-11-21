@@ -79,7 +79,7 @@ requests send `?sha256=` instead of the file. Memory for kept images is limited 
 
 ## GET /
 
-Health: `{"status": "ok", "version": "1.10.0", "loaded_models": [...]}`.
+Health: `{"status": "ok", "version": "1.11.0", "loaded_models": [...]}`.
 
 ## GET /models
 

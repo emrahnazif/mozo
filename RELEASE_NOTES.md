@@ -1,5 +1,9 @@
 ## Unreleased
 
+# Mozo v1.11.0: Docs That Come With It
+
+## What's New in v1.11.0
+
 - **The docs ship inside the package.** After `pip install mozo` every page is a markdown file in
   `mozo/docs/`, with an index at `mozo/docs/llms.txt`, so a coding agent in your project reads the
   docs for the version you installed, offline, rather than the website's. Text only: the website's
@@ -14,6 +18,8 @@
   deployment notes; and a reference for every public function, route and command. `docs/llms.txt`
   indexes it for agents. `tests/test_docs.py` fails when a family, public name, route or command has
   no entry, so the docs cannot quietly fall behind the code.
+
+---
 
 # Mozo v1.10.0: Text You Can Search
 

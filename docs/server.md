@@ -118,7 +118,7 @@ curl http://localhost:8000/
 ```
 
 ```json
-{"status": "ok", "version": "1.10.0", "loaded_models": ["owlv2/base-ensemble"]}
+{"status": "ok", "version": "1.11.0", "loaded_models": ["owlv2/base-ensemble"]}
 ```
 
 | Route | Answers with |

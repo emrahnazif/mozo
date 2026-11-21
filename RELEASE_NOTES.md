@@ -5,6 +5,11 @@
   same reason `/predict` gives, before anything is downloaded. Before, a server narrowed to
   permissive weights would still fetch and serve YOLO the moment a workflow named it. A node running
   a checkpoint of your own is not refused.
+- **Documentation at [emrah.fr/mozo](https://emrah.fr/mozo/).** A page per model family, with
+  examples run against the published weights; guides for Python, the HTTP server and workflows;
+  deployment notes; and a reference for every public function, route and command. `docs/llms.txt`
+  indexes it for agents. `tests/test_docs.py` fails when a family, public name, route or command has
+  no entry, so the docs cannot quietly fall behind the code.
 
 # Mozo v1.10.0: Text You Can Search
 

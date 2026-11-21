@@ -418,7 +418,8 @@ roughly the order they bite.
       SigLIP 2's case, without the tokenizer vocabulary it reads at construction. **If you add a
       data file in a new shape, check the wheel actually contains it** — build one and look.
 - [ ] `PROVENANCE.md`, `NOTICE`, `LICENSE`, `README.md` inside the vendored package.
-- [ ] `docs/models.md` section.
+- [ ] `docs/models/<family>.md` page, in the shape the other family pages share, and a row in
+      `docs/models/all-models.md`.
 - [ ] Counts in `README.md` (six sites) and `mozo/__init__.py`, plus the licence breakdown.
       `tests/test_stated_counts.py` fails until they are right.
 - [ ] `mozo/static/test_ui.html` — check whether it needs anything. It reads `prompted` and

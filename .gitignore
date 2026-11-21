@@ -219,8 +219,8 @@ __marimo__/
 test_results.json
 
 # Where tools/bench/* writes. Measurements of one machine on one day; the numbers worth keeping
-# are quoted in docs/models.md and in each family's PROVENANCE.md. Anchored: unanchored, it would
-# also swallow tools/bench/, which is source.
+# are quoted on each family's page under docs/models/ and in its PROVENANCE.md. Anchored:
+# unanchored, it would also swallow tools/bench/, which is source.
 /bench/
 
 # Local weight tree — the bucket source of truth. Published via rsync; mozo/manifest.json is what ships.

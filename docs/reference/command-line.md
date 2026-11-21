@@ -74,5 +74,5 @@ mozo version
 ```
 
 ```text
-Mozo version 1.11.0
+Mozo version 1.12.0
 ```

@@ -1,5 +1,9 @@
 ## Unreleased
 
+# Mozo v1.12.0: Workflows Say What They Give
+
+## What's New in v1.12.0
+
 - **A workflow node can say it gives many values.** A node returning `-> list[Image]` is
   catalogued with `"many": true` on that output, and the editor draws its port with a dashed ring.
   `crop_around_detections` is the first: its output read as one image, though it gives one per
@@ -9,6 +13,8 @@
   hand stacked every node in one spot, with no edges drawn and nothing draggable. The editor now
   lays such nodes out top to bottom by their edges, and a saved workflow leaves out the empty
   `"position": {}` it used to write for them.
+
+---
 
 # Mozo v1.11.0: Docs That Come With It
 

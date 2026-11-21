@@ -99,7 +99,7 @@ mozo.MODEL_REGISTRY["sam2"]["variants"]      # ['tiny', 'small', 'base_plus', 'l
 ## \_\_version\_\_
 
 ```python
-mozo.__version__      # '1.11.0'
+mozo.__version__      # '1.12.0'
 ```
 
 ## ModelManager

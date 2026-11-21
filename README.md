@@ -61,7 +61,7 @@ variant is what decides whether masks come back.
 
 COCO's 17 person joints per detection, as `(x, y, confidence)` in source-image pixels. RF-DETR
 finds people and joints in one pass; ViTPose is top-down and takes detections as an argument —
-[details](docs/models.md#vitpose).
+[details](docs/models/vitpose.md).
 
 | Family | Variants | Weights licence | Runtimes |
 |---|---|---|---|
@@ -82,7 +82,7 @@ Boxes for anything you can name, from a phrase rather than a fixed class list.
 
 Name your classes in words and each is scored against the image — or take the vectors instead, and
 make a corpus embedded once searchable by words afterwards. Scores are similarities, not
-probabilities — [details](docs/models.md#clip).
+probabilities — [details](docs/models/clip.md).
 
 | Family | Variants | Weights licence | Prompt | Output |
 |---|---|---|---|---|
@@ -94,7 +94,7 @@ probabilities — [details](docs/models.md#clip).
 English text in, one vector out, and texts that mean the same thing land close together: search
 documentation, notes, or what EasyOCR read off an image, by meaning rather than by keyword. Text
 only — these vectors do not share a space with CLIP's or SigLIP 2's, so they cannot search
-pictures by words. Served through `/encode` alone — [details](docs/models.md#granite-embedding-r2).
+pictures by words. Served through `/encode` alone — [details](docs/models/granite-embedding-r2.md).
 
 | Family | Variants | Weights licence | Input | Output |
 |---|---|---|---|---|
@@ -133,7 +133,7 @@ An `HxW` float32 map. Six of the nine variants predict metres and three are rela
 ### Background removal
 
 A per-pixel opacity matte, not a binary mask — which is the difference between keeping a head of
-hair and cutting it off. [Details](docs/models.md#ben2).
+hair and cutting it off. [Details](docs/models/ben2.md).
 
 | Family | Variants | Weights licence | Output |
 |---|---|---|---|
@@ -143,14 +143,14 @@ hair and cutting it off. [Details](docs/models.md#ben2).
 
 Give it a frame and a mask and it repaints the hole so the thing was never there — pair the mask
 with SAM 3 or EdgeTAM. It answers with a sample rather than an estimate —
-[details](docs/models.md#moebius).
+[details](docs/models/moebius.md).
 
 | Family | Variants | Weights licence | Output |
 |---|---|---|---|
 | `moebius` | `general` `places2` | Apache-2.0 | an `HxWx3` image |
 
 How each family behaves and why — OWLv2 suppressing nothing, the encoder cache, EasyOCR's line
-ordering, prompt semantics — is in [docs/models.md](docs/models.md).
+ordering, prompt semantics — is on each family's page under [docs/models/](docs/models/all-models.md).
 
 ## Install
 
@@ -208,8 +208,8 @@ curl http://localhost:8000/models          # all 82, no torch import, no weights
 curl http://localhost:8000/models/loaded   # what is resident right now
 ```
 
-Full parameter reference below, and the server documents itself at
-`http://localhost:8000/docs`.
+Every route and parameter is in the [HTTP API reference](docs/reference/http-api.md), and the
+server documents itself at `http://localhost:8000/docs`.
 
 ### 2. Python API
 
@@ -250,9 +250,9 @@ model.unit                           # 'metres' — or None, and then it is not 
 A workflow is a graph of nodes in a JSON file. Draw it at `/workflow`, or write it by hand; run it
 from Python, from the command line, or over HTTP. The editor also mounts into a page of your own,
 and the routes into your own FastAPI app — see
-[docs/workflows.md](docs/workflows.md#inside-your-own-application).
+[docs/workflows/editor.md](docs/workflows/editor.md#put-the-editor-in-your-own-app).
 
-![The mozo workflow UI](docs/workflow.png)
+![The mozo workflow UI](docs/assets/workflow.png)
 
 ```python
 from mozo.workflow import Workflow
@@ -295,220 +295,22 @@ and recorded in
 Because the extraction *is* the implementation rather than a wrapper around one, none of this
 costs anything at run time: EasyOCR runs within 1% of the published package on the same weights.
 
-## HTTP API
+## Documentation
 
-```http
-POST /predict/{family}/{variant}
-Content-Type: multipart/form-data
-```
+Everything below the surface is at **[emrah.fr/mozo](https://emrah.fr/mozo/)**, written in
+[`docs/`](docs/index.md) in this repository:
 
-| Parameter | Applies to | Meaning |
-|---|---|---|
-| `file` | all | The image. Required. |
-| `threshold` | detection, text-prompted | Confidence floor. Omitted, the family's own published default applies — they differ, and the endpoint deliberately does not restate them. |
-| `labels` | detection | Comma-separated class names overriding the model's own. |
-| `text` | text-prompted | The concept to look for. Required by those families. Repeat it for several. |
-| `point`, `label` | promptable, SAM 3 | A click as `x,y`, and `1` to include or `0` to exclude. Repeat both together. On SAM 3, a click or `text`, not both. |
-| `box` | promptable, SAM 3 | A box as `x1,y1,x2,y2`. May be combined with points. |
-| `name` | promptable, SAM 3 | What to call what you pointed at. |
-| `multimask` | promptable, SAM 3 | Three candidate masks rather than one. Default `true`. |
-
-`text` is deliberately not comma-separated the way `labels` is: a prompt is free text, so
-`?text=a person, holding a mug` stays one concept rather than becoming two wrong ones. `label` is
-required with `point` and has no default — guessing between include and exclude returns a
-confident mask of the wrong thing.
-
-```bash
-# Boxes for anything you can name, under a permissive licence
-curl -X POST "http://localhost:8000/predict/owlv2/base-ensemble?text=kettle&text=a%20mug" \
-  -F "file=@kitchen.jpg"
-
-# Click one thing: three candidate masks, best first
-curl -X POST "http://localhost:8000/predict/edgetam/edgetam?point=820,640&label=1" \
-  -F "file=@street.jpg"
-
-# A box, one mask, named by you
-curl -X POST "http://localhost:8000/predict/sam2/tiny?box=40,60,300,480&multimask=false&name=cat" \
-  -F "file=@street.jpg"
-
-# SAM 3 answers a click the same way, from the encode its phrases use
-curl -X POST "http://localhost:8000/predict/sam3/sam3?point=820,640&label=1" -F "file=@street.jpg"
-
-# Encode once when the image opens, then click by its sha256 -- no upload per click
-curl -X POST "http://localhost:8000/prepare/sam2/large" -F "file=@street.jpg"   # {"sha256": "3f9a..."}
-curl -X POST "http://localhost:8000/predict/sam2/large?sha256=3f9a...&point=820,640&label=1"
-```
-
-Depth answers with an image rather than JSON:
-
-```bash
-curl -X POST "http://localhost:8000/predict/depth_anything_v2/indoor-small" \
-  -F "file=@room.jpg" -D headers.txt --output depth.png
-
-# depth.png is a 16-bit PNG; headers.txt carries what it means:
-#   X-Depth-Unit: metres | none      X-Depth-Min / X-Depth-Max: the endpoints
-#   depth = min + png / 65535 * (max - min)
-```
-
-16-bit rather than 8, because six of the nine variants predict metres and quantising those to 256
-levels would discard the measurement.
-
-CLIP and SigLIP 2 have a second route. `/predict` classifies; `/encode` returns the vectors
-instead of an answer, for images or for phrases but not both in one call. Granite Embedding R2 has
-only the second: it answers nothing about an image, so `/predict` points you at `/encode`.
-
-```bash
-# Score an image against phrases you make up
-curl -X POST "http://localhost:8000/predict/clip/base?text=a%20forklift&text=a%20person" \
-  -F "file=@aisle.jpg"
-
-# The vectors themselves, to put in a vector database of your own
-curl -X POST "http://localhost:8000/encode/clip/base" -F "file=@aisle.jpg"
-curl -X POST "http://localhost:8000/encode/clip/base?text=a%20forklift&text=a%20person"
-
-# Text alone, for searching documents by meaning
-curl -X POST "http://localhost:8000/encode/granite_embedding_r2/small?text=how%20do%20I%20count%20people%3F"
-```
-
-The response carries `model` and `revision` alongside the embeddings, and those are not decoration:
-a vector is only comparable against others from the same weights, so a stored index is tied to them.
-
-`/prepare` works for SAM 2, EdgeTAM, SAM 3 and OWLv2. It is for a client on the same machine or
-network clicking interactively; code running mozo in-process calls `model.prepare(image)` and sends
-nothing. A client that never sends `?sha256=` is answered exactly as before —
-[details](docs/models.md#sam-2-and-edgetam).
-
-The other endpoints: `GET /` for health and residency, `GET /models` for the catalogue,
-`GET /models/loaded` for what is in memory, `GET /test-ui` for the browser page, and `GET /docs`
-for the generated OpenAPI reference.
-
-## Python API
-
-`mozo.get_model` uses one process-wide cache. When you want a separate lifetime — a batch job
-that should release its models at the end — build your own manager and drop it:
-
-```python
-from mozo import ModelManager
-
-models = ModelManager()
-model = models.get_model("rfdetr", "medium", device="cpu")
-
-scratch = ModelManager()      # a separate lifetime; drop it and its models go with it
-```
-
-`device` takes `"cuda"`, `"mps"`, `"cpu"`, or `None` to take the best available.
-
-### Your own checkpoints
-
-Fine-tuned weights load through the same API, on architectures mozo supports:
-
-```python
-model = models.get_model(
-    "rfdetr", "my-training",
-    checkpoint_path="runs/best.pth",
-    model_size="small", project_type="detection",
-    labels=["hardhat", "vest"],
-)
-```
-
-Everything that changes what gets built is part of the cache identity — a checkpoint, a pinned
-revision, a runtime — so two people's `my-training` are two models rather than one.
-
-### PixelFlow
-
-Every detection family returns the same object, so filtering and annotation are written once:
-
-```python
-import pixelflow as pf
-
-found = model.predict(image)
-filtered = found.filter_by_confidence(0.8).filter_by_class_id([0, 2])
-
-annotated = pf.annotate.box(image, filtered)
-annotated = pf.annotate.label(annotated, filtered)
-
-json_output = filtered.to_json()
-```
-
-More: [PixelFlow](https://github.com/emrahnazif/pixelflow)
-
-## How it works
-
-**Nothing loads until it is asked for.** The server starts instantly whatever is published, and
-the first request for a family downloads and loads it. That first request is slow — minutes, for
-a multi-gigabyte family on a cold cache — and every one after it is not.
-
-**Nothing is evicted automatically.** A model stays until you unload it. This is deliberate: an
-earlier version bounded the cache by model count, and a count cannot tell 0.10 GB from 1.34 GB.
-The same number could not be right for a 6 GB laptop and an 80 GB accelerator, and measured, it
-broke the obvious deployment — detection, segmentation and depth from one instance, 0.60 GB
-between them — into a 762 ms eviction on every request. **Memory is yours to manage: the levers
-are which models you ask for and which you unload.** `mozo.unload("rfdetr/nano")` and
-`mozo.clear()` release models and hand GPU memory back to the driver, and
-`ModelManager.resident()` reports each model's device, last use and estimated size.
-
-**A model is built once** however many requests arrive for it at the same moment, and no request
-waits behind a different model's load — not even one whose weights are still downloading.
-
-**One model serves concurrent requests in parallel.** `predict` is not serialised, and in
-parallel it runs 1.2–2.7× faster. That is safe on CPU, CUDA and ONNX Runtime. On Apple silicon
-(`mps`) and CoreML it is tested — 6,000 concurrent calls with no error and results identical to
-sequential ones — but not documented as thread-safe by PyTorch or Apple, so serialise your own
-calls there if you need a guarantee.
-
-**Weights resolve from a manifest that ships inside the package**, so working out which bytes a
-model refers to needs no network and no configuration. Every artifact is verified by sha256 after
-download, and its licence and a NOTICE naming the exact upstream release are published beside it.
-
-## Configuration
-
-| Variable | Meaning |
+| | |
 |---|---|
-| `MOZO_ENABLE` | Which models this server offers, comma-separated. A family (`clip`) or one variant (`clip/base`); mix freely. Unset offers everything. An allow-list, so an upgrade that adds a family does not start serving it unasked. A name that matches nothing is logged and ignored, never fatal — it can only subtract. |
-| `MOZO_CACHE` | Where downloads live. Default `~/.cache/mozo`. |
-| `MOZO_BASE_URL` | Serve artifacts from a mirror instead of the manifest's. A `file://` URL pointing at a `weights/` tree works, which is how an air-gapped host can be fed from removable media. |
-| `MOZO_OFFLINE` | Set to `1` to refuse downloads. A missing file raises an error naming the exact path, URL and hash, so it can be placed by hand. |
-| `MOZO_PREPARED_MB` | How much memory the server may use for images kept by `/prepare`, so clicks can name them by `?sha256=`. Default 512; the least recently used image goes first. |
-| `PYTORCH_ENABLE_MPS_FALLBACK` | Set to `1` on Apple silicon so unimplemented ops fall back to CPU rather than failing. |
+| [Installation](docs/installation.md) | CUDA, Apple silicon, the ONNX and CoreML runtimes, where weights are cached |
+| [Python](docs/python.md) | loading models, reading and drawing results, memory, your own checkpoints |
+| [HTTP server](docs/server.md) | serving models, what comes back, prepared images for interactive clicks |
+| [Models](docs/models/all-models.md) | one page per family: examples, every parameter, how it behaves and why |
+| [Workflows](docs/workflows/editor.md) | the editor, every node, running over videos and folders, writing a node |
+| [Deployment](docs/deployment/production.md) | configuration, production, runtimes, verification, licences |
+| [Reference](docs/reference/python-api.md) | every public function, route and command |
 
-An application embedding mozo can set the last three in code instead, and ask what the cache
-holds — none of it touches the network or imports torch:
-
-```python
-import mozo
-from mozo import weights
-
-mozo.configure(cache="~/MyApp/weights", offline=False)    # wins over MOZO_CACHE, MOZO_OFFLINE
-weights.download_size("sam2", "large", device="mps")      # bytes a load would still fetch
-weights.is_cached("sam2", "large", device="mps")          # would a load need the network?
-weights.cached()                                          # every file, its key, size and state
-weights.remove("sam3", "sam3")                            # delete it; returns the bytes freed
-
-# Download now, load later; progress(done_bytes, total_bytes) and cancelled() see every chunk.
-weights.fetch("sam2", "large", device="mps", progress=bar.update, cancelled=job.cancelled)
-mozo.get_model("sam2/large", progress=bar.update, cancelled=job.cancelled)
-```
-
-## Deploying
-
-```bash
-mozo start                      # 0.0.0.0:8000
-mozo start --port 8080
-mozo start --workers 4          # read the note below first
-mozo start --reload             # development; forces one worker
-```
-
-It is a real server — FastAPI on uvicorn, thread-safe, with weights verified by hash — and three
-things about it are yours to arrange:
-
-- **`--workers N` multiplies memory by N.** Workers are separate processes and share nothing, so
-  each loads its own copy of every model it serves. Four workers serving SAM 3 is four times
-  3.4 GB, not one. Prefer one worker unless you have measured otherwise.
-- **There is no authentication and no rate limiting**, and the default bind is `0.0.0.0`. Put it
-  behind something before it faces a network you do not control.
-- **Nothing is evicted automatically**, so a server asked for every family will eventually hold
-  every family. Decide what an instance serves rather than letting callers decide for it —
-  `MOZO_ENABLE` is how, and it is also how the licence question below is answered.
+For agents, [`docs/llms.txt`](docs/llms.txt) lists every page with a one-line summary.
 
 ## What mozo does not do
 
@@ -518,25 +320,10 @@ things about it are yours to arrange:
 
 ## Extending
 
-1. Write an adapter in `mozo/adapters/your_model.py`
-2. Register it in `mozo/registry.py`
-3. It is available over HTTP, in Python, and on the test page
-4. Add a node in `mozo/workflow/nodes/model.py` — one function — and it joins the editor's palette
-
-Workflow nodes are the same idea one level up: a function with annotated arguments in
-`mozo/workflow/nodes/`, and the catalogue, the editor's form and the type checking all follow from
-it.
-
-```
-HTTP request → FastAPI server → ModelManager → Adapter → Vendor
-                                     ↓
-                               thread-safe cache
-```
-
-The rule that keeps this honest: **a vendor imports no other vendor and never imports mozo.**
-Duplication between vendors is deliberate, so a family can be re-extracted from a newer upstream
-release without touching anything else. `tests/test_vendor_agreement.py` enforces it, and each
-vendor's `PROVENANCE.md` records the exact upstream commit it came from and what was changed.
+A workflow node is one Python function: [Write a node](docs/workflows/writing-nodes.md). A new model
+family is vendored, verified and published by the process in [VENDORING.md](VENDORING.md); the rule
+that keeps it honest is that **a vendor imports no other vendor and never imports mozo**, which
+`tests/test_vendor_agreement.py` enforces.
 
 ## Development
 
@@ -555,6 +342,7 @@ cd ui && npm install && npm run build   # writes mozo/workflow/static/assets/
 
 ## Links
 
+- [Documentation](https://emrah.fr/mozo/)
 - [Repository](https://github.com/emrahnazif/mozo)
 - [Issues](https://github.com/emrahnazif/mozo/issues)
 - [PixelFlow](https://github.com/emrahnazif/pixelflow) — the result format

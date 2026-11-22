@@ -1,4 +1,36 @@
-## Unreleased
+# Mozo v1.13.0: Short workflow files and an editor that lays itself out
+
+- **A shorter workflow file.** A workflow can be written as its nodes alone, one per line with its
+  parameters beside its id and type, and no edges: an input that is not written takes the latest
+  earlier node with an output of its type, and a node writes `"inputs": {"image": "read"}` only
+  where it wants something else. The video example in the docs goes from seven edges to one
+  written input. Unknown parameters and inputs are refused, naming the node, where they used to be
+  ignored. `Workflow.save`, `to_dict` and the editor now write this form, one node per line;
+  files with `edges` are read as before. Files saved by this version need this version to read.
+- **The editor's panel sits beside the canvas.** One panel on the right lists the nodes, and shows
+  the selected node's settings instead when one is selected, so the canvas is never covered. A
+  host can draw it into an element of its own with `mount(element, {panel})`.
+- **The editor connects and lays out nodes for you.** A node dropped onto the canvas is connected
+  by the same rule as the short file. A workflow with no positions is laid out with dagre, Svelte
+  Flow's own layout recipe, and **Tidy up** lays out the whole canvas again. The view fits the
+  workflow each time one is opened, not only the first.
+- **A workflow document with a key mozo does not read is refused,** naming the keys it takes:
+  `{"workflow": {...}}` loaded as a workflow of no nodes, and `parameters` put on a node instead
+  of under `data` was dropped. Either form, every level: the document, a node, an edge.
+- **Opening a workflow in the editor is no longer reported as a change.** While a document waited
+  for the node list to load, the editor could fire `"change"`, so a host showed "unsaved" on a
+  workflow just opened. The canvas is now empty until the document is drawn. Every node is now one
+  width, with its description cut to two lines (the whole of it is in the panel), so laid-out
+  nodes no longer overlap.
+- **A parameter may not be called `id`, `type`, `inputs`, `xy` or `data`,** since the short file
+  writes parameters beside those. No built-in node has one.
+- The editor's bundle ships the licences of everything compiled into it: Svelte, Svelte Flow and
+  dagre beside Heroicons.
+
+- **A node's description is its docstring's whole first paragraph, as plain text.** The catalogue
+  took the first line only, so a sentence wrapped across two lines was cut in half (`track`'s was),
+  and docstring markup such as ``` ``tracker_id`` ``` and `:func:` showed as written. Your own
+  nodes get the same: write the description as the first paragraph.
 
 # Mozo v1.12.0: Workflows Say What They Give
 

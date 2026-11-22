@@ -226,20 +226,7 @@
   font-weight: var(--mz-weight-semibold);
 }
 
-/* A floating card over the canvas: the palette, the properties drawer. */
-.mz-card {
-  position: absolute;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--mz-color-border);
-  border-radius: var(--mz-radius-lg);
-  background: var(--mz-color-surface);
-  box-shadow: var(--mz-shadow-overlay);
-}
-
-/* Rows divided by a line, the last without one: the palette's nodes, the drawer's fields. */
+/* Rows divided by a line, the last without one: the palette's nodes, a node's fields. */
 .mz-rows > * + * {
   border-top: 1px solid var(--mz-color-border);
 }
@@ -294,11 +281,20 @@
   background: var(--mz-color-canvas);
 }
 
+/* One width for every node, and a description of at most two lines, so a node's size is known
+   before it is drawn: the layout (`arrange` in api.js) places nodes at that size, and a node as
+   wide as its description overlapped its neighbour. The whole description is in the panel. */
 .mz-editor .svelte-flow__node-default {
-  width: auto;
-  max-width: 22rem;
+  width: 15rem;
   padding: 0;
   text-align: left;
+}
+
+.mz-editor .svelte-flow__node-default .mz-entry-about {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 /* A node's state during a Test, on the node's own wrapper. */

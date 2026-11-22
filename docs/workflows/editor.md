@@ -19,11 +19,16 @@ models and nothing extra to install.
 mozo start
 ```
 
-Then open `http://localhost:8000/workflow`. The palette on the left lists every node by category.
-Drag nodes onto the canvas, connect an output to an input, and set each node's parameters in the
-panel. **Test** runs the graph on one image and shows every node's output; **Run** runs it over
-everything its source produces, such as every frame of a video. **Export** saves the workflow as a
-JSON file, and **Import** opens one.
+Then open `http://localhost:8000/workflow`. The panel on the right lists every node; drag one
+onto the canvas and its inputs are connected to the latest node that gives what they take, the
+same rule a workflow file follows (below). Drag a wire to connect something else. Click a node and
+the panel shows its parameters instead; **← All nodes** goes back. The panel never covers the
+canvas.
+
+**Test** runs the graph on one image and shows every node's output; **Run** runs it over everything
+its source produces, such as every frame of a video. **Tidy up** lays out every node again, top to
+bottom along the connections. **Export** saves the workflow as a JSON file, and **Import** opens
+one.
 
 [Nodes](/docs/workflows/nodes.md) lists all 50 nodes with their inputs, outputs and parameters.
 
@@ -36,17 +41,10 @@ This workflow finds faces with Grounding DINO, blurs them, and saves the result:
   "name": "Blur faces",
   "description": "Find every face and blur it.",
   "nodes": [
-    {"id": "read", "type": "read_media", "data": {"parameters": {"source": "example.jpg"}}},
-    {"id": "find", "type": "grounding_dino",
-     "data": {"parameters": {"text": ["face"], "variant": "tiny", "threshold": 0.3}}},
-    {"id": "blur", "type": "blur_regions", "data": {"parameters": {}}},
-    {"id": "save", "type": "save_image", "data": {"parameters": {"path": "blurred"}}}
-  ],
-  "edges": [
-    {"source": "read", "sourceHandle": "image", "target": "find", "targetHandle": "image"},
-    {"source": "read", "sourceHandle": "image", "target": "blur", "targetHandle": "image"},
-    {"source": "find", "sourceHandle": "detections", "target": "blur", "targetHandle": "detections"},
-    {"source": "blur", "sourceHandle": "image", "target": "save", "targetHandle": "image"}
+    {"id": "read", "type": "read_media", "source": "example.jpg"},
+    {"id": "find", "type": "grounding_dino", "text": ["face"], "variant": "tiny", "threshold": 0.3},
+    {"id": "blur", "type": "blur_regions"},
+    {"id": "save", "type": "save_image", "path": "blurred"}
   ]
 }
 ```
@@ -57,11 +55,33 @@ mozo run blur_faces.json
 
 ![The example photograph with four faces blurred; the fifth person, mostly hidden behind a cup, is not](/docs/assets/blur-faces.jpg)
 
-A node has an `id`, a `type` (the node's name) and its `parameters`. An edge connects one node's
-output port to another's input port. The editor also writes each node's `position` on the canvas.
-It is optional: the editor lays out nodes that have none, top to bottom by the edges, so a
-workflow written in code or by hand opens ready to edit.
-`name` and `description` are optional, and are what someone choosing between workflows reads.
+One node per line: its `id`, its `type` (the node's name) and its parameters. There are no
+connections in it, because **an input that is not written takes the latest earlier node in the list
+with an output of its type.** `find` takes `read`'s image, and `blur` takes `find`'s detections and
+`read`'s image, since `find` gives detections and no image. One output can feed any number of
+nodes.
+
+A node writes an input only when it wants something other than the latest, under `inputs`:
+
+```json
+{"id": "draw", "type": "draw_boxes", "inputs": {"image": "read"}}
+```
+
+The value is a node's id, or `node.port` when that node has two outputs of the type, such as
+`flip.detections`. `null` means nothing is connected yet, which the editor writes for a half-built
+graph and which does not run.
+
+- **What is refused:** a parameter the node does not have, an input it does not take, and an input
+  the rule cannot settle (nothing earlier gives the type, or the latest such node gives two). Each
+  says which node and what to write.
+- **`xy`** is where the editor draws the node, `[x, y]`. It is optional: the editor lays out nodes
+  that have none, so a workflow written in code or by hand opens ready to edit.
+- **`name` and `description`** are optional, and are what someone choosing between workflows reads.
+
+Saving, from the editor or with `Workflow.save`, writes this form: each node after the nodes it
+takes from, keeping the order otherwise, and only the inputs the rule would get wrong. Opening what
+was saved gives the same graph. A file with `edges` is read the way mozo 1.12 and earlier wrote it,
+each edge naming both ports, so older files keep working.
 
 ## Connections are typed
 
@@ -136,13 +156,22 @@ To put the editor inside a page of your own, mount it into an element:
 
 | Call | What it does |
 |---|---|
-| `mount(element, {document, toolbar, base})` | Draws an editor filling `element`. `document` opens a workflow, `toolbar: false` leaves the buttons to you, `base` points at a router mounted elsewhere. |
-| `getDocument()` / `setDocument(document)` | Reads or replaces the workflow on the canvas. Setting one is not a change. A connection to a missing node or port is left out, and the editor says which. |
+| `mount(element, {document, toolbar, base, panel})` | Draws an editor filling `element`. `document` opens a workflow, `toolbar: false` leaves the buttons to you, `base` points at a router mounted elsewhere, `panel` draws the panel into an element of yours (below). |
+| `getDocument()` / `setDocument(document)` | Reads the workflow on the canvas, in the short form, or replaces it with one in either form, fitting the view to it. Setting one is not a change. A connection to a missing node or port is left out, and the editor says which. |
 | `on("change", listener)` | Calls `listener` with the document whenever the person changes it, once a drag ends rather than during it. Returns a function that stops listening. |
 | `test(file)` | Tests on a file, or on the one chosen on the input node. Resolves to every node's output. |
 | `destroy()` | Removes the editor from the page. |
 
+To put the panel in a column of your own, beside a chat say, give `mount` the element:
+
+```js
+mount(document.querySelector("#canvas"), { toolbar: false, panel: document.querySelector("#side") });
+```
+
+The panel fills that element and the canvas fills the first, so neither covers the other.
+
 The editor mounts in a shadow root, so its styles cannot reach your page and yours cannot reach it.
+The panel gets a shadow root of its own, restyled by the same variables set on its element.
 Restyle it through its CSS variables, set on the element you mounted it into: `--mz-color-bg`,
 `--mz-color-text`, `--mz-font-sans`, `--mz-radius-md` and the rest in mozo's
 `ui/src/styles/editor.css`. `color-scheme: dark` on that element turns it dark. Nodes your

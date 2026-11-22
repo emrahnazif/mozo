@@ -1,6 +1,7 @@
 <script>
   /**
-   * Every node the server offers, to drag onto the canvas, with a search box over them.
+   * Every node the server offers, to drag onto the canvas, with a search box over them. Shown
+   * in the editor's panel while no node is selected (see Panel.svelte).
    *
    * The list is the catalogue as the server sends it, which is the registry: a node a host
    * registers with `@node` appears here with nothing else to do.
@@ -22,7 +23,7 @@
   }
 </script>
 
-<aside class="mz-card mz-palette" aria-label="Nodes">
+<section class="mz-palette">
   <div class="mz-search">
     <Icon name="magnifying-glass" />
     <input class="mz-input" type="search" placeholder="Search nodes" aria-label="Search nodes"
@@ -41,14 +42,14 @@
       <li class="mz-empty mz-muted">{needle ? 'No node matches.' : 'Loading nodes…'}</li>
     {/each}
   </ul>
-</aside>
+</section>
 
 <style>
   .mz-palette {
-    top: var(--mz-space-4);
-    left: var(--mz-space-4);
-    width: 18rem;
-    max-height: calc(100% - 2 * var(--mz-space-4));
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
   }
 
   .mz-search {

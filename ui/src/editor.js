@@ -25,35 +25,30 @@ const STYLESHEET = new URL(/* @vite-ignore */ 'editor.css', import.meta.url).hre
  * @param {string} [options.base] Where the workflow router is mounted, ending in `/`. Derived
  *     from this script's own address -- it is served at `<router>/assets/editor.js` -- so it is
  *     given only to reach a router somewhere else.
+ * @param {HTMLElement} [options.panel] Where to draw the panel -- the node list, or the selected
+ *     node's settings -- for a host that wants it in a column of its own. It fills the element,
+ *     in a shadow root of its own, restyled by the same `--mz-*` tokens set on that element.
+ *     Without it, the panel sits at the right of the editor's box.
  * @returns {{getDocument: function(): object, setDocument: function(object): void,
  *            test: function(File=): Promise<object>, on: function(string, function): function,
  *            destroy: function(): void}}
  */
-export function mount(element, { document = null, toolbar = true, base } = {}) {
+export function mount(element, { document = null, toolbar = true, base, panel } = {}) {
     const target = window.document.createElement('div');
     target.style.height = '100%';
-    let root;
-
-    if (import.meta.env.DEV) {
-        // The dev server puts the styles in the page's head, where a shadow root would not see
-        // them -- so in development only, the editor mounts straight into the element.
-        root = element;
-        element.classList.add('mz-host');
-        root.replaceChildren(target);
-    } else {
-        root = element.shadowRoot || element.attachShadow({ mode: 'open' });
-        // Held back until the stylesheet has arrived, so the editor is not seen unstyled for a
-        // moment. Hidden rather than not drawn: the canvas measures itself as it mounts.
-        const link = Object.assign(window.document.createElement('link'),
-                                   { rel: 'stylesheet', href: STYLESHEET });
-        target.style.visibility = 'hidden';
-        link.onload = link.onerror = () => { target.style.visibility = ''; };
-        root.replaceChildren(link, target);
-    }
+    const root = into(element, target);
+    // The editor's styles are all scoped under `.mz-editor`, so the panel is drawn inside one;
+    // and into a shadow root with the stylesheet, like the editor itself, so the page's styles
+    // and the panel's cannot reach each other.
+    const panelTarget = panel ? Object.assign(window.document.createElement('div'), { className: 'mz-editor' }) : null;
+    const panelRoot = panel ? into(panel, panelTarget) : null;
 
     const app = new App({
         target,
-        props: { base: base || new URL(/* @vite-ignore */ '..', import.meta.url).href, toolbar, document },
+        props: {
+            base: base || new URL(/* @vite-ignore */ '..', import.meta.url).href,
+            toolbar, document, panel: panelTarget,
+        },
     });
 
     return {
@@ -72,6 +67,28 @@ export function mount(element, { document = null, toolbar = true, base } = {}) {
         destroy: () => {
             app.$destroy();
             root.replaceChildren();
+            panelRoot?.replaceChildren();
         },
     };
+}
+
+/**
+ * Draw *target* into *host*, in a shadow root holding the stylesheet; returns what holds it.
+ * Held back until the stylesheet has arrived, so it is not seen unstyled for a moment. Hidden
+ * rather than not drawn: the canvas measures itself as it mounts.
+ */
+function into(host, target) {
+    if (import.meta.env.DEV) {
+        // The dev server puts the styles in the page's head, where a shadow root would not see
+        // them -- so in development only, it mounts straight into the element.
+        host.classList.add('mz-host');
+        host.replaceChildren(target);
+        return host;
+    }
+    const root = host.shadowRoot || host.attachShadow({ mode: 'open' });
+    const link = Object.assign(window.document.createElement('link'), { rel: 'stylesheet', href: STYLESHEET });
+    target.style.visibility = 'hidden';
+    link.onload = link.onerror = () => { target.style.visibility = ''; };
+    root.replaceChildren(link, target);
+    return root;
 }

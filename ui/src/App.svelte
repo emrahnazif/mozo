@@ -1,7 +1,7 @@
 <script>
     /**
-     * One editor: the canvas, the palette, the properties drawer and -- unless the host drives it
-     * -- the toolbar.
+     * One editor: the canvas, the panel beside it -- the node list, or the selected node's
+     * settings -- and, unless the host drives it, the toolbar.
      *
      * Everything it draws stays inside its own box: nothing is fixed to the window, so a host can
      * put it in any element of any size. What a host can ask of it is exported below and wrapped
@@ -14,10 +14,12 @@
     import Toolbar from './lib/Toolbar.svelte';
     import CustomNode from './lib/CustomNode.svelte';
     import FlowDropZone from './lib/FlowDropZone.svelte';
-    import Palette from './lib/Palette.svelte';
-    import PropertiesPanel from './lib/PropertiesPanel.svelte';
+    import Panel from './lib/Panel.svelte';
     import RunProgress from './lib/RunProgress.svelte';
-    import { client, drawable, fileNameFor, fromDocument, toDocument } from './lib/api.js';
+    import Fit from './lib/Fit.svelte';
+    import {
+        arrange, client, connectDropped, drawable, fileNameFor, fromDocument, serialise, toDocument,
+    } from './lib/api.js';
     import { createState, noAbout, provideState } from './lib/state.js';
 
     /** Where the workflow router is mounted, ending in `/`. */
@@ -26,6 +28,9 @@
     export let toolbar = true;
     /** The workflow to open, as mozo's document format; none is a fresh canvas. */
     export let document = null;
+    /** Where to draw the panel -- the node list and the selected node's settings -- or null for
+     *  at the right of the editor's own box. See `mount`'s `panel` in editor.js. */
+    export let panel = null;
 
     const api = client(base);
     const dispatch = createEventDispatcher();
@@ -40,7 +45,10 @@
         data: { nodeType: 'read_media', parameters: {} },
     });
 
-    const nodes = writable([startingNode()]);
+    // Empty while a given document waits for the catalogue, rather than the starting node: that
+    // would be drawn for a moment, and could be clicked, in place of the workflow being opened.
+    const initial = document ? [] : [startingNode()];
+    const nodes = writable(initial);
     const edges = writable([]);
     const selectedNode = writable(null);
     const executionResults = writable(null);
@@ -61,7 +69,7 @@
 
     //: The document as last reported, so "change" fires for a change to the workflow and not for a
     //: node being selected or measured, which the canvas also writes into its nodes.
-    let reported = JSON.stringify(toDocument([startingNode()], [], noAbout()));
+    let reported = JSON.stringify(toDocument(initial, [], noAbout()));
 
     onMount(async () => {
         try {
@@ -93,13 +101,16 @@
     let ready = false;
     let waiting = document;
 
-    /** The workflow on the canvas, as mozo's document format -- or the one waiting to be drawn. */
+    //: Bumped to fit the canvas to the graph: after a document is opened, and after Tidy up.
+    let fitRequest = 0;
+
+    /**
+     * The workflow on the canvas, as a short document -- or the one waiting to be drawn, as given:
+     * until the catalogue arrives there are no port types to apply the rule with.
+     */
     export function getDocument() {
-        if (waiting) {
-            const held = fromDocument(waiting);
-            return toDocument(held.nodes, held.edges, held.about);
-        }
-        return toDocument(get(nodes), get(edges), get(about));
+        if (waiting) return waiting;
+        return toDocument(get(nodes), get(edges), get(about), get(catalogue));
     }
 
     /** Open *opened* -- a document in mozo's format -- in place of whatever is on the canvas. */
@@ -110,7 +121,7 @@
 
     /** Draw *opened*, leaving out every edge whose node or port is not here -- see `drawable`. */
     function open(opened) {
-        const canvas = fromDocument(opened);
+        const canvas = fromDocument(opened, $catalogue);
         const { drawn, left } = drawable(canvas.edges, canvas.nodes, $catalogue);
         if (left.length) {
             say(`Left out ${left.length === 1 ? 'a connection' : `${left.length} connections`} to a `
@@ -125,11 +136,24 @@
         executionResults.set(null);
         drawerOpen.set(false);
         reported = JSON.stringify(getDocument());
+        fitRequest += 1;
+    }
+
+    /** Lay out every node again with dagre, top to bottom along the connections. */
+    function tidy() {
+        const arranged = arrange($nodes, $edges);
+        nodes.update(n => n.map(node => ({ ...node, position: arranged.get(node.id) })));
+        fitRequest += 1;
     }
 
     $: announce($nodes, $edges, $about);
 
     function announce() {
+        // Nothing to announce while a document waits for the catalogue: the canvas does not hold
+        // it yet, and `getDocument` hands back the document as given, which would be compared with
+        // the empty canvas and reported as a change the person never made. `open` takes the
+        // baseline once it is drawn.
+        if (waiting) return;
         // Once a drag ends rather than on every frame of it: a host saving on "change" would
         // otherwise save sixty times a second.
         if ($nodes.some(node => node.dragging)) return;
@@ -144,14 +168,19 @@
 
     function handleNodeDrop(event) {
         const { nodeType, position } = event.detail;
-        nodes.update(n => [...n, {
+        const dropped = {
             id: `${nodeType}-${Date.now()}`,
             type: 'default',
             position,
             // A new node sets nothing. Unset means the node's own default, on both sides of the wire.
             data: { nodeType, parameters: {} },
             origin: [0.5, 0.0],
-        }]);
+        };
+        // Connected the way the next line of a short document would be: each input to the latest
+        // node with an output of its type. The person rewires only what they want otherwise.
+        const added = connectDropped(dropped, $nodes, $edges, $catalogue);
+        nodes.update(n => [...n, dropped]);
+        if (added.length) edges.update(e => [...e, ...added]);
     }
 
     function onNodeClick(event) {
@@ -307,7 +336,7 @@
     }
 
     function exportWorkflow() {
-        const blob = new Blob([JSON.stringify(getDocument(), null, 2)], { type: 'application/json' });
+        const blob = new Blob([serialise(getDocument())], { type: 'application/json' });
         const link = Object.assign(window.document.createElement('a'), {
             href: URL.createObjectURL(blob), download: fileNameFor($about),
         });
@@ -340,45 +369,49 @@
                 onCancel={cancelRun}
                 onExport={exportWorkflow}
                 onImport={importWorkflow}
+                onTidy={tidy}
                 testing={$isExecuting}
                 runningNow={!!$running && !$running.done}
             />
         {/if}
 
-        <div class="mz-canvas">
-            <FlowDropZone on:nodedrop={handleNodeDrop}>
-                <SvelteFlow
-                    {nodes}
-                    {edges}
-                    {nodeTypes}
-                    proOptions={{ hideAttribution: true }}
-                    on:nodeclick={onNodeClick}
-                    on:paneclick={onPaneClick}
-                    {isValidConnection}
-                    maxZoom={1}
-                    fitView
-                    fitViewOptions={{ maxZoom: 1, padding: 0.2 }}
-                >
-                    <Background variant="dots" />
-                </SvelteFlow>
-            </FlowDropZone>
+        <Fit request={fitRequest} />
 
-            <Palette />
+        <div class="mz-body">
+            <div class="mz-canvas">
+                <FlowDropZone on:nodedrop={handleNodeDrop}>
+                    <SvelteFlow
+                        {nodes}
+                        {edges}
+                        {nodeTypes}
+                        proOptions={{ hideAttribution: true }}
+                        on:nodeclick={onNodeClick}
+                        on:paneclick={onPaneClick}
+                        {isValidConnection}
+                        maxZoom={1}
+                        fitView
+                        fitViewOptions={{ maxZoom: 1, padding: 0.2 }}
+                    >
+                        <Background variant="dots" />
+                    </SvelteFlow>
+                </FlowDropZone>
 
-            <PropertiesPanel
+                <RunProgress />
+
+                {#if refusal}
+                    <div class="mz-overlay mz-toast" role="status">
+                        <span>{refusal}</span>
+                        <button class="mz-toast-close" aria-label="Dismiss" on:click={() => (refusal = null)}>×</button>
+                    </div>
+                {/if}
+            </div>
+
+            <Panel
+                target={panel}
                 selectedNode={$selectedNode}
                 {updateNodeParameters}
                 executionResults={$executionResults}
             />
-
-            <RunProgress />
-
-            {#if refusal}
-                <div class="mz-overlay mz-toast" role="status">
-                    <span>{refusal}</span>
-                    <button class="mz-toast-close" aria-label="Dismiss" on:click={() => (refusal = null)}>×</button>
-                </div>
-            {/if}
         </div>
     </SvelteFlowProvider>
 </div>
@@ -388,10 +421,17 @@
         outline: none;
     }
 
+    /* The canvas and the panel side by side, so the panel never covers the canvas. */
+    .mz-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+    }
+
     .mz-canvas {
         position: relative;
         flex: 1;
-        min-height: 0;
+        min-width: 0;
     }
 
     /* Said at the bottom of the canvas, where a rejected drag ended, and dismissable. */

@@ -11,10 +11,11 @@
     import arrowUpTray from 'heroicons/24/outline/arrow-up-tray.svg?raw';
     import magnifyingGlass from 'heroicons/24/outline/magnifying-glass.svg?raw';
     import xMark from 'heroicons/24/outline/x-mark.svg?raw';
+    import squares from 'heroicons/24/outline/squares-2x2.svg?raw';
 
     const ICONS = {
         play, forward, stop, 'arrow-down-tray': arrowDownTray, 'arrow-up-tray': arrowUpTray,
-        'magnifying-glass': magnifyingGlass, 'x-mark': xMark,
+        'magnifying-glass': magnifyingGlass, 'x-mark': xMark, 'squares-2x2': squares,
     };
 
     export let name;

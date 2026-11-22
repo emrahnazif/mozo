@@ -26,7 +26,7 @@
     export let updateNodeParameters;
     export let executionResults;
 
-    const { catalogue, chosenFile, drawerOpen } = useState();
+    const { catalogue, chosenFile } = useState();
 
     $: nodeInfo = $catalogue[selectedNode?.data?.nodeType] || {};
     $: fields = nodeInfo.parameters || [];
@@ -84,132 +84,120 @@
     let dragging = false;
 </script>
 
-<aside class="mz-card mz-drawer mz-rows" class:mz-open={$drawerOpen} aria-label="Node properties">
-    {#if selectedNode}
+<section class="mz-properties mz-rows">
+    <div class="mz-section">
+        <p class="mz-title">{selectedNode.data.nodeType}</p>
+        <p class="mz-hint">{nodeInfo.description || ''}</p>
+    </div>
+
+    {#each fields as field (field.name)}
+        {@const value = valueOf(field)}
         <div class="mz-section">
-            <p class="mz-title">{selectedNode.data.nodeType}</p>
-            <p class="mz-hint">{nodeInfo.description || ''}</p>
-        </div>
-
-        {#each fields as field (field.name)}
-            {@const value = valueOf(field)}
-            <div class="mz-section">
-                {#if field.kind === 'bool'}
-                    <label class="mz-check">
-                        <input id={field.name} type="checkbox" checked={!!value}
-                               on:change={(e) => change(field, e.target.checked)} />
-                        {label(field.name)}
-                    </label>
-                {:else}
-                    <label class="mz-label" for={field.name}>
-                        {label(field.name)}
-                        {#if field.optional}<span class="mz-muted"> — optional</span>{/if}
-                    </label>
-                    {#if field.kind === 'select'}
-                        <select id={field.name} class="mz-select" value={value}
-                                on:change={(e) => change(field, e.target.value)}>
-                            {#each field.options as option}
-                                <option value={option}>{option}</option>
-                            {/each}
-                        </select>
-                    {:else if field.kind === 'color'}
-                        <div class="mz-row">
-                            <input id={field.name} class="mz-color" type="color" value={value || '#00ff00'}
-                                   on:input={(e) => change(field, e.target.value)} />
-                            {#if field.optional}
-                                <button class="mz-link" on:click={() => change(field, null)}>by class</button>
-                            {/if}
-                        </div>
-                    {:else if field.kind === 'list'}
-                        <textarea id={field.name} class="mz-textarea" rows="3"
-                                  value={lines(value)} placeholder="one per line"
-                                  on:input={(e) => changeLines(field, e.target.value)}></textarea>
-                        <p class="mz-hint">One per line.</p>
-                    {:else if field.kind === 'path'}
-                        <input id={field.name} class="mz-input" type="text" value={shown(value)}
-                               placeholder="a path on the server"
-                               on:input={(e) => changeText(field, e.target.value)} />
-                    {:else if field.kind === 'source'}
-                        <div class="mz-drop" class:mz-dragging={dragging} role="button" tabindex="-1"
-                             on:dragover|preventDefault={() => (dragging = true)}
-                             on:dragleave={() => (dragging = false)}
-                             on:drop|preventDefault={(e) => {
-                                 dragging = false;
-                                 chooseFile(e.dataTransfer.files);
-                             }}>
-                            <label class="mz-button mz-full">
-                                {$chosenFile ? $chosenFile.name : 'Drop or choose a file'}
-                                <input type="file" hidden on:change={(e) => chooseFile(e.target.files)} />
-                            </label>
-                        </div>
-                        {#if $chosenFile}
-                            <p class="mz-hint">
-                                The next run reads this file.
-                                <button class="mz-link" on:click={() => chosenFile.set(null)}>
-                                    Use the path instead
-                                </button>
-                            </p>
+            {#if field.kind === 'bool'}
+                <label class="mz-check">
+                    <input id={field.name} type="checkbox" checked={!!value}
+                           on:change={(e) => change(field, e.target.checked)} />
+                    {label(field.name)}
+                </label>
+            {:else}
+                <label class="mz-label" for={field.name}>
+                    {label(field.name)}
+                    {#if field.optional}<span class="mz-muted"> — optional</span>{/if}
+                </label>
+                {#if field.kind === 'select'}
+                    <select id={field.name} class="mz-select" value={value}
+                            on:change={(e) => change(field, e.target.value)}>
+                        {#each field.options as option}
+                            <option value={option}>{option}</option>
+                        {/each}
+                    </select>
+                {:else if field.kind === 'color'}
+                    <div class="mz-row">
+                        <input id={field.name} class="mz-color" type="color" value={value || '#00ff00'}
+                               on:input={(e) => change(field, e.target.value)} />
+                        {#if field.optional}
+                            <button class="mz-link" on:click={() => change(field, null)}>by class</button>
                         {/if}
-                        <input id={field.name} class="mz-input mz-gap" type="text" value={shown(value)}
-                               placeholder="or a path on the server -- a file or a folder"
-                               disabled={!!$chosenFile}
-                               on:input={(e) => changeText(field, e.target.value)} />
-                        {#if !$chosenFile}
-                            <p class="mz-hint">
-                                A folder runs every image in it. Folders are server paths --
-                                only single files can be uploaded.
-                            </p>
-                        {/if}
-                    {:else if field.kind === 'int' || field.kind === 'float'}
-                        <input id={field.name} class="mz-input" type="number"
-                               step={field.kind === 'int' ? '1' : '0.05'}
-                               value={shown(value)}
-                               placeholder={field.optional ? 'automatic' : ''}
-                               on:input={(e) => changeNumber(field, e.target.value, field.kind === 'int')} />
-                    {:else}
-                        <input id={field.name} class="mz-input" type="text" value={shown(value)}
-                               placeholder={field.optional ? 'unset' : ''}
-                               on:input={(e) => changeText(field, e.target.value)} />
+                    </div>
+                {:else if field.kind === 'list'}
+                    <textarea id={field.name} class="mz-textarea" rows="3"
+                              value={lines(value)} placeholder="one per line"
+                              on:input={(e) => changeLines(field, e.target.value)}></textarea>
+                    <p class="mz-hint">One per line.</p>
+                {:else if field.kind === 'path'}
+                    <input id={field.name} class="mz-input" type="text" value={shown(value)}
+                           placeholder="a path on the server"
+                           on:input={(e) => changeText(field, e.target.value)} />
+                {:else if field.kind === 'source'}
+                    <div class="mz-drop" class:mz-dragging={dragging} role="button" tabindex="-1"
+                         on:dragover|preventDefault={() => (dragging = true)}
+                         on:dragleave={() => (dragging = false)}
+                         on:drop|preventDefault={(e) => {
+                             dragging = false;
+                             chooseFile(e.dataTransfer.files);
+                         }}>
+                        <label class="mz-button mz-full">
+                            {$chosenFile ? $chosenFile.name : 'Drop or choose a file'}
+                            <input type="file" hidden on:change={(e) => chooseFile(e.target.files)} />
+                        </label>
+                    </div>
+                    {#if $chosenFile}
+                        <p class="mz-hint">
+                            The next run reads this file.
+                            <button class="mz-link" on:click={() => chosenFile.set(null)}>
+                                Use the path instead
+                            </button>
+                        </p>
                     {/if}
-                {/if}
-            </div>
-        {/each}
-
-        {#if result}
-            <div class="mz-section">
-                <p class="mz-label">Result</p>
-                {#if typeof result === 'string' && result.startsWith('data:image')}
-                    <img src={result} alt="what this node produced" />
-                {:else if result && result.depth}
-                    <img src={result.depth} alt="depth map" />
-                    <p class="mz-hint">{result.min.toFixed(2)} to {result.max.toFixed(2)}</p>
-                {:else if Array.isArray(result)}
-                    <p class="mz-hint">{result.length} results</p>
-                    <pre>{JSON.stringify(result.slice(0, 10), null, 1)}</pre>
+                    <input id={field.name} class="mz-input mz-gap" type="text" value={shown(value)}
+                           placeholder="or a path on the server -- a file or a folder"
+                           disabled={!!$chosenFile}
+                           on:input={(e) => changeText(field, e.target.value)} />
+                    {#if !$chosenFile}
+                        <p class="mz-hint">
+                            A folder runs every image in it. Folders are server paths --
+                            only single files can be uploaded.
+                        </p>
+                    {/if}
+                {:else if field.kind === 'int' || field.kind === 'float'}
+                    <input id={field.name} class="mz-input" type="number"
+                           step={field.kind === 'int' ? '1' : '0.05'}
+                           value={shown(value)}
+                           placeholder={field.optional ? 'automatic' : ''}
+                           on:input={(e) => changeNumber(field, e.target.value, field.kind === 'int')} />
                 {:else}
-                    <pre>{JSON.stringify(result, null, 1)}</pre>
+                    <input id={field.name} class="mz-input" type="text" value={shown(value)}
+                           placeholder={field.optional ? 'unset' : ''}
+                           on:input={(e) => changeText(field, e.target.value)} />
                 {/if}
-            </div>
-        {/if}
-    {:else}
-        <p class="mz-section mz-muted">Select a node to edit it.</p>
+            {/if}
+        </div>
+    {/each}
+
+    {#if result}
+        <div class="mz-section">
+            <p class="mz-label">Result</p>
+            {#if typeof result === 'string' && result.startsWith('data:image')}
+                <img src={result} alt="what this node produced" />
+            {:else if result && result.depth}
+                <img src={result.depth} alt="depth map" />
+                <p class="mz-hint">{result.min.toFixed(2)} to {result.max.toFixed(2)}</p>
+            {:else if Array.isArray(result)}
+                <p class="mz-hint">{result.length} results</p>
+                <pre>{JSON.stringify(result.slice(0, 10), null, 1)}</pre>
+            {:else}
+                <pre>{JSON.stringify(result, null, 1)}</pre>
+            {/if}
+        </div>
     {/if}
-</aside>
+</section>
 
 <style>
-    /* Slides in from the right edge of the canvas when a node is selected. */
-    .mz-drawer {
-        top: var(--mz-space-4);
-        right: var(--mz-space-4);
-        width: 20rem;
-        max-height: calc(100% - 2 * var(--mz-space-4));
+    /* The selected node's settings, in the editor's panel (see Panel.svelte). */
+    .mz-properties {
+        flex: 1;
+        min-height: 0;
         overflow-y: auto;
-        transform: translateX(calc(100% + 2 * var(--mz-space-4)));
-        transition: transform var(--mz-duration-slow) var(--mz-ease-out);
-    }
-
-    .mz-drawer.mz-open {
-        transform: none;
     }
 
     .mz-section {

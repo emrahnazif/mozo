@@ -66,8 +66,10 @@ class TestItIsServed:
         a mozo upgrade unless the browser is told to check."""
         assert client.get("/workflow/assets/editor.js").headers["cache-control"] == "no-cache"
 
-    def test_the_icons_licence_ships_beside_them(self, client):
-        assert "MIT" in client.get("/workflow/assets/heroicons-LICENSE").text
+    @pytest.mark.parametrize("name", ["heroicons", "dagre", "graphlib", "xyflow-svelte",
+                                      "xyflow-system", "svelte"])
+    def test_every_bundled_package_s_licence_ships_beside_it(self, client, name):
+        assert "MIT" in client.get(f"/workflow/assets/{name}-LICENSE").text
 
     def test_a_name_that_climbs_out_of_the_directory_reaches_nothing(self, client):
         assert client.get("/workflow/assets/../../server.py").status_code == 404

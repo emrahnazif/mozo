@@ -24,6 +24,7 @@
   export let onCancel;
   export let onExport;
   export let onImport;
+  export let onTidy;
   export let testing;
   export let runningNow;
 
@@ -64,6 +65,9 @@
       {/if}
     {/if}
 
+    <button class="mz-button" on:click={onTidy} title="Lay out every node again, top to bottom along the connections">
+      <Icon name="squares-2x2" />Tidy up
+    </button>
     <button class="mz-button" on:click={onExport} title="Save the workflow as a file">
       <Icon name="arrow-down-tray" />Export
     </button>

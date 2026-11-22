@@ -455,10 +455,15 @@ class TestTheFileFormat:
         assert again.steps["a"].position == {"x": 10, "y": 20}
         assert again.steps["a"].parameters == {"width": 3}
 
-    def test_the_saved_file_is_json_with_nodes_and_edges(self, tmp_path):
+    def test_the_saved_file_is_the_short_form_one_node_per_line(self, tmp_path):
         path = tmp_path / "w.json"
-        Workflow.from_dict(document({"a": ("make", {})}, [])).save(path)
-        assert set(json.loads(path.read_text())) == {"nodes", "edges"}
+        Workflow.from_dict(document({"a": ("make", {"width": 3}), "b": ("brighten", {})},
+                                    [("a", "image", "b", "image")])).save(path)
+        assert path.read_text() == (
+            '{\n  "nodes": [\n'
+            '    {"id": "a", "type": "make", "width": 3},\n'
+            '    {"id": "b", "type": "brighten"}\n'
+            '  ]\n}\n')
 
     def test_a_node_with_no_position_is_saved_without_one(self):
         """Not as ``{}``: the editor lays out a node with none, and ``{}`` reads as a position."""
@@ -490,7 +495,8 @@ class TestTheFileFormat:
         again = Workflow.load(path)
 
         assert (again.name, again.description) == ("Blur faces", "Find faces and blur them.")
-        assert again.to_dict() == saved
+        assert again.to_dict() == {"name": "Blur faces", "description": "Find faces and blur them.",
+                                   "nodes": [{"id": "a", "type": "make", "xy": [0, 0]}]}
         assert list(json.loads(path.read_text()))[:2] == ["name", "description"]
 
     def test_a_file_without_them_loads_and_saves_as_it_was(self, tmp_path):

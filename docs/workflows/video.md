@@ -33,21 +33,12 @@ draws their boxes into a new video, and logs every frame's detections:
 {
   "name": "Track people",
   "nodes": [
-    {"id": "read", "type": "read_media", "data": {"parameters": {"source": "street.mp4", "rate": 6}}},
-    {"id": "find", "type": "rfdetr", "data": {"parameters": {"variant": "nano"}}},
-    {"id": "track", "type": "track", "data": {"parameters": {}}},
-    {"id": "boxes", "type": "draw_boxes", "data": {"parameters": {}}},
-    {"id": "save", "type": "save_video", "data": {"parameters": {"path": "tracked.mp4"}}},
-    {"id": "log", "type": "save_annotations", "data": {"parameters": {"path": "tracked.jsonl"}}}
-  ],
-  "edges": [
-    {"source": "read", "sourceHandle": "image", "target": "find", "targetHandle": "image"},
-    {"source": "find", "sourceHandle": "detections", "target": "track", "targetHandle": "detections"},
-    {"source": "read", "sourceHandle": "image", "target": "boxes", "targetHandle": "image"},
-    {"source": "track", "sourceHandle": "detections", "target": "boxes", "targetHandle": "detections"},
-    {"source": "boxes", "sourceHandle": "image", "target": "save", "targetHandle": "image"},
-    {"source": "read", "sourceHandle": "image", "target": "log", "targetHandle": "image"},
-    {"source": "track", "sourceHandle": "detections", "target": "log", "targetHandle": "detections"}
+    {"id": "read", "type": "read_media", "source": "street.mp4", "rate": 6},
+    {"id": "find", "type": "rfdetr", "variant": "nano"},
+    {"id": "track", "type": "track"},
+    {"id": "boxes", "type": "draw_boxes"},
+    {"id": "save", "type": "save_video", "path": "tracked.mp4"},
+    {"id": "log", "type": "save_annotations", "inputs": {"image": "read"}, "path": "tracked.jsonl"}
   ]
 }
 ```

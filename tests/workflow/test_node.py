@@ -46,7 +46,7 @@ class TestReadingTheSignature:
 
         assert described(sharpen).name == "sharpen"
 
-    def test_the_description_is_the_docstring_s_first_line(self):
+    def test_the_description_is_the_docstring_s_first_paragraph(self):
         def sharpen(image: Image) -> Image:
             """Sharpen an image.
 
@@ -54,6 +54,17 @@ class TestReadingTheSignature:
             """
 
         assert described(sharpen).description == "Sharpen an image."
+
+    def test_a_wrapped_sentence_is_kept_whole_and_its_markup_dropped(self):
+        def follow(detections: Detections) -> Detections:
+            """Give each object the same ``tracker_id``, read by :func:`count`, from
+            frame to frame.
+
+            Args: not part of it.
+            """
+
+        assert described(follow).description == (
+            "Give each object the same tracker_id, read by count, from frame to frame.")
 
     def test_a_node_without_a_docstring_describes_itself_as_nothing(self):
         def bare(image: Image) -> Image:

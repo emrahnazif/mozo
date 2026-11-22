@@ -30,7 +30,10 @@ Read and validate a workflow file. Raises `FileNotFoundError` for a missing file
 Workflow.from_dict(data)
 ```
 
-Validate a workflow document already parsed from JSON.
+Validate a workflow document already parsed from JSON, in either form: the short form (nodes only,
+inputs written where the latest earlier output of their type is not the one wanted) or the full
+form with `edges`. [What a workflow is](/docs/workflows/editor.md#what-a-workflow-is) describes
+both.
 
 ### Workflow.to_dict
 
@@ -38,7 +41,9 @@ Validate a workflow document already parsed from JSON.
 workflow.to_dict()
 ```
 
-The workflow as a JSON-ready document, the inverse of `from_dict`.
+The workflow as a short document, the inverse of `from_dict`: each node after the nodes it takes
+from, and only the inputs the rule would get wrong. `workflow.connections` has every edge, for code
+that wants them.
 
 ### Workflow.save
 
@@ -46,7 +51,8 @@ The workflow as a JSON-ready document, the inverse of `from_dict`.
 workflow.save(path)
 ```
 
-Write the workflow to a JSON file.
+Write the workflow to a JSON file in the short form, one node per line, so a text edit can
+replace one node.
 
 ### Workflow.run
 

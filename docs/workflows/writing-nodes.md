@@ -32,7 +32,8 @@ def keep_classes(detections: Detections, names: list[str] = ["person"]) -> Detec
 One rule splits the arguments: **an annotation that names a port type is an input; anything else is
 a parameter.** `detections: Detections` is an input port, wired from another node. `names` is a
 parameter, typed into the editor. The return annotation is the output port. The docstring's first
-line is the description the editor shows, and `category` is the palette group it appears in.
+paragraph is the description the editor and the catalogue show, joined into one line with markup
+such as ``` ``name`` ``` reduced to the name, and `category` is the palette group it appears in.
 
 Import the module before you load a workflow that uses the node, and it is registered: it appears in
 `mozo.workflow.catalogue()`, in the editor's palette when the server imported it, and
@@ -56,6 +57,9 @@ A node that turns one item into several, such as one crop per detection, returns
 so with `-> list[Image]`. Every node after it then runs once per value. The catalogue marks that
 output `"many": true`, so whoever builds a workflow can see that one item becomes many before
 running it.
+
+A parameter may not be called `id`, `type`, `inputs`, `xy` or `data`: a workflow file writes a
+node's parameters beside those on one line, so registering such a node raises `TypeError`.
 
 A parameter's annotation decides the editor's widget:
 

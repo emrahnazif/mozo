@@ -20,8 +20,8 @@ from itertools import chain
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Optional
 
-from . import registry
-from .node import Connection, Context, Models, NodeSpec, Parameter, State, WorkflowError
+from . import document, registry
+from .node import Connection, Context, Models, NodeSpec, Parameter, State, WorkflowError, _only
 
 __all__ = ["Event", "ModelUse", "Preflight", "Workflow", "WorkflowError"]
 
@@ -208,6 +208,9 @@ class Step:
             raise WorkflowError(f"a node is an object, not {data!r}")
         if "id" not in data or "type" not in data:
             raise WorkflowError(f"node needs an id and a type: {data}")
+        _only(data, f"node {data['id']}", ("id", "type", "position", "data"))
+        _only(data["data"] if isinstance(data.get("data"), dict) else {},
+              f"node {data['id']}'s data", ("parameters",))
         try:
             spec = registry.get(data["type"])
         except KeyError as error:
@@ -346,10 +349,12 @@ class Workflow:
 
     @classmethod
     def from_dict(cls, data: dict) -> Workflow:
-        """Read a workflow from the editor's ``{name, description, nodes, edges}`` format.
+        """Read a workflow document, in either form.
 
-        ``name`` and ``description`` are optional, so a file written before they existed loads as
-        it always did.
+        The short form is nodes alone, one per line, with an input written only where the latest
+        earlier output of its type is not the one wanted (see :mod:`mozo.workflow.document`). The
+        full form has ``edges``, each naming both ports, and is read exactly as before. ``name``
+        and ``description`` are optional in both.
 
         Raises:
             WorkflowError: If *data* is not a workflow. One error for every way it can fail to be,
@@ -357,33 +362,33 @@ class Workflow:
         """
         if not isinstance(data, dict):
             raise WorkflowError(f"a workflow is a JSON object, not {type(data).__name__}")
+        # A key mozo does not read is refused rather than ignored: a workflow sent as
+        # {"workflow": {...}} used to load as a workflow of no nodes, and the error came later
+        # and somewhere else.
+        _only(data, "a workflow", ("name", "description", "nodes", "edges"))
         nodes, edges = data.get("nodes", []), data.get("edges", [])
         for key, value in (("nodes", nodes), ("edges", edges)):
             if not isinstance(value, list):
                 raise WorkflowError(f"a workflow's {key} are a list, not {value!r}")
-        return cls(
-            [Step.from_dict(node) for node in nodes],
-            [Connection.from_dict(edge) for edge in edges],
-            name=data.get("name"),
-            description=data.get("description"),
-        )
+        if document.is_short(data):
+            steps, connections = document.read(nodes)
+        else:
+            steps = [Step.from_dict(node) for node in nodes]
+            connections = [Connection.from_dict(edge) for edge in edges]
+        return cls(steps, connections, name=data.get("name"), description=data.get("description"))
 
     def to_dict(self) -> dict:
-        """Write the workflow back out in the format it was read from.
+        """The workflow as a short document, whichever form it was read from.
 
-        ``name`` and ``description`` are written only when set, so a file without them comes back
-        exactly as it went in.
+        Each node comes after the nodes it takes from, and writes only the inputs the rule would
+        get wrong, so :meth:`from_dict` gives back the same graph. ``name`` and ``description``
+        are written only when set. :attr:`connections` has every edge, for code that wants them.
         """
-        described = {"name": self.name, "description": self.description}
-        return {
-            **{key: value for key, value in described.items() if value is not None},
-            "nodes": [step.to_dict() for step in self.steps.values()],
-            "edges": [connection.to_dict() for connection in self.connections],
-        }
+        return document.write(self)
 
     def save(self, path: str | Path) -> None:
-        """Write the workflow to a JSON file."""
-        Path(path).write_text(json.dumps(self.to_dict(), indent=2))
+        """Write the workflow to a JSON file, one node per line."""
+        Path(path).write_text(document.dumps(self.to_dict()), encoding="utf-8")
 
     # --- Shape ---
 

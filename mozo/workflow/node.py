@@ -30,6 +30,7 @@ Two inputs, one parameter, one output, a name and a description -- none of it wr
 from __future__ import annotations
 
 import inspect
+import re
 import types
 import typing
 from array import array
@@ -57,6 +58,14 @@ class WorkflowError(ValueError):
     a ``KeyError``, which would also catch the caller's own bugs. Not raised for a run's overrides,
     which are the caller's to get right rather than the file's: those stay ``KeyError``.
     """
+
+
+def _only(data: dict, what: str, fields: tuple) -> None:
+    """Refuse a key of *data* that is not one of *fields*, naming the ones that are."""
+    unknown = [key for key in data if key not in fields]
+    if unknown:
+        raise WorkflowError(
+            f"{what} has no field {', '.join(map(repr, unknown))}. It has: {', '.join(fields)}")
 
 
 class PortType(Enum):
@@ -532,7 +541,14 @@ class Connection:
         for key in ("source", "sourceHandle", "target", "targetHandle"):
             if not data.get(key):
                 raise WorkflowError(f"edge is missing {key!r}: {data}")
+        _only(data, "an edge", ("source", "sourceHandle", "target", "targetHandle"))
         return cls(data["source"], data["sourceHandle"], data["target"], data["targetHandle"])
+
+
+#: The keys of a node in a short workflow document that are not parameters (see
+#: :mod:`mozo.workflow.document`). A node may not have a parameter with one of these names, so its
+#: settings can sit beside them on one line. ``data`` marks a node written in the full form.
+RESERVED = ("id", "type", "inputs", "xy", "data")
 
 
 @dataclass(frozen=True)
@@ -678,6 +694,11 @@ class NodeSpec:
                         f"{function.__name__}: input {name!r} has a default. An input arrives over "
                         f"a connection, so a default would be a value nothing can produce.")
                 inputs.append(Port(name, _PORTS[annotation]))
+            elif name in RESERVED:
+                raise TypeError(
+                    f"{function.__name__}: a parameter may not be called {name!r}. A short "
+                    f"workflow document writes parameters beside {RESERVED}, so it would be read "
+                    f"as the node's own field.")
             else:
                 parameters.append(_parameter(function.__name__, name, annotation, argument.default))
 
@@ -715,7 +736,7 @@ class NodeSpec:
         return cls(
             name=function.__name__,
             category=category,
-            description=(inspect.getdoc(function) or "").partition("\n")[0],
+            description=_described(function),
             inputs=tuple(inputs),
             outputs=produced,
             parameters=tuple(parameters),
@@ -877,6 +898,22 @@ class NodeSpec:
             "outputs": [_port_dict(port) for port in self.outputs],
             "parameters": [_parameter_dict(parameter) for parameter in self.parameters],
         }
+
+
+#: A Sphinx role (``:func:`name```) or a literal (````name````): what a docstring is written in,
+#: and noise in a catalogue whose readers -- the editor, an app, an agent picking a node -- show
+#: plain text. Both become the name alone.
+_MARKUP = re.compile(r"(?::\w+:)?`{1,2}([^`]+)`{1,2}")
+
+
+def _described(function: Callable) -> str:
+    """A node's description: its docstring's first paragraph, in one line and without markup.
+
+    The first paragraph rather than the first line, because a sentence wrapped at the line length
+    is still one sentence: cut at the line, the catalogue showed half of it.
+    """
+    first = (inspect.getdoc(function) or "").partition("\n\n")[0]
+    return _MARKUP.sub(r"\1", " ".join(first.split()))
 
 
 def _produced(node: str, returns: Any, names: Sequence[str] | None) -> tuple:

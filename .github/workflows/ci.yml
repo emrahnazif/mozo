@@ -52,6 +52,11 @@ jobs:
           python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e ".[test,onnx,coreml]" pytest
 
+      # The editor's packages: tests/workflow/test_editor_conversion.py runs ui/src/lib/api.js
+      # in node, and that imports dagre.
+      - name: Install the editor's packages
+        run: npm ci --prefix ui
+
       # No weights, and no network to fetch them with: MOZO_OFFLINE turns a download into an
       # error rather than a ten-minute wait, and a cache directory that does not exist yet keeps
       # the run honest about what it is actually testing.

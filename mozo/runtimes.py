@@ -118,8 +118,9 @@ def get_default_device() -> str:
 #: measured worse on accuracy and no better on speed; and ``coreml-fp16``, which SAM 2's three
 #: smaller variants do publish, has never been measured against torch MPS for a promptable model.
 #: This table's whole claim is that its entries were measured, so an unmeasured one does not join
-#: it. ``tensorrt-fp16`` was measured and is deliberately absent: about 2.4% of OWLv2's confident
-#: detections change, so a user has to ask for it.
+#: it. ``tensorrt-fp16`` was measured and is deliberately absent: 2.3-4.8% of OWLv2's confident
+#: detections change (TensorRT's fp16 kernels are less exact than torch's on it), and Grounding
+#: DINO's runs every image at one square size, so a user has to ask for it.
 #:
 #: What that absence buys is narrower than it looks. Entries are matched by exact membership
 #: (``if key in usable``), so leaving a runtime out means ``auto`` will not *prefer* it -- but
@@ -181,7 +182,7 @@ def runnable(published: list[str], derives: dict[str, str] | None = None) -> lis
         ['onnx-fp16', 'torch-fp32']
         >>> runnable(["onnx-fp32-decoder", "onnx-fp32-encoder", "torch-fp32"])
         ['onnx-fp32', 'torch-fp32']
-        >>> runnable(["torch-fp32"], {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp32"})
+        >>> runnable(["torch-fp32"], {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp16"})
         ['torch-fp32', 'torch-fp16']
     """
     offered = list(dict.fromkeys(
@@ -517,6 +518,22 @@ def _tensorrt_install_hint() -> str:
     return f"pip install tensorrt-cu{major}"
 
 
+#: The oldest TensorRT mozo builds engines with. 10.13 miscompiles Grounding DINO's position
+#: encoding, and 11 is the first to build strongly typed engines only.
+_TENSORRT_MIN = 11
+
+
+def _tensorrt_unusable() -> str | None:
+    """Why TensorRT cannot run here, or None when it can: missing, or older than 11."""
+    try:
+        import tensorrt
+    except ImportError:
+        return "TensorRT is not installed"
+    if int(tensorrt.__version__.split(".")[0]) < _TENSORRT_MIN:
+        return f"mozo needs TensorRT {_TENSORRT_MIN} or later; {tensorrt.__version__} is installed"
+    return None
+
+
 class TensorRTRunner:
     """A TensorRT engine built from an ONNX graph, callable on CUDA tensors.
 
@@ -526,10 +543,16 @@ class TensorRTRunner:
     Kept under a model's cache directory, ``weights.remove`` deletes it with the model and
     ``weights.cached`` reports it as ``"built"``.
 
-    **Strongly typed: precision comes from the graph.** TensorRT 11 builds no other kind of
-    engine -- its fp16 switch is gone -- so an fp16 engine is built from a graph whose own types
-    are fp16, such as one exported under torch's fp16 autocast. That also makes the engine's
-    precision the graph author's decision rather than TensorRT's, op by op.
+    **TensorRT 11 or later, strongly typed: precision comes from the graph.** TensorRT 11 builds
+    no other kind of engine -- its fp16 switch is gone -- so an fp16 engine is built from a graph
+    whose own types are fp16, such as one exported under torch's fp16 autocast. That makes the
+    engine's precision the graph author's decision rather than TensorRT's, op by op. TensorRT 10
+    is refused: it miscompiles Grounding DINO's position encoding (measured with 10.13), and its
+    builder-chosen fp16 is the other kind of engine.
+
+    **fp32 is IEEE fp32.** TensorRT computes fp32 matrix products in TF32 unless told not to,
+    which torch does not do by default; that alone moved OWLv2's scores by up to 0.017 (p99) on
+    an fp32 graph, where with TF32 off the engine matched torch exactly.
 
     **It takes and returns torch tensors on the device**, unlike the other runners here, which
     speak numpy. Those runtimes copy to the host by nature; this one would pay a device round
@@ -551,9 +574,6 @@ class TensorRTRunner:
         probe: Inputs to run a freshly built engine on once, refusing it if any output comes back
             NaN. Zeros by default, which suits an image graph; a graph with masks needs real
             inputs, because all-zero masks hide everything and NaN is then what torch gives too.
-        fp16: TensorRT 10's weakly typed fp16 switch, kept only for a graph that does not carry
-            fp16 types yet (OWLv2's). TensorRT 11 has no such switch, and asking for it there
-            raises rather than quietly building in fp32.
 
     Attributes:
         inputs: Input tensor names, in the order the engine declares them.
@@ -568,22 +588,18 @@ class TensorRTRunner:
     """
 
     def __init__(self, path: str | Path, device: str = "cuda", *, engines: str | Path | None = None,
-                 export=None, shapes: dict[str, tuple] | None = None, probe: tuple | None = None,
-                 fp16: bool = False) -> None:
-        try:
-            import tensorrt as trt
-        except ImportError as error:  # pragma: no cover - depends on the install
+                 export=None, shapes: dict[str, tuple] | None = None,
+                 probe: tuple | None = None) -> None:
+        if (problem := _tensorrt_unusable()) is not None:
             raise RuntimeError_(
-                "TensorRT is not installed, so tensorrt runtimes cannot be run. Install the "
-                f"build that matches your torch's CUDA: {_tensorrt_install_hint()}"
-            ) from error
+                f"{problem}, so tensorrt runtimes cannot be run. TensorRT 10 miscompiles some "
+                "models (measured with 10.13: Grounding DINO's boxes off by up to the whole "
+                "image). Install the build that matches your torch's CUDA, 12 or 13: "
+                f"{_tensorrt_install_hint()}"
+            )
+        import tensorrt as trt
         import torch
 
-        if fp16 and not hasattr(trt.BuilderFlag, "FP16"):
-            raise RuntimeError_(
-                f"TensorRT {trt.__version__} has no fp16 switch: an fp16 engine is built from a "
-                "graph whose own types are fp16, and this graph's are not."
-            )
         self._torch, self._trt = torch, trt
         self.device = torch.device(device)
         if self.device.type != "cuda":
@@ -594,10 +610,10 @@ class TensorRTRunner:
         graph = Path(path)
         self._logger = trt.Logger(trt.Logger.ERROR)
         with torch.cuda.device(self.device):
-            self.engine_path = self._engine_path(graph, Path(engines) if engines else None, fp16)
+            self.engine_path = self._engine_path(graph, Path(engines) if engines else None)
             self.built = not self.engine_path.is_file()
             # A fresh build is deserialised from the bytes in hand rather than read back.
-            blob = (self._build(graph, export, shapes or {}, fp16) if self.built
+            blob = (self._build(graph, export, shapes or {}) if self.built
                     else self.engine_path.read_bytes())
             engine = trt.Runtime(self._logger).deserialize_cuda_engine(blob)
             del blob
@@ -622,17 +638,16 @@ class TensorRTRunner:
         if self.built:
             self._check(probe)
 
-    def _engine_path(self, graph: Path, engines: Path | None, fp16: bool) -> Path:
+    def _engine_path(self, graph: Path, engines: Path | None) -> Path:
         import re
 
         props = self._torch.cuda.get_device_properties(self.device)
         gpu = re.sub(r"[^a-z0-9]+", "-", props.name.lower()).strip("-")
-        flag = "-fp16" if fp16 else ""
-        name = (f"{graph.stem}{flag}-{gpu}-sm{props.major}{props.minor}"
+        name = (f"{graph.stem}-{gpu}-sm{props.major}{props.minor}"
                 f"-trt{self._trt.__version__}.engine")
         return (engines or graph.with_suffix(_ENGINES_SUFFIX)) / name
 
-    def _build(self, graph: Path, export, shapes: dict, fp16: bool):
+    def _build(self, graph: Path, export, shapes: dict):
         """Build the engine on a thread of its own, wait for it, and return the serialised engine.
 
         TensorRT's builder switches the C locale of the thread that runs it to ASCII and does not
@@ -654,7 +669,7 @@ class TensorRTRunner:
         def build() -> None:
             try:
                 with self._torch.cuda.device(self.device):
-                    result.append(self._build_here(graph, shapes, fp16))
+                    result.append(self._build_here(graph, shapes))
             except BaseException as error:  # handed back to the caller below
                 result.append(error)
 
@@ -670,7 +685,7 @@ class TensorRTRunner:
             raise result[0]
         return result[0]
 
-    def _build_here(self, graph: Path, shapes: dict, fp16: bool):
+    def _build_here(self, graph: Path, shapes: dict):
         import os
         import time
         import uuid
@@ -683,15 +698,14 @@ class TensorRTRunner:
         )
         start = time.perf_counter()
         builder = trt.Builder(self._logger)
-        typing = 0 if fp16 else 1 << int(trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED)
-        network = builder.create_network(typing)
+        network = builder.create_network(
+            1 << int(trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED))
         parser = trt.OnnxParser(network, self._logger)
         if not parser.parse_from_file(str(graph)):
             errors = "; ".join(str(parser.get_error(i)) for i in range(parser.num_errors))
             raise RuntimeError_(f"TensorRT could not parse {graph.name}: {errors}")
         config = builder.create_builder_config()
-        if fp16:
-            config.set_flag(trt.BuilderFlag.FP16)
+        config.clear_flag(trt.BuilderFlag.TF32)
         if shapes:
             profile = builder.create_optimization_profile()
             for name, (low, preferred, high) in shapes.items():

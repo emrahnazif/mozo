@@ -31,8 +31,7 @@ import numpy as np
 
 from .. import registry
 from ..image import load_image
-from ..runtimes import (RuntimeError_, TensorRTRunner, _tensorrt_install_hint,
-                        free_device_memory, get_default_device, select_runtime)
+from ..runtimes import TensorRTRunner, free_device_memory, get_default_device, select_runtime
 from ..vendors.grounding_dino_deploy import SPECS, VARIANTS, Predictor
 from ..vendors.grounding_dino_deploy.checkpoint import build
 from ..vendors.grounding_dino_deploy.export import example, export, profile, require_exporter
@@ -90,7 +89,7 @@ class GroundingDinoPredictor:
     DERIVES = registry.DERIVES[FAMILY]
 
     #: The square a TensorRT engine runs at when no ``input_size`` is given. Measured on 500 COCO
-    #: images: 1.5 AP under upstream's resize for ``tiny`` and 1.9 for ``base``, at the smallest
+    #: images: 1.6 AP under upstream's resize for ``tiny`` and 1.8 for ``base``, at the smallest
     #: square of the three measured and so the fastest. See ``docs/models/grounding-dino.md``.
     TENSORRT_SIZE = 800
 
@@ -155,15 +154,6 @@ class GroundingDinoPredictor:
         with the model. When it has to be built, the graph is exported from the checkpoint --
         under fp16 autocast, so the engine runs ``torch-fp16``'s precision -- and deleted after.
         """
-        import tensorrt
-
-        if int(tensorrt.__version__.split(".")[0]) < 11:
-            raise RuntimeError_(
-                f"Grounding DINO needs TensorRT 11 or later; {tensorrt.__version__} is installed. "
-                "TensorRT 10 miscompiles its position encoding (measured with 10.13: boxes off "
-                "by up to the whole image). Upgrade it, which needs a torch built for CUDA 12 "
-                f"or 13: {_tensorrt_install_hint()}"
-            )
         spec, device, size = SPECS[self.variant], self.device, self.input_size
 
         def write(path: Path) -> None:

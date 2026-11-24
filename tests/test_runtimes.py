@@ -158,12 +158,14 @@ def _tiny_graph(directory, forward):
 
 @pytest.fixture
 def cuda_tensorrt():
-    from importlib.util import find_spec
-
     import torch
 
-    if not torch.cuda.is_available() or find_spec("tensorrt") is None:
-        pytest.skip("needs CUDA and tensorrt")
+    from mozo.runtimes import _tensorrt_unusable
+
+    if not torch.cuda.is_available():
+        pytest.skip("needs CUDA")
+    if (problem := _tensorrt_unusable()) is not None:
+        pytest.skip(problem)
     return torch
 
 
@@ -173,9 +175,9 @@ class TestTensorRTRunner:
 
         torch = cuda_tensorrt
         graph = _tiny_graph(tmp_path, lambda x: x * 2 + 1)
-        first = TensorRTRunner(graph, device="cuda", fp16=False)
+        first = TensorRTRunner(graph, device="cuda")
         assert first.built and first.engine_path.parent == tmp_path / "onnx-fp32.engines"
-        assert not TensorRTRunner(graph, device="cuda", fp16=False).built
+        assert not TensorRTRunner(graph, device="cuda").built
 
         x = torch.arange(8.0, device="cuda")[None]
         (y,) = first(x)
@@ -228,24 +230,32 @@ class TestTensorRTRunner:
             x = torch.rand(1, n, device="cuda")
             assert torch.allclose(run(x)[0], x.cumsum(1), atol=1e-5)
 
-    def test_the_fp16_switch_is_refused_where_tensorrt_has_none(self, cuda_tensorrt, tmp_path):
-        """TensorRT 11 builds strongly typed engines only; a request for its old switch must not
-        quietly build an fp32 engine under an fp16 name."""
-        import tensorrt
+    def test_fp32_is_ieee_not_tf32(self, cuda_tensorrt, tmp_path):
+        """TensorRT computes fp32 products in TF32 unless told not to; torch's reference does
+        not. TF32 keeps 10 mantissa bits, so a 512-long dot product drifts around 1e-3."""
+        from mozo.runtimes import TensorRTRunner
 
-        from mozo.runtimes import RuntimeError_, TensorRTRunner
+        torch = cuda_tensorrt
+        weight = torch.randn(512, 512, generator=torch.Generator().manual_seed(0))
 
-        if hasattr(tensorrt.BuilderFlag, "FP16"):
-            pytest.skip("this TensorRT still has the fp16 switch")
-        with pytest.raises(RuntimeError_, match="no fp16 switch"):
-            TensorRTRunner(_tiny_graph(tmp_path, lambda x: x), device="cuda", fp16=True)
+        class Graph(torch.nn.Module):
+            def forward(self, x):
+                return x @ weight
+
+        path = tmp_path / "matmul.onnx"
+        torch.onnx.export(Graph(), (torch.ones(1, 512),), str(path), input_names=["x"],
+                          output_names=["y"], opset_version=17, dynamo=False)
+        x = torch.randn(1, 512, generator=torch.Generator().manual_seed(1))
+        (y,) = TensorRTRunner(path, device="cuda")(x.cuda())
+        assert torch.allclose(y.cpu(), x.double().matmul(weight.double()).float(),
+                              atol=1e-4, rtol=1e-5)
 
     def test_an_engine_that_returns_nan_is_refused_and_deleted(self, cuda_tensorrt, tmp_path):
         from mozo.runtimes import RuntimeError_, TensorRTRunner
 
         graph = _tiny_graph(tmp_path, lambda x: (x * 0) / (x * 0))  # 0/0 on the zeros probe
         with pytest.raises(RuntimeError_, match="NaN in y"):
-            TensorRTRunner(graph, device="cuda", fp16=False)
+            TensorRTRunner(graph, device="cuda")
         assert not list((tmp_path / "onnx-fp32.engines").glob("*.engine"))
 
     def test_concurrent_calls_each_get_their_own_answer(self, cuda_tensorrt, tmp_path):
@@ -254,7 +264,7 @@ class TestTensorRTRunner:
         from mozo.runtimes import TensorRTRunner
 
         torch = cuda_tensorrt
-        run = TensorRTRunner(_tiny_graph(tmp_path, lambda x: x * 3), device="cuda", fp16=False)
+        run = TensorRTRunner(_tiny_graph(tmp_path, lambda x: x * 3), device="cuda")
         inputs = [torch.full((1, 8), float(i), device="cuda") for i in range(64)]
         with ThreadPoolExecutor(8) as pool:
             outputs = list(pool.map(lambda x: run(x)[0], inputs))
@@ -265,15 +275,14 @@ class TestTensorRTRunner:
         """Grounding DINO masks its padded logits with -inf; that must not fail the check."""
         from mozo.runtimes import TensorRTRunner
 
-        assert TensorRTRunner(_tiny_graph(tmp_path, lambda x: (x * 0).log()), device="cuda",
-                              fp16=False).built
+        assert TensorRTRunner(_tiny_graph(tmp_path, lambda x: (x * 0).log()), device="cuda").built
 
     def test_a_probe_can_be_given_for_a_graph_zeros_would_break(self, cuda_tensorrt, tmp_path):
         from mozo.runtimes import TensorRTRunner
 
         torch = cuda_tensorrt
         graph = _tiny_graph(tmp_path, lambda x: x / x)  # NaN on zeros, fine on anything else
-        assert TensorRTRunner(graph, device="cuda", fp16=False,
+        assert TensorRTRunner(graph, device="cuda",
                               probe=(torch.ones(1, 8, device="cuda"),)).built
 
     def test_cpu_is_refused(self, cuda_tensorrt, tmp_path):
@@ -281,6 +290,18 @@ class TestTensorRTRunner:
 
         with pytest.raises(RuntimeError_, match="only on CUDA"):
             TensorRTRunner(tmp_path / "missing.onnx", device="cpu")
+
+
+def test_tensorrt_10_is_refused_with_the_reason(monkeypatch, tmp_path):
+    """10.13 miscompiles Grounding DINO's position encoding; nobody gets an engine from it."""
+    import sys
+    import types
+
+    from mozo.runtimes import RuntimeError_, TensorRTRunner
+
+    monkeypatch.setitem(sys.modules, "tensorrt", types.SimpleNamespace(__version__="10.13.0.35"))
+    with pytest.raises(RuntimeError_, match="TensorRT 11 or later"):
+        TensorRTRunner(tmp_path / "unused.onnx", device="cuda")
 
 
 def test_the_missing_tensorrt_message_names_the_matching_wheel(monkeypatch):
@@ -303,5 +324,5 @@ def test_building_an_engine_leaves_the_callers_locale_alone(cuda_tensorrt, tmp_p
     from mozo.runtimes import TensorRTRunner
 
     before = locale.getpreferredencoding(False)
-    TensorRTRunner(_tiny_graph(tmp_path, lambda x: x - 1), device="cuda", fp16=False)
+    TensorRTRunner(_tiny_graph(tmp_path, lambda x: x - 1), device="cuda")
     assert locale.getpreferredencoding(False) == before

@@ -353,21 +353,6 @@ def test_tensorrt_is_offered_on_cuda_and_never_chosen():
     assert choose("cuda") == "torch-fp16"
 
 
-def test_tensorrt_10_is_refused_with_the_reason(monkeypatch):
-    """10.13 miscompiles the position encoding; a user on it must be told, not handed boxes."""
-    import sys
-    import types
-
-    from mozo.adapters.grounding_dino import GroundingDinoPredictor
-    from mozo.runtimes import RuntimeError_
-
-    monkeypatch.setitem(sys.modules, "tensorrt", types.SimpleNamespace(__version__="10.13.0.35"))
-    adapter = GroundingDinoPredictor.__new__(GroundingDinoPredictor)
-    adapter.variant, adapter.device, adapter.input_size = "tiny", "cuda", 800
-    with pytest.raises(RuntimeError_, match="TensorRT 11 or later"):
-        adapter._engine(Path("unused.pth"))
-
-
 def test_a_missing_exporter_is_named_with_its_pip_line(monkeypatch):
     """Checked before the checkpoint loads for a minute, not after: the export needs them."""
     import importlib.util
@@ -398,8 +383,6 @@ def test_input_size_is_checked():
 
 
 def _on_cuda(runtime, **options):
-    from importlib.util import find_spec
-
     import torch
 
     from mozo import weights
@@ -407,12 +390,10 @@ def _on_cuda(runtime, **options):
     if not torch.cuda.is_available():
         pytest.skip("needs CUDA")
     if runtime.startswith("tensorrt"):
-        if find_spec("tensorrt") is None:
-            pytest.skip("needs tensorrt")
-        import tensorrt
+        from mozo.runtimes import _tensorrt_unusable
 
-        if int(tensorrt.__version__.split(".")[0]) < 11:
-            pytest.skip("needs TensorRT 11 or later")
+        if (problem := _tensorrt_unusable()) is not None:
+            pytest.skip(problem)
     if not weights.is_cached("grounding_dino", "tiny", "torch-fp32"):
         pytest.skip("grounding_dino/tiny is not downloaded here")
     from mozo.adapters.grounding_dino import GroundingDinoPredictor

@@ -101,6 +101,39 @@ class TestWhatALoadWouldFetch:
         monkeypatch.setitem(registry.EXECUTES, "toy", ("torch",))
         assert not weights.is_cached("toy", "split", device="cpu")
 
+    def test_a_derived_runtime_is_planned_as_its_source(self, weights, monkeypatch,
+                                                        manifest_file):
+        """``torch-fp16`` has no file: it is the fp32 checkpoint, so that is what it fetches."""
+        from mozo import registry
+
+        monkeypatch.setitem(registry.DERIVES, "toy", {"torch-fp16": "torch-fp32",
+                                                      "tensorrt-fp16": "onnx-fp32"})
+        assert weights.download_size("toy", "alpha", "torch-fp16", device="cuda") == \
+            _sizes(manifest_file, "toy/alpha", "torch-fp32", "LICENSE")
+        # The engine is built from the graph; what the graph lacks comes from the checkpoint.
+        monkeypatch.setitem(registry.NEEDS, "toy", {"tensorrt": ("torch-fp32",)})
+        assert weights.download_size("toy", "alpha", "tensorrt-fp16", device="cuda") == \
+            _sizes(manifest_file, "toy/alpha", "onnx-fp32", "torch-fp32", "LICENSE")
+
+    def test_a_cuda_runtime_named_without_a_device_is_planned_on_cuda(self, weights, monkeypatch,
+                                                                       manifest_file):
+        """What files a runtime is made of does not depend on the device asking."""
+        from mozo import registry
+
+        monkeypatch.setitem(registry.DERIVES, "toy", {"torch-fp16": "torch-fp32"})
+        assert weights.download_size("toy", "alpha", "torch-fp16") == \
+            _sizes(manifest_file, "toy/alpha", "torch-fp32", "LICENSE")
+        weights.resolve("toy", "alpha")
+        assert weights.is_cached("toy", "alpha", "torch-fp16")
+
+    def test_a_derived_runtime_on_the_wrong_device_says_so(self, weights, monkeypatch):
+        from mozo import registry
+        from mozo.runtimes import RuntimeError_
+
+        monkeypatch.setitem(registry.DERIVES, "toy", {"torch-fp16": "torch-fp32"})
+        with pytest.raises(RuntimeError_, match="runs only on cuda"):
+            weights.is_cached("toy", "alpha", "torch-fp16", device="cpu")
+
     def test_a_runtime_it_cannot_run_says_so(self, weights):
         from mozo.runtimes import RuntimeError_
 

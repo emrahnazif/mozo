@@ -41,10 +41,13 @@ curl -X POST "http://localhost:8000/predict/owlv2/base-ensemble?text=a%20laptop&
 
 | ID | Weights (torch) | Runtimes | Licence |
 |---|---|---|---|
-| `owlv2/base-ensemble` | 620 MB | torch | Apache-2.0 |
-| `owlv2/base` | 620 MB | torch | Apache-2.0 |
-| `owlv2/large-ensemble` | 1,751 MB | torch | Apache-2.0 |
-| `owlv2/large` | 1,751 MB | torch | Apache-2.0 |
+| `owlv2/base-ensemble` | 620 MB | torch, fp16 and TensorRT on CUDA | Apache-2.0 |
+| `owlv2/base` | 620 MB | torch, fp16 and TensorRT on CUDA | Apache-2.0 |
+| `owlv2/large-ensemble` | 1,751 MB | torch, fp16 and TensorRT on CUDA | Apache-2.0 |
+| `owlv2/large` | 1,751 MB | torch, fp16 and TensorRT on CUDA | Apache-2.0 |
+
+TensorRT also downloads the image tower's ONNX graph, 354 MB for `base` and 1,233 MB for `large`,
+to build its engine from.
 
 The `-ensemble` variants average Google's self-trained and fine-tuned checkpoints, and they are
 what the paper reports. `base` and `large` are self-training only. Start with `base-ensemble`.
@@ -115,6 +118,52 @@ Grounding DINO reads it better.
 The image is padded at the bottom and right to a square, then resized to 960 pixels for `base` and
 1008 for `large`. The aspect ratio is preserved, but a 4:3 photograph spends a quarter of its
 patches on padding.
+
+### On CUDA: half precision and TensorRT
+
+On CUDA, `auto` runs OWLv2 as `torch-fp16`: the image tower's blocks in half precision, with the
+norms around them, the heads and the text tower still in fp32. There is nothing extra to download;
+it is the same checkpoint. `runtime="tensorrt-fp16"` runs the image tower through a TensorRT engine
+instead, which is faster again but changes more detections, so `auto` never picks it.
+[Runtimes](/docs/deployment/runtimes.md#tensorrt) says how to install TensorRT and what the first
+load costs.
+
+Measured on an RTX 3090 against fp32, on 500 COCO val2017 images with the 80 class names as the
+phrases. Time is the image tower alone, the part that changes. A detection "changes" when it
+crosses the 0.3 threshold one way or the other and is more than 0.02 away from it; the count is out
+of every detection fp32 makes above 0.3. *Input rounded* is fp32 itself with only its input rounded
+to half precision, an invisible change: it is how often this model's detections change on their
+own.
+
+| Variant | Runtime | Image tower | Speed | COCO AP | Detections that change |
+|---|---|---|---|---|---|
+| `base-ensemble` | fp32 | 106.9 ms | 1.0× | 50.01 | |
+| | input rounded | | | 50.00 | 9 of 3,095 (0.3%) |
+| | `torch-fp16` | 24.2 ms | 4.4× | 50.07 | 13 (0.4%) |
+| | `tensorrt-fp16` | 13.7 ms | 7.7× | 50.00 | 75 (2.4%) |
+| `base` | fp32 | 108.0 ms | 1.0× | 38.03 | |
+| | input rounded | | | 38.03 | 0 of 2,055 (0%) |
+| | `torch-fp16` | 24.6 ms | 4.4× | 38.04 | 10 (0.5%) |
+| `large-ensemble` | fp32 | 535.9 ms | 1.0× | 50.66 | |
+| | input rounded | | | 50.60 | 5 of 2,601 (0.2%) |
+| | `torch-fp16` | 97.6 ms | 5.5× | 50.66 | 21 (0.8%) |
+| `large` | fp32 | 536.3 ms | 1.0× | 43.55 | |
+| | input rounded | | | 43.60 | 2 of 1,327 (0.2%) |
+| | `torch-fp16` | 97.7 ms | 5.5× | 43.60 | 18 (1.4%) |
+
+`tensorrt-fp16` was measured on `base-ensemble`; on the other variants it runs, but its numbers
+are not measured yet.
+
+Accuracy does not move on any of them. What moves is which borderline detections you get: with
+`torch-fp16` a few more than the model's own noise on `base` (0.4–0.5% against 0–0.3%), and more
+on `large` (0.8–1.4% against 0.2%); with `tensorrt-fp16`, about one confident detection in 40. A few boxes can also jump by 30–50 pixels, on every runtime including the
+input-rounded fp32 one: some patches sit between two plausible boxes, such as one object or the
+group it is in, and tip over under any small change. Ask for `runtime="torch-fp32"` to get exactly
+the fp32 results.
+
+TensorRT's fp16 arithmetic is less exact than torch's, and keeping its norms, softmax or residual
+stream in fp32 did not change that. Its fp32 engines agree with torch but are only 1.1 to 1.3 times
+faster, so mozo does not offer them.
 
 ### Verified on every stage
 

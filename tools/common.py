@@ -107,6 +107,25 @@ def synchronise(device: str) -> None:
         torch.cuda.synchronize()
 
 
+def require_one_file(staged: Path) -> None:
+    """Refuse an exported graph whose weights did not fit inside it.
+
+    An artifact is one file. Past protobuf's 2 GB ceiling ``torch.onnx.export`` silently writes
+    the weights beside the graph instead of inside it, leaving a few hundred KB of stub that loads
+    perfectly here -- where its siblings still exist -- and fails wherever it is published to.
+    Checking the directory catches that without reading the protobuf, so *staged* must be alone
+    in a directory of its own.
+    """
+    spilled = sorted(p.name for p in staged.parent.iterdir() if p != staged)
+    if spilled:
+        raise SystemExit(
+            f"the graph did not fit in one file: {len(spilled)} weight files were written "
+            f"beside it ({', '.join(spilled[:3])}...). ONNX falls back to external data past "
+            "protobuf's 2 GB limit, and mozo publishes one file per artifact. Not writing "
+            "this artifact."
+        )
+
+
 def median_ms(work, device: str, runs: int = 10, warmup: int = 3) -> float:
     """Median wall time of *work*, in milliseconds, with *device* drained after every call.
 

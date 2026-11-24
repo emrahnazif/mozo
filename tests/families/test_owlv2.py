@@ -230,3 +230,87 @@ def test_the_adapter_publishes_every_variant_the_vendor_can_build():
     from mozo.adapters.owlv2 import OwlV2Predictor
 
     assert set(OwlV2Predictor.VARIANTS) == set(SPECS)
+
+
+# --- reduced precision ---------------------------------------------------------------------------
+
+def test_half_trunk_halves_the_blocks_and_leaves_both_norms_fp32():
+    """The split that was measured: embeddings and blocks fp16, the norms around them fp32."""
+    tower = OwlV2("base-ensemble").vision.half_trunk()
+    assert tower.embeddings.patch_embedding.weight.dtype == torch.float16
+    assert {p.dtype for p in tower.encoder.parameters()} == {torch.float16}
+    assert tower.pre_layernorm.weight.dtype == torch.float32
+    assert tower.post_layernorm.weight.dtype == torch.float32
+
+
+def test_the_casts_leave_the_fp32_tower_unchanged_to_the_bit():
+    """``half_trunk`` added casts to the forward. On an fp32 tower each must be the identity, or
+    the published path -- the one verified against ``transformers`` -- would have moved."""
+    from mozo.vendors.owlv2_deploy.config import VisionSpec
+
+    spec = VisionSpec(image_size=64, patch_size=16, width=64, layers=2, heads=2,
+                      intermediate=128, layer_norm_eps=1e-5)
+    from mozo.vendors.owlv2_deploy.vision.vit import VisionTower
+
+    torch.manual_seed(0)
+    tower = VisionTower(spec).eval()
+    pixels = torch.randn(1, 3, 64, 64)
+    with torch.no_grad():
+        before = tower.post_layernorm(tower.encoder(tower.pre_layernorm(tower.embeddings(pixels))))
+        assert torch.equal(tower(pixels), before)
+
+
+def _choose(device, runtime="auto"):
+    """What an OWLv2 load would run, from the real manifest and registry."""
+    from mozo.registry import DERIVES, EXECUTES
+    from mozo.runtimes import select_runtime
+    from mozo.weights import artifacts
+
+    return select_runtime(device, artifacts(FAMILY, "base-ensemble"), runtime,
+                          executes=EXECUTES[FAMILY], derives=DERIVES[FAMILY])
+
+
+def test_cuda_runs_fp16_by_default_and_tensorrt_on_request():
+    """How derived runtimes are chosen is ``test_runtimes.py``'s; this pins OWLv2's entry."""
+    assert _choose("cuda") == "torch-fp16"
+    assert _choose("cuda", "tensorrt-fp16") == "tensorrt-fp16"
+    assert _choose("cpu") == "torch-fp32"
+
+
+def test_the_published_graph_is_not_run_through_onnx_runtime():
+    """It was measured twice as slow as torch on the CPU; it is published to build engines from."""
+    from mozo.runtimes import RuntimeError_
+
+    with pytest.raises(RuntimeError_, match="can only execute torch, tensorrt"):
+        _choose("cuda", "onnx-fp32")
+
+
+def _on_cuda(runtime):
+    """An adapter for base-ensemble on *runtime*, or a skip saying what this machine lacks."""
+    from importlib.util import find_spec
+
+    from mozo import weights
+
+    if not torch.cuda.is_available():
+        pytest.skip("needs CUDA")
+    if runtime.startswith("tensorrt") and find_spec("tensorrt") is None:
+        pytest.skip("needs tensorrt")
+    if not weights.is_cached(FAMILY, "base-ensemble", runtime, device="cuda"):
+        pytest.skip(f"owlv2/base-ensemble {runtime} is not downloaded here")
+    from mozo.adapters.owlv2 import OwlV2Predictor
+
+    return OwlV2Predictor("base-ensemble", device="cuda", runtime=runtime)
+
+
+@pytest.mark.parametrize("runtime", ["torch-fp16", "tensorrt-fp16"])
+def test_reduced_precision_finds_what_fp32_finds_on_the_fixture(runtime, image):
+    """Not a parity gate -- fp16 moves borderline detections, by design and as documented -- but
+    the confident ones on the fixture must survive: same phrases, boxes within a few pixels."""
+    phrases = ["person", "car", "bicycle", "dog"]
+    want = _on_cuda("torch-fp32").predict(image, phrases, threshold=0.25)
+    got = _on_cuda(runtime).predict(image, phrases, threshold=0.2)
+    assert len(want) > 0
+    for found in want:
+        nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))
+        assert nearest.class_name == found.class_name
+        assert float(np.abs(np.subtract(nearest.bbox, found.bbox)).max()) < 5.0

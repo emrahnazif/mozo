@@ -82,6 +82,22 @@ class VisionTower(nn.Module):
         Upstream applies ``post_layernorm`` to the pooled class token inside the tower and again
         to the full sequence in the detector. Only the second is on this path, so it is applied
         once, here.
+
+        The embeddings and the encoder run in whatever dtype their weights are in -- half, after
+        :meth:`half_trunk` -- and both layer norms stay fp32. For an fp32 tower every cast below
+        is a no-op that returns the same tensor, so the fp32 path is unchanged to the bit.
         """
-        hidden = self.pre_layernorm(self.embeddings(pixels))
-        return self.post_layernorm(self.encoder(hidden))
+        trunk = self.embeddings.patch_embedding.weight.dtype
+        hidden = self.pre_layernorm(self.embeddings(pixels.to(trunk)).float())
+        return self.post_layernorm(self.encoder(hidden.to(trunk)).float())
+
+    def half_trunk(self) -> "VisionTower":
+        """Put the embeddings and the encoder blocks in fp16, leaving both layer norms fp32.
+
+        Not upstream's: OWLv2 is published and evaluated in fp32. This is the split mozo
+        measured on CUDA against fp32 (``docs/models/owlv2.md``). Returns the tower, converted
+        in place.
+        """
+        self.embeddings.half()
+        self.encoder.half()
+        return self

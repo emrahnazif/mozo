@@ -76,17 +76,38 @@ arithmetic rather than addresses.
 
 ## Export
 
-OWLv2 has a clean single-graph export and mozo publishes none. Both halves of that are deliberate.
+mozo publishes one graph per variant, the **vision tower alone**, and runs it only through
+TensorRT. Both halves of that are measured.
 
-Unlike SAM 2 and SAM 3, this model traces in one piece: `torch.onnx.export` at opset 17 produces a
-619 MB graph in five seconds, with a dynamic axis for the number of prompts, and it runs under
-`onnxruntime` agreeing with torch to 3.9e-03 on the logits. It was then **2× slower than torch on
-the same CPU** — the attention over 3,601 tokens comes out of the trace as MatMul, Softmax, MatMul,
-where torch dispatches a fused kernel. An artifact that `mozo.runtimes` would never select, at
-619 MB a variant, is 2.5 GB of published bytes with no user, so there is none.
+**Not through ONNX Runtime.** This model traces in one piece: `torch.onnx.export` at opset 17
+produces a 619 MB graph in five seconds, and it runs under `onnxruntime` agreeing with torch to
+3.9e-03 on the logits. It was then **2× slower than torch on the same CPU** — the attention over
+3,601 tokens comes out of the trace as MatMul, Softmax, MatMul, where torch dispatches a fused
+kernel. `registry.EXECUTES` keeps ONNX Runtime off this family for that reason.
 
-That leaves the seam in `network.py` unexploited by any graph runtime, which is not why it exists
-— it exists because `encode_text` and `encode_image` depend on different things, and
-`tools/bench/owlv2.py` measures what that is worth. If someone revisits this, the two-graph split
-along the same seam is the shape to try, and the blocker is the same one SAM 2 has: mozo has no
-multi-graph runner.
+**Through TensorRT, on CUDA.** Split along the seam in `network.py` — `encode_image`, pixels to
+patch features, with the class-token merge and final norm — the vision tower is 89% of a cold call
+and the part a compiled runtime speeds up. `tools/export/owlv2.py` exports it (354 MB for `base`,
+1,233 MB for `large`, batch 1, opset 17) and checks it through ONNX Runtime on the CPU before
+writing it: features within 2.7e-03, boxes within 0.08 px over the 50 best patches, scores within
+1.5e-05. On the user's machine, `mozo.runtimes.TensorRTRunner` builds an fp16 engine from it once
+per GPU and TensorRT version. The text tower and heads stay the checkpoint's.
+
+On an RTX 3090 (TensorRT 10.13, 500 COCO val2017 images, `base-ensemble`), the engine runs the
+tower in 13.7 ms against torch fp32's 106.2 — 7.7× — at the same COCO AP (50.00 against 50.01).
+Its fp16 GEMMs are less exact than torch's, and that is not repairable from outside: per-layer fp32
+pins, strongly-typed graphs, and fp32 LayerNorm, softmax and residual stream all left the drift
+where it was, and attention-only and MLP-only fp16 engines each drift about 15× torch's fp16. So
+about 2.4% of detections above 0.3 cross that threshold against fp32, and `tensorrt-fp16` is
+offered, documented, and never chosen by `auto`. TensorRT fp32 and TF32 engines agree with torch to
+under 1e-4 and 0.008 in score respectively, at only 1.14× and 1.29×, so neither is offered.
+
+## Half precision
+
+`VisionTower.half_trunk` puts the embeddings and the encoder blocks in fp16 and keeps the norms
+around them, the heads and the text tower in fp32. It is mozo's, not upstream's, and it is what
+`torch-fp16` runs — `auto`'s choice on CUDA. Measured with `tools/bench/owlv2_precision.py`
+against fp32, and against fp32's own noise floor: fp32 with only its input rounded to fp16, which
+on its own moves one `base-ensemble` box 38.7 px. A few patches sit on a knife edge between two
+boxes, and the largest shift is therefore no measure of a runtime; how often it changes a detection,
+compared with that floor, is. The numbers per variant are in `docs/models/owlv2.md`.

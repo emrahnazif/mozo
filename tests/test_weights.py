@@ -252,6 +252,24 @@ class TestSplitRuntimes:
         with pytest.raises(WeightsError, match="coreml-fp16, onnx-fp32, torch-fp32"):
             parts("toy", "split", "tensorrt-fp16")
 
+    def test_a_derived_runtime_is_made_of_its_source(self, weights, monkeypatch):
+        """A runtime built at load time fetches the artifact it is built from."""
+        from mozo import registry
+        from mozo.weights import parts
+
+        monkeypatch.setitem(registry.DERIVES, "toy", {"tensorrt-fp16": "onnx-fp32"})
+        got = parts("toy", "split", "tensorrt-fp16")
+        assert sorted(got) == ["decoder", "encoder"]
+        assert got["encoder"].read_bytes() == b"split-onnx-encoder"
+
+    def test_a_derived_runtime_without_its_source_is_not_offered(self, weights, monkeypatch):
+        from mozo import registry
+        from mozo.weights import WeightsError, parts
+
+        monkeypatch.setitem(registry.DERIVES, "toy", {"tensorrt-fp16": "onnx-fp16"})
+        with pytest.raises(WeightsError, match="publishes no 'tensorrt-fp16'"):
+            parts("toy", "split", "tensorrt-fp16")
+
     def test_a_part_key_is_not_a_runtime_name(self, weights):
         """``onnx-fp32-encoder`` names a file, not something you can choose to run as."""
         from mozo.weights import WeightsError, parts

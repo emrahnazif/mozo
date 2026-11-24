@@ -115,8 +115,9 @@ weights.cached()
 
 Everything in the cache, one record per file, in path order:
 `{family, variant, revision, key, runtime, size, path, state}`. `state` is `"complete"` for a
-verified file, `"unpacked"` for an extracted CoreML package, `"partial"` for an interrupted
-download, and `"unlisted"` for a file this version of mozo does not know, such as an old revision.
+verified file, `"unpacked"` for an extracted CoreML package, `"built"` for the TensorRT engines
+built from a graph on this machine, `"partial"` for an interrupted download, and `"unlisted"` for a
+file this version of mozo does not know, such as an old revision.
 
 ## remove
 

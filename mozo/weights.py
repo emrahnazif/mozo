@@ -89,12 +89,17 @@ _ACCOMPANYING = (_LICENCE_KEY, _NOTICE_KEY)
 #: always has terms.
 _REQUIRED = frozenset({_LICENCE_KEY})
 
-#: How the cache names what is not a finished entry yet, and what a CoreML archive unpacks to.
-#: Stated here because this module owns the cache's layout; :func:`_fetch`,
-#: :func:`mozo.runtimes._unpacked` and :func:`cached` all read them from here.
+#: How the cache names what is not a finished entry yet, what a CoreML archive unpacks to, and
+#: the directory TensorRT engines built from a graph are kept in, beside it. Stated here because
+#: this module owns the cache's layout; :func:`_fetch`, :func:`mozo.runtimes._unpacked`,
+#: :class:`mozo.runtimes.TensorRTRunner` and :func:`cached` all read them from here.
 _PARTIAL_SUFFIX = ".part"
 _UNPACKED_SUFFIX = ".mlpackage"
 _STAGING_SUFFIX = ".unpacking"
+_ENGINES_SUFFIX = ".engines"
+
+#: What :func:`cached` calls each thing built on this machine beside the artifact it came from.
+_BESIDE = {_UNPACKED_SUFFIX: "unpacked", _ENGINES_SUFFIX: "built"}
 
 _manifest: dict[str, Any] | None = None
 
@@ -291,12 +296,16 @@ def _lookup(family: str, variant: str, revision: str | None) -> tuple[str, dict[
     return name, entry
 
 
-def _composing(entry: dict[str, Any], runtime: str) -> list[str]:
+def _composing(entry: dict[str, Any], runtime: str, family: str = "") -> list[str]:
     """Return the artifact keys that compose *runtime*, in a stable order.
 
     One definition of "these files are that runtime", used both to fetch them and to explain
-    why a runtime name is not itself a file.
+    why a runtime name is not itself a file. A runtime *family* builds at load time
+    (:data:`mozo.registry.DERIVES`) is made of the files of the artifact it is built from.
     """
+    from .registry import DERIVES
+
+    runtime = DERIVES.get(family, {}).get(runtime, runtime)
     return sorted(k for k in entry["artifacts"] if runtime_of(k) == runtime)
 
 
@@ -564,20 +573,21 @@ def parts(
         >>> parts("rfdetr", "small", "torch-fp32")        # doctest: +SKIP
         {'': PosixPath(...)}
     """
+    from .registry import DERIVES
     from .runtimes import runnable
 
     _, entry = _lookup(family, variant, revision)
     # Through ``runnable`` rather than by excluding the licence: ``labels`` is neither a
     # companion nor something a model can be executed as, and answering with it here would
     # contradict the list a caller was given to choose from.
-    available = runnable(sorted(entry["artifacts"]))
+    available = runnable(sorted(entry["artifacts"]), DERIVES.get(family))
     if runtime not in available:
         raise WeightsError(
             f"{family}/{variant} publishes no {runtime!r}. "
             f"Available runtimes: {', '.join(available) or 'none'}"
         )
 
-    keys = _composing(entry, runtime)
+    keys = _composing(entry, runtime, family)
 
     # Offline, none of these touches the network, so collecting every complaint costs nothing
     # and spares a caller placing files by hand from learning about them one run at a time.
@@ -673,18 +683,20 @@ def _planned(
         WeightsError: If the model or revision is not published.
         mozo.runtimes.RuntimeError_: If *runtime* is not published, or not one this family runs.
     """
-    from .registry import EXECUTES, NEEDS
+    from .registry import DERIVES, EXECUTES, NEEDS
     from .runtimes import get_default_device, select_runtime
 
     name, entry = _lookup(family, variant, revision)
     published = entry["artifacts"]
     if runtime == "auto" and device is None:
         device = get_default_device()  # the one path here that imports torch
-    chosen = select_runtime(device or "cpu", sorted(published), runtime,
-                            executes=EXECUTES.get(family))
+    # A runtime named outright with no device is planned without one: which files it is made of
+    # does not depend on where it would run.
+    chosen = select_runtime(device, sorted(published), runtime,
+                            executes=EXECUTES.get(family), derives=DERIVES.get(family))
 
     brings = NEEDS.get(family, {})
-    keys = [*_composing(entry, chosen),
+    keys = [*_composing(entry, chosen, family),
             *brings.get(framework_of(chosen), ()), *brings.get("*", ()), *_ACCOMPANYING]
     files = {key: published[key] for key in dict.fromkeys(keys) if key in published}
     return _model_dir(family, variant) / name, files
@@ -802,7 +814,8 @@ def cached() -> list[dict[str, Any]]:
     - ``runtime`` is the runtime that key belongs to, or ``None`` for a licence, NOTICE or labels.
     - ``state`` is ``"complete"`` for a verified file the manifest lists -- a file only takes its
       final name after its size and hash match; ``"unpacked"`` for the ``.mlpackage`` a CoreML
-      archive was extracted to; ``"partial"`` for an interrupted download or extraction; and
+      archive was extracted to; ``"built"`` for the TensorRT engines built from a graph on this
+      machine; ``"partial"`` for an interrupted download or extraction; and
       ``"unlisted"`` for anything this version's manifest does not know, such as a revision an
       upgrade has moved past.
 
@@ -832,9 +845,9 @@ def cached() -> list[dict[str, Any]]:
                 key, state = by_name.get(stem) or by_name.get(stem.rsplit(".", 1)[0]), "partial"
             elif path.suffix == _STAGING_SUFFIX:
                 key, state = by_stem.get(path.stem), "partial"
-            elif path.suffix == _UNPACKED_SUFFIX:
+            elif path.suffix in _BESIDE:
                 key = by_stem.get(path.stem)
-                state = "unpacked" if key else "unlisted"
+                state = _BESIDE[path.suffix] if key else "unlisted"
             else:
                 key = by_name.get(path.name)
                 state = "complete" if key else "unlisted"

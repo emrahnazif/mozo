@@ -1,3 +1,26 @@
+## Unreleased
+
+- **OWLv2 runs about 4.4 times faster on CUDA by default (5.5 times for `large`).** `auto` now
+  picks `torch-fp16` on CUDA: the same checkpoint, with the image tower's blocks in half precision
+  and its norms, heads and text tower in fp32. COCO AP is unchanged on every variant. A few
+  borderline detections come out differently than in fp32: 0.4–0.5% of those above 0.3 on `base`,
+  0.8–1.4% on `large`. `runtime="torch-fp32"` gives exactly the old results. Nothing new to download.
+- **OWLv2 can run through TensorRT on CUDA, 7.7 times faster than fp32.** Ask for
+  `runtime="tensorrt-fp16"` after installing the TensorRT wheel that matches your torch's CUDA
+  (`pip install tensorrt-cu12`, or `-cu11`, `-cu13`). The first load on a machine builds an engine
+  for that GPU, in about a minute, and keeps it in the cache; later loads take about a second.
+  COCO AP is unchanged, but TensorRT's fp16 arithmetic is less exact than torch's, so about 2.4% of
+  confident detections differ from fp32. `auto` never picks it. Each OWLv2 variant now publishes
+  its image tower as an ONNX graph (354 MB for `base`, 1,233 MB for `large`) to build engines from;
+  only TensorRT loads download it.
+- **`mozo.runtimes.TensorRTRunner`** builds an engine from an ONNX graph, caches it beside the
+  graph for the GPU and TensorRT version, and runs it on torch CUDA tensors, safely from several
+  threads. `weights.cached()` lists built engines with the state `"built"`, and `weights.remove`
+  deletes them with the model.
+- **Runtimes can be built at load time** from another published artifact, rather than downloaded,
+  and can be limited to one kind of device: `torch-fp16` and `tensorrt-fp16` exist only on CUDA,
+  and asking for them elsewhere says so.
+
 # Mozo v1.14.0: Granite Embedding R2 on CoreML, at half the download
 
 - **Granite Embedding R2 downloads half as much: 95 MB instead of 191 MB.** The new revision,

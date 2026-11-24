@@ -93,9 +93,27 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 #: The adapters read it from here, so there is one statement of it.
 EXECUTES: dict[str, tuple[str, ...]] = {
     **{family: ("torch",)
-       for family in ("ben2", "clip", "easyocr", "edgetam", "grounding_dino", "moebius", "owlv2",
+       for family in ("ben2", "clip", "easyocr", "edgetam", "grounding_dino", "moebius",
                       "sam2", "siglip2")},
     "granite_embedding_r2": ("torch", "coreml"),
+    # Not "onnx": the vision graph is published to build TensorRT engines from, and ONNX Runtime
+    # ran it twice as slow as torch on the CPU. See the OWLv2 PROVENANCE, under Export.
+    "owlv2": ("torch", "tensorrt"),
+}
+
+#: Runtimes a family builds at load time from another published artifact, rather than
+#: downloading as a file of their own: derived runtime -> the artifact it is built from.
+#:
+#: ``torch-fp16`` is the fp32 checkpoint with part of the network cast to half precision, so it
+#: has no file to publish. A TensorRT engine is specific to the GPU and the TensorRT version that
+#: built it, so it *cannot* be published: it is built from the published ONNX graph on first load
+#: and cached beside it. A derived runtime is offered only where its source is published, and it
+#: fetches its source's files, so ``fetch``, ``is_cached`` and ``download_size`` stay truthful.
+#:
+#: Each entry is a measured decision, not a capability: OWLv2's fp16 was measured on 500 COCO
+#: images against fp32's own noise floor before it was offered. See ``docs/models/owlv2.md``.
+DERIVES: dict[str, dict[str, str]] = {
+    "owlv2": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp32"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -105,7 +123,8 @@ EXECUTES: dict[str, tuple[str, ...]] = {
 #: names from the published ``labels`` file; run from torch it reads them off the checkpoint.
 #: RF-DETR's and ViTPose's checkpoints carry no names at all, so they read labels on every
 #: runtime. SAM 3's graph covers only the vision encoder, so its checkpoint is fetched whichever
-#: runtime won.
+#: runtime won. OWLv2's graph is the same shape of thing -- the vision tower alone -- so its text
+#: tower and heads come from the checkpoint, on ONNX and on the TensorRT engine built from it.
 #:
 #: The same reason as :data:`EXECUTES`: what a load downloads has to be answerable without the
 #: adapter. A test loads each family and holds this to the files it actually fetched.
@@ -115,6 +134,7 @@ NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
     "rfdetr": {"*": ("labels",)},
     "vitpose": {"*": ("labels",)},
     "sam3": {"onnx": ("torch-fp32",), "coreml": ("torch-fp32",)},
+    "owlv2": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
 }
 
 #: Family -> where its adapter lives, what it does, and which variants it publishes.

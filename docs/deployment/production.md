@@ -49,6 +49,11 @@ weights.fetch("rfdetr", "medium", device="cuda")
 Then send each model one request after the server starts, if the first real request should not wait
 for the load either.
 
+A [TensorRT runtime](/docs/deployment/runtimes.md#tensorrt) has one more first-time cost: its first
+load on a machine builds an engine for that GPU, which takes about a minute. Load the model once on
+the machine itself, or in the image if it is built on the same GPU model, so that is paid before
+traffic arrives.
+
 A model is built once, however many requests for it arrive at the same moment, and no request waits
 behind a different model's load, even one whose weights are still downloading.
 

@@ -696,6 +696,11 @@
               "sha256": "d9e9d637e55d8ba8f594499b30e31385571acec9fbe0e833dffa8309b6a14316",
               "size": 673
             },
+            "onnx-fp32": {
+              "path": "owlv2/base/2026-08-21/onnx-fp32.onnx",
+              "sha256": "b8a744982ec98708283b452e8fbee548f41c4618b8157505af2d9b9e7e2f4f0d",
+              "size": 353817761
+            },
             "torch-fp32": {
               "path": "owlv2/base/2026-08-21/torch-fp32.pth",
               "sha256": "56c7c1adff4a422d9ceba3fc744d8595a29a05ac4714497a9472d1ffc2e7332f",
@@ -720,6 +725,11 @@
               "path": "owlv2/base-ensemble/2026-08-21/NOTICE",
               "sha256": "11acbbbfb6c00c3e3be481a12771230e7e7dd2152cb6225e6d8e903430809adc",
               "size": 732
+            },
+            "onnx-fp32": {
+              "path": "owlv2/base-ensemble/2026-08-21/onnx-fp32.onnx",
+              "sha256": "de3229c4d21dfb8de00b2a75c248534ea01cf05f9c5dae2f278fa62864dfe478",
+              "size": 353817761
             },
             "torch-fp32": {
               "path": "owlv2/base-ensemble/2026-08-21/torch-fp32.pth",
@@ -746,6 +756,11 @@
               "sha256": "fc5e7bdbf34dc154622bd734bfc6444d119fb2d422cec95b242df2d896246771",
               "size": 675
             },
+            "onnx-fp32": {
+              "path": "owlv2/large/2026-08-21/onnx-fp32.onnx",
+              "sha256": "ac7ff5a2df6bcf22957a9ed0faec727118c3dac606d7beae7248bcef04c6663c",
+              "size": 1233205729
+            },
             "torch-fp32": {
               "path": "owlv2/large/2026-08-21/torch-fp32.pth",
               "sha256": "3f442c5e2875819ae6173b4f30f399e9c9ae51ed731184dfbed0f09eb85ce23f",
@@ -770,6 +785,11 @@
               "path": "owlv2/large-ensemble/2026-08-21/NOTICE",
               "sha256": "55b88be896d0b5eca7a5c3857a29515c11b9c248fcab78b0c0aebd9a14c717c2",
               "size": 734
+            },
+            "onnx-fp32": {
+              "path": "owlv2/large-ensemble/2026-08-21/onnx-fp32.onnx",
+              "sha256": "aa2aceb499690fa2243c308fc3f73002dc844345349dbd9bb5863d7f49098d30",
+              "size": 1233205729
             },
             "torch-fp32": {
               "path": "owlv2/large-ensemble/2026-08-21/torch-fp32.pth",

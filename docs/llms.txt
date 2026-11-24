@@ -33,7 +33,7 @@ python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_
 
 - [Configure the cache, downloads and served models](https://emrah.fr/mozo/deployment/configuration/): Every setting mozo reads: where weights are cached, offline mode, a download mirror, which models a server offers, and memory for prepared images. File: `deployment/configuration.md`
 - [Run mozo's server in production](https://emrah.fr/mozo/deployment/production/): What to arrange before mozo's server faces real traffic: workers and memory, loading models ahead of time, concurrency, and access control. File: `deployment/production.md`
-- [Torch, ONNX and CoreML runtimes](https://emrah.fr/mozo/deployment/runtimes/): Which runtimes each mozo model can run on, how runtime="auto" chooses for your device, and how to pick one yourself. File: `deployment/runtimes.md`
+- [Torch, ONNX, CoreML and TensorRT runtimes](https://emrah.fr/mozo/deployment/runtimes/): Which runtimes each mozo model can run on, how runtime="auto" chooses for your device, half precision and TensorRT on CUDA, and how to pick one yourself. File: `deployment/runtimes.md`
 - [How mozo proves it matches the original models](https://emrah.fr/mozo/deployment/verification/): What bit-identical means in mozo, how each model is checked against its original implementation, the few stated exceptions, and how to re-run a check. File: `deployment/verification.md`
 - [Model weights and their licences](https://emrah.fr/mozo/deployment/weights-and-licences/): Which licence each model's weights carry, what AGPL-3.0, CC-BY-NC-4.0 and the SAM License ask of you, and how to serve only permissive weights. File: `deployment/weights-and-licences.md`
 

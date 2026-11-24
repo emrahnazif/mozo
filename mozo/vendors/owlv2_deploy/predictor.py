@@ -93,6 +93,12 @@ class Detector:
             ``torch-fp32.pth``.
         variant: Which published geometry. See :data:`~.config.SPECS`.
         device: Where to run. mozo decides this; the default is only for direct use.
+        half_trunk: Run the image tower's embeddings and blocks in fp16. See
+            :meth:`~.vision.vit.VisionTower.half_trunk`. The text tower and the heads stay fp32.
+        image_tower: A callable that replaces :meth:`OwlV2.encode_image`: ``(1, 3, S, S)``
+            normalised pixels on *device* in, ``(1, P, width)`` patch features out -- a compiled
+            graph of the same tower. The torch tower is then released, so the device does not hold
+            it twice. The text tower and the heads are always the checkpoint's.
 
     Attributes:
         image_size: Square side the trunk runs at.
@@ -104,12 +110,22 @@ class Detector:
         checkpoint: str | os.PathLike,
         variant: str = "base-ensemble",
         device: str | torch.device = "cpu",
+        half_trunk: bool = False,
+        image_tower=None,
     ):
         # No variant check here: ``OwlV2`` raises the same message on the next line, before the
         # checkpoint is read.
         self.model = OwlV2(variant)
         self.model.load_state_dict(load_state_dict(os.fspath(checkpoint)), strict=True)
+        # Both after the strict load, which checks the whole checkpoint against the fp32
+        # parameters it was published for, and before the move, so the device never holds a
+        # tower that is about to be replaced or rounded.
+        if image_tower is not None:
+            self.model.vision = None
+        elif half_trunk:
+            self.model.vision.half_trunk()
         self.model.eval().to(device)
+        self._image_tower = image_tower or self.model.encode_image
 
         self.tokenizer = Tokenizer(context_length=SPECS[variant].text.context_length)
         self.device = device
@@ -151,9 +167,14 @@ class Detector:
         return self._remember(
             self._images,
             key,
-            lambda: self.model.encode_image(preprocess(image, self.image_size).to(self.device)),
+            lambda: self.encode_pixels(preprocess(image, self.image_size).to(self.device)),
             IMAGE_CACHE,
         )
+
+    @torch.no_grad()
+    def encode_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        """Run the image tower on preprocessed pixels, uncached: ``(1, P, width)`` fp32."""
+        return self._image_tower(pixels).float()
 
     def encode_text(self, phrases: Sequence[str]) -> tuple[torch.Tensor, torch.Tensor]:
         """Return one vocabulary encoded, computing it only if not already held.

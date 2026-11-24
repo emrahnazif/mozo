@@ -63,7 +63,8 @@ sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != Path(__file__)
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from common import DETECTOR, fixtures, person_boxes, variant_parser  # noqa: E402
+from common import (DETECTOR, fixtures, person_boxes, require_one_file,  # noqa: E402
+                    variant_parser)
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import OnnxRunner  # noqa: E402
 from mozo.vendors.vitpose_deploy import SPECS, Predictor  # noqa: E402
@@ -182,18 +183,7 @@ def export_variant(variant: str, revision: str | None, boxes: dict[Path, np.ndar
         print(f"  exported  {spec.height}x{spec.width}, opset {OPSET}, output {OUTPUT_NAME}, "
               "dynamic batch")
 
-        # An artifact is one file. Past protobuf's 2 GB ceiling ``torch.onnx.export`` silently
-        # writes the weights beside the graph instead of inside it, leaving a few hundred KB of
-        # stub that loads perfectly here -- where its siblings still exist -- and fails wherever it
-        # is published to. Checking the directory catches that without reading the protobuf.
-        spilled = sorted(p.name for p in staged.parent.iterdir() if p != staged)
-        if spilled:
-            raise SystemExit(
-                f"the graph did not fit in one file: {len(spilled)} weight files were written "
-                f"beside it ({', '.join(spilled[:3])}...). ONNX falls back to external data past "
-                "protobuf's 2 GB limit, and mozo publishes one file per artifact. Not writing "
-                "this artifact."
-            )
+        require_one_file(staged)
 
         runner = OnnxRunner(staged, device="cpu")
         for image, batch, centers, scales, want in reference:

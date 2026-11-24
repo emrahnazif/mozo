@@ -26,10 +26,10 @@ import numpy as np
 
 from .. import registry
 from ..image import load_image
-from ..runtimes import get_default_device, select_runtime
+from ..runtimes import TensorRTRunner, get_default_device, select_runtime
 from ..vendors.owlv2_deploy import Detector
 from ..vendors.owlv2_deploy.predictor import THRESHOLD
-from ..weights import artifacts, resolve
+from ..weights import artifacts, framework_of, parts, resolve
 from ._prepare import Preparing
 
 try:
@@ -73,13 +73,9 @@ class OwlV2Predictor(Preparing):
     #: Google publishes six; these are the four anyone uses. See ``PROVENANCE.md``.
     VARIANTS = ["base-ensemble", "base", "large-ensemble", "large"]
 
-    #: Which runtimes this adapter can execute. Only torch, because the vendor builds a torch
-    #: module from a checkpoint and has no graph path at all. Declared rather than checked
-    #: afterwards so that ``auto`` cannot pick an artifact this would then have to refuse --
-    #: inert while OWLv2 publishes only torch, and the line that keeps ``auto`` correct if it
-    #: ever publishes more. (``PROVENANCE.md`` covers a different question: why no graph is
-    #: published, which is that the one that traced ran twice as slow.)
+    #: Frameworks this adapter executes, and runtimes it builds at load time. See the registry.
     EXECUTES = registry.EXECUTES[FAMILY]
+    DERIVES = registry.DERIVES[FAMILY]
 
     def __init__(
         self,
@@ -106,12 +102,22 @@ class OwlV2Predictor(Preparing):
                 artifacts(FAMILY, variant, revision=revision),
                 runtime,
                 executes=self.EXECUTES,
+                derives=self.DERIVES,
             )
         )
+        # The image tower is the only part a graph replaces: the text tower and the heads always
+        # come from the checkpoint, which is why a TensorRT load fetches it beside the graph.
+        tower = None
+        if framework_of(self.runtime) == "tensorrt":
+            engine = TensorRTRunner(parts(FAMILY, variant, self.runtime, revision=revision)[""],
+                                    device=self.device, fp16=self.runtime.endswith("-fp16"))
+            tower = lambda pixels: engine(pixels)[0]  # noqa: E731
 
+        # ``torch-fp16`` has no file of its own: it is the fp32 checkpoint, rounded after loading.
         weights = (Path(checkpoint_path) if checkpoint_path
-                   else resolve(FAMILY, variant, self.runtime, revision=revision))
-        self._detector = Detector(weights, variant, device=self.device)
+                   else resolve(FAMILY, variant, "torch-fp32", revision=revision))
+        self._detector = Detector(weights, variant, device=self.device,
+                                  half_trunk=self.runtime == "torch-fp16", image_tower=tower)
         _log.info("OWLv2 %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def _encode(self, pixels: np.ndarray) -> None:

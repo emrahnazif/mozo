@@ -23,6 +23,7 @@ __all__ = [
     "CoreMLRunner",
     "OnnxRunner",
     "RuntimeError_",
+    "TensorRTRunner",
     "coreml_functions",
     "executable",
     "get_default_device",
@@ -43,8 +44,8 @@ from typing import Any
 
 import numpy as np
 
-from .weights import (_RUNNABLE, _STAGING_SUFFIX, _UNPACKED_SUFFIX, framework_of, part_of,
-                      runtime_of)
+from .weights import (_ENGINES_SUFFIX, _PARTIAL_SUFFIX, _RUNNABLE, _STAGING_SUFFIX,
+                      _UNPACKED_SUFFIX, framework_of, part_of, runtime_of)
 
 #: Cached: the answer cannot change within a process, and ``torch.cuda.is_available()`` costs
 #: real time the first time it is asked.
@@ -110,10 +111,15 @@ def get_default_device() -> str:
 #: has no MPS path at all and quietly runs on the CPU. Defaulting to a guess would have shipped
 #: that regression silently to everyone on a Mac.
 #:
-#: No fp16 entry appears here. Where fp16 was tried for a whole-file runtime it measured worse
-#: on accuracy and no better on speed; and ``coreml-fp16``, which SAM 2's three smaller variants
-#: do publish, has never been measured against torch MPS for a promptable model. This table's
-#: whole claim is that its entries were measured, so an unmeasured one does not join it.
+#: One fp16 entry appears here, ``torch-fp16`` on CUDA, and it only exists for families that
+#: derive it (:data:`mozo.registry.DERIVES`), each measured first. OWLv2's is 4.4x faster on an
+#: RTX 3090 (5.5x for ``large``) at unchanged COCO AP, changing 0.4-1.4% of detections across a
+#: 0.3 threshold against fp32. Elsewhere, where fp16 was tried for a whole-file runtime, it
+#: measured worse on accuracy and no better on speed; and ``coreml-fp16``, which SAM 2's three
+#: smaller variants do publish, has never been measured against torch MPS for a promptable model.
+#: This table's whole claim is that its entries were measured, so an unmeasured one does not join
+#: it. ``tensorrt-fp16`` was measured and is deliberately absent: about 2.4% of OWLv2's confident
+#: detections change, so a user has to ask for it.
 #:
 #: What that absence buys is narrower than it looks. Entries are matched by exact membership
 #: (``if key in usable``), so leaving a runtime out means ``auto`` will not *prefer* it -- but
@@ -130,7 +136,7 @@ def get_default_device() -> str:
 #: here; only one of them dramatically. A family whose margin came out under 1.0 would belong in
 #: ``EXECUTES`` or unpublished, not in a third preference table.
 _PREFERENCE: dict[str, tuple[str, ...]] = {
-    "cuda": ("torch-fp32", "onnx-fp32"),
+    "cuda": ("torch-fp16", "torch-fp32", "onnx-fp32"),
     "cpu": ("torch-fp32", "onnx-fp32"),
     "mps": ("coreml-fp32", "torch-fp32", "onnx-fp32"),
 }
@@ -142,26 +148,50 @@ _PREFERENCE: dict[str, tuple[str, ...]] = {
 #: execute one is this module's business.
 _REQUIRES = {"onnx": "onnxruntime", "coreml": "coremltools", "tensorrt": "tensorrt"}
 
+#: Runtimes that run on one kind of device only, by runtime name or by framework. TensorRT is
+#: NVIDIA's. ``torch-fp16`` is offered on CUDA alone because that is the only device it was
+#: measured on: half precision on a CPU is slower than fp32, and on MPS it is unmeasured.
+_DEVICES: dict[str, tuple[str, ...]] = {"torch-fp16": ("cuda",), "tensorrt": ("cuda",)}
 
-def runnable(published: list[str]) -> list[str]:
+
+def _devices_for(runtime: str) -> tuple[str, ...] | None:
+    """The device kinds *runtime* runs on, or ``None`` if it runs on any."""
+    return _DEVICES.get(runtime) or _DEVICES.get(framework_of(runtime))
+
+
+def _runs_on(runtime: str, device: str | None) -> bool:
+    kinds = _devices_for(runtime)
+    return kinds is None or device is None or device.split(":")[0] in kinds
+
+
+def runnable(published: list[str], derives: dict[str, str] | None = None) -> list[str]:
     """Return the runtimes these artifacts can be executed as, each named once.
 
     Keys that only differ by their part collapse into the runtime they compose, so a caller
     choosing a runtime sees ``onnx-fp32`` rather than an encoder and a decoder it would have to
     know to rejoin. :func:`mozo.weights.parts` is what turns the answer back into files.
 
+    Args:
+        published: Artifact keys, as :func:`mozo.weights.artifacts` lists them.
+        derives: The family's entry in :data:`mozo.registry.DERIVES`: runtimes built at load
+            time from another artifact. Each is offered only when its source is published.
+
     Examples:
         >>> runnable(["labels", "onnx-fp16", "torch-fp32"])
         ['onnx-fp16', 'torch-fp32']
         >>> runnable(["onnx-fp32-decoder", "onnx-fp32-encoder", "torch-fp32"])
         ['onnx-fp32', 'torch-fp32']
+        >>> runnable(["torch-fp32"], {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp32"})
+        ['torch-fp32', 'torch-fp16']
     """
-    return list(dict.fromkeys(
+    offered = list(dict.fromkeys(
         runtime_of(key) for key in published if framework_of(key) in _RUNNABLE
     ))
+    return offered + [runtime for runtime, source in (derives or {}).items()
+                      if source in offered and runtime not in offered]
 
 
-def executable(published: list[str]) -> list[str]:
+def executable(published: list[str], derives: dict[str, str] | None = None) -> list[str]:
     """Return the runtimes this machine can actually run, not merely the ones published.
 
     Publishing a CoreML artifact does not put ``coremltools`` on the machine reading the
@@ -171,7 +201,7 @@ def executable(published: list[str]) -> list[str]:
     """
     from importlib.util import find_spec
 
-    return [runtime for runtime in runnable(published)
+    return [runtime for runtime in runnable(published, derives)
             if (module := _REQUIRES.get(framework_of(runtime))) is None or find_spec(module)]
 
 
@@ -199,15 +229,17 @@ def providers_for(device: str) -> list[str]:
 
 
 def select_runtime(
-    device: str,
+    device: str | None,
     published: list[str],
     requested: str = "auto",
     executes: tuple[str, ...] | None = None,
+    derives: dict[str, str] | None = None,
 ) -> str:
     """Choose which published artifact to run on *device*.
 
     Args:
-        device: Where the model will run -- ``cpu``, ``cuda``, ``mps``.
+        device: Where the model will run -- ``cpu``, ``cuda``, ``mps``. ``None`` only with a
+            runtime named in *requested*, to ask whether it exists without saying where.
         published: Artifact keys the model publishes, from :func:`mozo.weights.artifacts`.
         requested: An explicit runtime such as ``"onnx-fp16"``, or ``"auto"`` to take the best
             published option for the device.
@@ -216,6 +248,8 @@ def select_runtime(
             adapter rather than about the machine -- so it belongs here, beside the two filters
             that already narrow the choice, and not in a check the caller makes after this
             function has already answered. ``None`` means the caller can run anything published.
+        derives: Runtimes the family builds at load time from another published artifact, from
+            :data:`mozo.registry.DERIVES`. Offered where their source is published.
 
     Returns:
         A runtime name, which is an artifact key for a family that publishes its runtime as one
@@ -223,7 +257,8 @@ def select_runtime(
         :func:`mozo.weights.parts` takes.
 
     Raises:
-        RuntimeError_: If *requested* is not published, or nothing suitable exists.
+        RuntimeError_: If *requested* is not published, does not run on *device*, or nothing
+            suitable exists.
 
     Examples:
         >>> select_runtime("cpu", ["onnx-fp32", "torch-fp32"])
@@ -237,7 +272,7 @@ def select_runtime(
         >>> select_runtime("cpu", ["onnx-fp32", "torch-fp32"], executes=("torch",))
         'torch-fp32'
     """
-    offered = runnable(published)
+    offered = runnable(published, derives)
     supported = ([key for key in offered if framework_of(key) in executes]
                  if executes is not None else offered)
 
@@ -252,9 +287,16 @@ def select_runtime(
                 f"{requested!r} is published for this model, but this family can only execute "
                 f"{', '.join(executes)}. Available: {', '.join(supported) or 'nothing'}"
             )
+        if not _runs_on(requested, device):
+            raise RuntimeError_(
+                f"{requested!r} runs only on {' or '.join(_devices_for(requested))}, and this "
+                f"model is on {device!r}. Available here: "
+                f"{', '.join(k for k in supported if _runs_on(k, device)) or 'nothing'}"
+            )
         return requested
 
-    usable = [key for key in executable(published) if key in supported]
+    usable = [key for key in executable(published, derives)
+              if key in supported and _runs_on(key, device)]
     for key in _PREFERENCE.get(device.split(":")[0], _PREFERENCE["cpu"]):
         if key in usable:
             return key
@@ -465,3 +507,210 @@ class OnnxRunner:
         feed: dict[str, Any] = {self.inputs[0]: batch}
         feed.update(extra)
         return tuple(self._session.run(None, feed))
+
+
+def _tensorrt_install_hint() -> str:
+    """The pip line for the TensorRT build matching this torch's CUDA, which it must match."""
+    import torch
+
+    major = (torch.version.cuda or "12").split(".")[0]
+    return f"pip install tensorrt-cu{major}"
+
+
+class TensorRTRunner:
+    """A TensorRT engine built from an ONNX graph, callable on CUDA tensors.
+
+    An engine is specific to the GPU and the TensorRT version that built it, so it cannot be
+    published: mozo publishes the graph, and the first load on a machine builds the engine and
+    keeps it beside the graph, in ``<graph>.engines/``, named for the precision, the GPU and the
+    TensorRT version. Every later load deserialises it in about a second. ``weights.remove``
+    deletes it with the model, and ``weights.cached`` reports it as ``"built"``.
+
+    **It takes and returns torch tensors on the device**, unlike the other runners here, which
+    speak numpy. Those runtimes copy to the host by nature; this one would pay a device round
+    trip per call for nothing, and every caller already holds torch tensors.
+
+    **Thread safety.** One execution context, enqueued under a lock on a stream of its own, and the
+    caller's stream waits on it. Calls from several threads are serialised on the GPU, which is
+    what one context can do, and each gets its own outputs.
+
+    Args:
+        path: The ``.onnx`` graph to build from.
+        device: A CUDA device, ``"cuda"`` or ``"cuda:N"``.
+        fp16: Let TensorRT run layers in half precision. Its fp16 kernels are less precise than
+            torch's -- see the family's documentation for what that costs, measured.
+
+    Attributes:
+        inputs: Input tensor names, in the order the engine declares them.
+        outputs: Output tensor names, in the order the engine declares them.
+        input_shape: The first input's shape.
+        engine_path: Where the engine is cached.
+        built: Whether this load built the engine, rather than finding it cached.
+
+    Examples:
+        >>> run = TensorRTRunner("onnx-fp32.onnx", device="cuda")        # doctest: +SKIP
+        >>> (patches,) = run(pixels)                                       # doctest: +SKIP
+    """
+
+    def __init__(self, path: str | Path, device: str = "cuda", *, fp16: bool = True) -> None:
+        try:
+            import tensorrt as trt
+        except ImportError as error:  # pragma: no cover - depends on the install
+            raise RuntimeError_(
+                "TensorRT is not installed, so tensorrt runtimes cannot be run. Install the "
+                f"build that matches your torch's CUDA: {_tensorrt_install_hint()}"
+            ) from error
+        import torch
+
+        self._torch, self._trt = torch, trt
+        self.device = torch.device(device)
+        if self.device.type != "cuda":
+            raise RuntimeError_(f"TensorRT runs only on CUDA, not on {device!r}.")
+        if self.device.index is None:
+            self.device = torch.device("cuda", torch.cuda.current_device())
+
+        self._logger = trt.Logger(trt.Logger.ERROR)
+        with torch.cuda.device(self.device):
+            self.engine_path = self._engine_path(Path(path), fp16)
+            self.built = not self.engine_path.is_file()
+            # A fresh build is deserialised from the bytes in hand rather than read back.
+            blob = (self._build(Path(path), fp16) if self.built
+                    else self.engine_path.read_bytes())
+            engine = trt.Runtime(self._logger).deserialize_cuda_engine(blob)
+            del blob
+            if engine is None:
+                raise RuntimeError_(
+                    f"{self.engine_path} could not be loaded. Delete it and load again to "
+                    "rebuild it."
+                )
+            self._engine = engine
+            self._context = engine.create_execution_context()
+            self._stream = torch.cuda.Stream(self.device)
+
+        names = [engine.get_tensor_name(i) for i in range(engine.num_io_tensors)]
+        self.inputs = [n for n in names
+                       if engine.get_tensor_mode(n) == trt.TensorIOMode.INPUT]
+        self.outputs = [n for n in names if n not in self.inputs]
+        self._dtypes = {n: torch.from_numpy(np.empty(0, trt.nptype(engine.get_tensor_dtype(n)))
+                                            ).dtype for n in names}
+        self.input_shape = tuple(engine.get_tensor_shape(self.inputs[0]))
+        self._lock = Lock()
+
+        if self.built:
+            self._check()
+
+    def _engine_path(self, graph: Path, fp16: bool) -> Path:
+        import re
+
+        props = self._torch.cuda.get_device_properties(self.device)
+        gpu = re.sub(r"[^a-z0-9]+", "-", props.name.lower()).strip("-")
+        precision = "fp16" if fp16 else "fp32"
+        name = f"{precision}-{gpu}-sm{props.major}{props.minor}-trt{self._trt.__version__}.engine"
+        return graph.with_suffix(_ENGINES_SUFFIX) / name
+
+    def _build(self, graph: Path, fp16: bool):
+        """Build the engine on a thread of its own, wait for it, and return the serialised engine.
+
+        TensorRT's builder switches the C locale of the thread that runs it to ASCII and does not
+        switch it back (measured with 10.13: ``locale.getpreferredencoding()`` reads
+        ``ANSI_X3.4-1968`` afterwards). On the caller's thread that would leave every later
+        ``open()`` without an explicit encoding unable to read UTF-8 -- in a server, for the life
+        of the process. The change is per thread, so a thread that ends takes it with it.
+        """
+        from threading import Thread
+
+        result: list = []
+
+        def build() -> None:
+            try:
+                with self._torch.cuda.device(self.device):
+                    result.append(self._build_here(graph, fp16))
+            except BaseException as error:  # handed back to the caller below
+                result.append(error)
+
+        worker = Thread(target=build, name="mozo-tensorrt-build")
+        worker.start()
+        worker.join()
+        if isinstance(result[0], BaseException):
+            raise result[0]
+        return result[0]
+
+    def _build_here(self, graph: Path, fp16: bool):
+        import os
+        import time
+        import uuid
+
+        trt = self._trt
+        _log.warning(
+            "[mozo] building a TensorRT engine from %s for %s. This happens once per GPU and "
+            "TensorRT version and takes about a minute; later loads reuse it.",
+            graph.name, self._torch.cuda.get_device_name(self.device),
+        )
+        start = time.perf_counter()
+        builder = trt.Builder(self._logger)
+        network = builder.create_network(0)
+        parser = trt.OnnxParser(network, self._logger)
+        if not parser.parse_from_file(str(graph)):
+            errors = "; ".join(str(parser.get_error(i)) for i in range(parser.num_errors))
+            raise RuntimeError_(f"TensorRT could not parse {graph.name}: {errors}")
+        config = builder.create_builder_config()
+        if fp16:
+            config.set_flag(trt.BuilderFlag.FP16)
+        blob = builder.build_serialized_network(network, config)
+        if blob is None:
+            raise RuntimeError_(f"TensorRT could not build an engine from {graph.name}.")
+        # Written under a private name and moved into place, so a crash or a second process
+        # building at the same moment never leaves a half-written engine where a load finds it.
+        self.engine_path.parent.mkdir(parents=True, exist_ok=True)
+        staging = self.engine_path.with_name(
+            f"{self.engine_path.name}.{uuid.uuid4().hex}{_PARTIAL_SUFFIX}")
+        staging.write_bytes(memoryview(blob))
+        os.replace(staging, self.engine_path)
+        _log.warning("[mozo] built %s in %.0f s.", self.engine_path.name,
+                     time.perf_counter() - start)
+        return blob
+
+    def _check(self) -> None:
+        """Run a freshly built engine once and refuse it if anything comes back non-finite."""
+        torch = self._torch
+        probe = torch.zeros(self.input_shape, dtype=self._dtypes[self.inputs[0]],
+                            device=self.device)
+        bad = [name for name, out in zip(self.outputs, self(probe))
+               if not torch.isfinite(out).all()]
+        if bad:
+            self.engine_path.unlink(missing_ok=True)
+            raise RuntimeError_(
+                f"the TensorRT engine built from this graph returned non-finite {', '.join(bad)} "
+                "on a test input, so it was deleted. Run this model on torch instead."
+            )
+
+    def __call__(self, *inputs) -> tuple:
+        """Run the engine on torch tensors and return its outputs in declaration order.
+
+        Inputs are moved to the device and cast to what the engine declares. Outputs are fresh
+        tensors on the device, ready on the caller's current stream.
+        """
+        torch = self._torch
+        with self._lock, torch.cuda.device(self.device):
+            caller = torch.cuda.current_stream()
+            self._stream.wait_stream(caller)
+            held = []
+            for name, value in zip(self.inputs, inputs):
+                value = value.to(self.device, self._dtypes[name]).contiguous()
+                self._context.set_input_shape(name, tuple(value.shape))
+                self._context.set_tensor_address(name, value.data_ptr())
+                held.append(value)
+            outputs = []
+            for name in self.outputs:
+                out = torch.empty(tuple(self._context.get_tensor_shape(name)),
+                                  dtype=self._dtypes[name], device=self.device)
+                self._context.set_tensor_address(name, out.data_ptr())
+                outputs.append(out)
+            if not self._context.execute_async_v3(self._stream.cuda_stream):
+                raise RuntimeError_("TensorRT failed to run the engine.")
+            caller.wait_stream(self._stream)
+            # Tell the allocator these were used on our stream, so their memory is not handed
+            # to someone else before the engine is done with it.
+            for tensor in (*held, *outputs):
+                tensor.record_stream(self._stream)
+        return tuple(outputs)

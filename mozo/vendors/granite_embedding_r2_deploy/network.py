@@ -50,11 +50,20 @@ class Network(nn.Module):
         self.rotary_local = Rotary(spec.head_dim, spec.local_theta)
 
     def forward(self, tokens: torch.Tensor) -> torch.Tensor:
-        hidden = self.embeddings(tokens)
-        length = tokens.shape[1]
-        rotations = {True: self.rotary_global(length, hidden.dtype),
-                     False: self.rotary_local(length, hidden.dtype)}
-        masks = {True: None, False: sliding_mask(length, self.window, tokens.device)}
+        positions = torch.arange(tokens.shape[1], device=tokens.device, dtype=torch.float32)
+        return self.run(self.embeddings(tokens), positions,
+                        {True: None, False: sliding_mask(positions, self.window)})
+
+    def run(self, hidden: torch.Tensor, positions: torch.Tensor,
+            masks: dict[bool, torch.Tensor | None]) -> torch.Tensor:
+        """The layers and the final norm over embedded *hidden*, at ``(L,)`` float *positions*.
+
+        *masks* is keyed by whether a layer is global. :meth:`forward` passes no mask to the
+        global layers and the sliding window to the rest;
+        :class:`~mozo.vendors.granite_embedding_r2_deploy.graph.Bucketed` adds the padding to both.
+        """
+        rotations = {True: self.rotary_global(positions, hidden.dtype),
+                     False: self.rotary_local(positions, hidden.dtype)}
         for layer in self.layers:
             hidden = layer(hidden, *rotations[layer.is_global], masks[layer.is_global])
         return self.final_norm(hidden)

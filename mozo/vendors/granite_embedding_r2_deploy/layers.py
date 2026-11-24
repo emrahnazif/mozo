@@ -49,12 +49,12 @@ class Rotary(nn.Module):
         exponents = torch.arange(0, head_dim, 2, dtype=torch.int64).float() / head_dim
         self.register_buffer("inv_freq", 1.0 / (theta**exponents), persistent=False)
 
-    def forward(self, length: int, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
-        """``(cos, sin)``, each ``(1, 1, length, head_dim)``: the shape attention broadcasts over heads.
+    def forward(self, positions: torch.Tensor, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
+        """``(cos, sin)``, each ``(1, 1, L, head_dim)``: the shape attention broadcasts over heads.
 
-        In float32 whatever the model's dtype -- upstream disables autocast here -- then cast.
+        *positions* is ``(L,)`` float32, ``0 .. L-1``. In float32 whatever the model's dtype --
+        upstream disables autocast here -- then cast.
         """
-        positions = torch.arange(length, device=self.inv_freq.device, dtype=torch.float32)
         freqs = (self.inv_freq[None, :, None] @ positions[None, None, :]).transpose(1, 2)
         angles = torch.cat((freqs, freqs), dim=-1)[:, None]
         return angles.cos().to(dtype), angles.sin().to(dtype)
@@ -71,18 +71,17 @@ def _rotate(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tens
     return ((wide * cos) + (_rotate_half(wide) * sin)).to(x.dtype)
 
 
-def sliding_mask(length: int, window: int, device: torch.device | str) -> torch.Tensor:
-    """``(1, 1, length, length)`` bool: True where ``abs(query - key) <= window``.
+def sliding_mask(positions: torch.Tensor, window: int) -> torch.Tensor:
+    """``(1, 1, L, L)`` bool: True where ``abs(query - key) <= window``, for ``(L,)`` *positions*.
 
     Always built, at every length. Upstream skips it below 64 tokens and passes nothing, which is
     the same as a mask that allows everything; measured bit-identical at every length from 2 to
     8,192, so there is no branch here for an exported graph to freeze.
 
     Two comparisons rather than ``abs(query - key) <= window``, which says the same thing but builds
-    two int64 ``(length, length)`` tensors on the way: 1.1 GB at 8,192 tokens for a 67 MB mask.
+    two ``(L, L)`` tensors on the way: 1.1 GB at 8,192 tokens for a 67 MB mask.
     """
-    index = torch.arange(length, device=device)
-    keys, queries = index[None, :], index[:, None]
+    keys, queries = positions[None, :], positions[:, None]
     return ((keys >= queries - window) & (keys <= queries + window))[None, None]
 
 

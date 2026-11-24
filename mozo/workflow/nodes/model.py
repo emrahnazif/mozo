@@ -109,6 +109,13 @@ def rfdetr(image: Image, models: Models, variant: variants("rfdetr") = "nano",
 
 
 @node(category="Detect", exclusive=True)
+def mayaku_street(image: Image, models: Models, variant: variants("mayaku_street") = "nano",
+                  threshold: float = 0.4) -> Detections:
+    """Mayaku street models -- road scenes, faces and licence plates included, masks on the seg variants."""
+    return models("mayaku_street", variant).predict(image, threshold=threshold)
+
+
+@node(category="Detect", exclusive=True)
 def rfdetr_checkpoint(image: Image, models: Models, checkpoint: Optional[FilePath] = None,
                       architecture: architectures("rfdetr") = "nano", labels: list[str] = [],
                       threshold: float = 0.5) -> Detections:

@@ -9,5 +9,6 @@ by every runtime. See PROVENANCE.md.
 """
 
 from .model import SPECS, Detections, Detector, Spec, detect, get_spec
+from .network import output_names
 
-__all__ = ["SPECS", "Detections", "Detector", "Spec", "detect", "get_spec"]
+__all__ = ["SPECS", "Detections", "Detector", "Spec", "detect", "get_spec", "output_names"]

@@ -213,6 +213,12 @@ class MaskBranch(nn.Module):
         return [m] + [k(x) for k, x in zip(self.ker, boxes)]
 
 
+def output_names(seg: bool) -> list[str]:
+    """The graph's outputs in order, upstream's names: what an exported graph calls them too."""
+    names = [f"{kind}{i}" for i in range(len(STRIDES)) for kind in ("cls", "box")]
+    return names + (["mask"] + [f"ker{i}" for i in range(len(STRIDES))] if seg else [])
+
+
 class StreetNetwork(nn.Module):
     """The whole graph. Built in its trained form so the checkpoint loads strictly, then fused in
     place by :meth:`fuse`, after which it is the deploy graph upstream's ``for_deploy`` runs."""
@@ -229,8 +235,7 @@ class StreetNetwork(nn.Module):
 
     @property
     def output_names(self) -> list[str]:
-        names = [f"{kind}{i}" for i in range(len(STRIDES)) for kind in ("cls", "box")]
-        return names + (["mask"] + [f"ker{i}" for i in range(len(STRIDES))] if self.seg else [])
+        return output_names(self.seg)
 
     def forward(self, x):
         stem, feats = self.backbone(x)

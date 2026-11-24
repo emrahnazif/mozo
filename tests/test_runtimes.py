@@ -181,21 +181,70 @@ class TestTensorRTRunner:
         (y,) = first(x)
         assert y.device.type == "cuda" and torch.equal(y, x * 2 + 1)
 
-    def test_precision_and_gpu_are_in_the_engines_name(self, cuda_tensorrt, tmp_path):
-        """An engine built for one GPU or TensorRT version must never be loaded by another."""
+    def test_graph_gpu_and_version_are_in_the_engines_name(self, cuda_tensorrt, tmp_path):
+        """An engine built for one GPU or TensorRT version must never be loaded by another, and
+        engines from two graphs may share a directory."""
         import tensorrt
 
         from mozo.runtimes import TensorRTRunner
 
         name = TensorRTRunner(_tiny_graph(tmp_path, lambda x: x + 1), device="cuda").engine_path.name
-        assert name.startswith("fp16-") and f"trt{tensorrt.__version__}" in name and "-sm" in name
+        assert name.startswith("onnx-fp32-") and f"trt{tensorrt.__version__}" in name
+        assert "-sm" in name
 
-    def test_an_engine_that_returns_non_finite_values_is_refused_and_deleted(
-            self, cuda_tensorrt, tmp_path):
+    def test_a_graph_is_exported_only_to_build_and_removed_after(self, cuda_tensorrt, tmp_path):
+        """An engine is all a load needs; the graph can always be written again."""
+        from mozo.runtimes import TensorRTRunner
+
+        calls = []
+
+        def export(path):
+            calls.append(path)
+            _tiny_graph(path.parent, lambda x: x * 5).rename(path)
+            (path.parent / f"{path.name}.data").write_bytes(b"weights an exporter put beside it")
+
+        graph, engines = tmp_path / "work" / "g.onnx", tmp_path / "kept"
+        first = TensorRTRunner(graph, device="cuda", engines=engines, export=export)
+        assert first.built and calls == [graph] and first.engine_path.parent == engines
+        assert not list(graph.parent.glob("g.onnx*"))
+        again = TensorRTRunner(graph, device="cuda", engines=engines, export=export)
+        assert not again.built and calls == [graph]
+
+    def test_a_dynamic_dimension_runs_anywhere_in_its_range(self, cuda_tensorrt, tmp_path):
+        from mozo.runtimes import TensorRTRunner
+
+        torch = cuda_tensorrt
+
+        class Graph(torch.nn.Module):
+            def forward(self, x):
+                return x.cumsum(1)
+
+        path = tmp_path / "dyn.onnx"
+        torch.onnx.export(Graph(), (torch.ones(1, 8),), str(path), input_names=["x"],
+                          output_names=["y"], opset_version=17, dynamo=False,
+                          dynamic_axes={"x": {1: "n"}, "y": {1: "n"}})
+        run = TensorRTRunner(path, device="cuda", shapes={"x": ((1, 2), (1, 8), (1, 64))})
+        for n in (2, 8, 64):
+            x = torch.rand(1, n, device="cuda")
+            assert torch.allclose(run(x)[0], x.cumsum(1), atol=1e-5)
+
+    def test_the_fp16_switch_is_refused_where_tensorrt_has_none(self, cuda_tensorrt, tmp_path):
+        """TensorRT 11 builds strongly typed engines only; a request for its old switch must not
+        quietly build an fp32 engine under an fp16 name."""
+        import tensorrt
+
         from mozo.runtimes import RuntimeError_, TensorRTRunner
 
-        graph = _tiny_graph(tmp_path, lambda x: (x * 0).log())  # log(0) on the zeros probe
-        with pytest.raises(RuntimeError_, match="non-finite y"):
+        if hasattr(tensorrt.BuilderFlag, "FP16"):
+            pytest.skip("this TensorRT still has the fp16 switch")
+        with pytest.raises(RuntimeError_, match="no fp16 switch"):
+            TensorRTRunner(_tiny_graph(tmp_path, lambda x: x), device="cuda", fp16=True)
+
+    def test_an_engine_that_returns_nan_is_refused_and_deleted(self, cuda_tensorrt, tmp_path):
+        from mozo.runtimes import RuntimeError_, TensorRTRunner
+
+        graph = _tiny_graph(tmp_path, lambda x: (x * 0) / (x * 0))  # 0/0 on the zeros probe
+        with pytest.raises(RuntimeError_, match="NaN in y"):
             TensorRTRunner(graph, device="cuda", fp16=False)
         assert not list((tmp_path / "onnx-fp32.engines").glob("*.engine"))
 
@@ -211,6 +260,21 @@ class TestTensorRTRunner:
             outputs = list(pool.map(lambda x: run(x)[0], inputs))
         torch.cuda.synchronize()
         assert all(torch.equal(y, x * 3) for x, y in zip(inputs, outputs))
+
+    def test_minus_infinity_is_a_legitimate_output(self, cuda_tensorrt, tmp_path):
+        """Grounding DINO masks its padded logits with -inf; that must not fail the check."""
+        from mozo.runtimes import TensorRTRunner
+
+        assert TensorRTRunner(_tiny_graph(tmp_path, lambda x: (x * 0).log()), device="cuda",
+                              fp16=False).built
+
+    def test_a_probe_can_be_given_for_a_graph_zeros_would_break(self, cuda_tensorrt, tmp_path):
+        from mozo.runtimes import TensorRTRunner
+
+        torch = cuda_tensorrt
+        graph = _tiny_graph(tmp_path, lambda x: x / x)  # NaN on zeros, fine on anything else
+        assert TensorRTRunner(graph, device="cuda", fp16=False,
+                              probe=(torch.ones(1, 8, device="cuda"),)).built
 
     def test_cpu_is_refused(self, cuda_tensorrt, tmp_path):
         from mozo.runtimes import RuntimeError_, TensorRTRunner

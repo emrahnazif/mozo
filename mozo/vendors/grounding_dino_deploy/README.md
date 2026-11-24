@@ -50,12 +50,14 @@ downloads; `base` is 8.3 AP better, which is why both are carried.
 
 ## Shapes
 
-Unlike every other family in mozo, **nothing is letterboxed to a square.** The short side goes to
-800 and the long side is capped near 1333, aspect preserved, nothing padded — so the tensor a
-photograph becomes depends on the photograph. A 1920×1281 image runs at 1199×800.
+By default, unlike every other family in mozo, **nothing is letterboxed to a square.** The short
+side goes to 800 and the long side is capped near 1333, aspect preserved, nothing padded — so the
+tensor a photograph becomes depends on the photograph. A 1920×1281 image runs at 1199×800.
 
-That is why this package publishes no ONNX or CoreML artifact: a graph exported at one shape
-cannot take another, and the adapter declares `EXECUTES = ("torch",)` so `auto` cannot pick one.
+A graph takes one shape, so for TensorRT the image is fitted into a square instead (`fit_square`,
+800 unless the caller picks `input_size`), and the padding is handed to the model as a mask. The
+square is the caller's choice, so no graph is published: `export.py` writes one on the user's
+machine, for their size, and the adapter builds the engine from it.
 
 ## What comes back
 

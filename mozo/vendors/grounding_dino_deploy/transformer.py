@@ -81,7 +81,7 @@ class ContrastiveEmbed(nn.Module):
 
 
 def encoder_output_proposals(
-    memory: Tensor, padding_mask: Tensor, spatial_shapes: Tensor
+    memory: Tensor, padding_mask: Tensor, level_shapes: list[tuple[int, int]]
 ) -> tuple[Tensor, Tensor]:
     """Turn every image token into a candidate box centred on itself.
 
@@ -92,8 +92,7 @@ def encoder_output_proposals(
     batch, _, _ = memory.shape
     proposals = []
     start = 0
-    for level, (height, width) in enumerate(spatial_shapes):
-        height, width = int(height), int(width)
+    for level, (height, width) in enumerate(level_shapes):
         level_mask = padding_mask[:, start : start + height * width].view(batch, height, width, 1)
         valid_h = torch.sum(~level_mask[:, :, 0, 0], 1)
         valid_w = torch.sum(~level_mask[:, 0, :, 0], 1)
@@ -160,6 +159,7 @@ class _DeformableEncoderLayer(nn.Module):
         pos: Tensor,
         reference_points: Tensor,
         spatial_shapes: Tensor,
+        level_shapes: list[tuple[int, int]],
         key_padding_mask: Tensor,
     ) -> Tensor:
         src = self.norm1(
@@ -169,6 +169,7 @@ class _DeformableEncoderLayer(nn.Module):
                 reference_points=reference_points,
                 value=src,
                 spatial_shapes=spatial_shapes,
+                level_shapes=level_shapes,
                 key_padding_mask=key_padding_mask,
             )
         )
@@ -192,11 +193,12 @@ class _Encoder(nn.Module):
         self.num_layers = num_layers
 
     @staticmethod
-    def reference_points(spatial_shapes: Tensor, valid_ratios: Tensor, device) -> Tensor:
+    def reference_points(
+        level_shapes: list[tuple[int, int]], valid_ratios: Tensor, device
+    ) -> Tensor:
         """A normalised grid of cell centres per level, scaled by each image's valid fraction."""
         points = []
-        for level, (height, width) in enumerate(spatial_shapes):
-            height, width = int(height), int(width)
+        for level, (height, width) in enumerate(level_shapes):
             ref_y, ref_x = torch.meshgrid(
                 torch.linspace(0.5, height - 0.5, height, dtype=torch.float32, device=device),
                 torch.linspace(0.5, width - 0.5, width, dtype=torch.float32, device=device),
@@ -213,6 +215,7 @@ class _Encoder(nn.Module):
         src: Tensor,
         pos: Tensor,
         spatial_shapes: Tensor,
+        level_shapes: list[tuple[int, int]],
         valid_ratios: Tensor,
         key_padding_mask: Tensor,
         memory_text: Tensor,
@@ -221,7 +224,7 @@ class _Encoder(nn.Module):
         text_self_attention_masks: Tensor,
     ) -> tuple[Tensor, Tensor]:
         output = src
-        reference = self.reference_points(spatial_shapes, valid_ratios, src.device)
+        reference = self.reference_points(level_shapes, valid_ratios, src.device)
         pos_text = token_position(position_ids[..., None], num_pos_feats=256)
 
         for index in range(self.num_layers):
@@ -241,6 +244,7 @@ class _Encoder(nn.Module):
                 pos=pos,
                 reference_points=reference,
                 spatial_shapes=spatial_shapes,
+                level_shapes=level_shapes,
                 key_padding_mask=key_padding_mask,
             )
         return output, memory_text
@@ -273,6 +277,7 @@ class _DecoderLayer(nn.Module):
         memory: Tensor,
         memory_key_padding_mask: Tensor,
         memory_spatial_shapes: Tensor,
+        memory_level_shapes: list[tuple[int, int]],
     ) -> Tensor:
         q = k = tgt + tgt_query_pos
         tgt = self.norm2(tgt + self.self_attn(q, k, tgt)[0])
@@ -294,6 +299,7 @@ class _DecoderLayer(nn.Module):
                 reference_points=tgt_reference_points.transpose(0, 1).contiguous(),
                 value=memory.transpose(0, 1),
                 spatial_shapes=memory_spatial_shapes,
+                level_shapes=memory_level_shapes,
                 key_padding_mask=memory_key_padding_mask,
             ).transpose(0, 1)
         )
@@ -317,6 +323,7 @@ class _Decoder(nn.Module):
         memory_key_padding_mask: Tensor,
         refpoints_unsigmoid: Tensor,
         spatial_shapes: Tensor,
+        level_shapes: list[tuple[int, int]],
         valid_ratios: Tensor,
         memory_text: Tensor,
         text_attention_mask: Tensor,
@@ -343,6 +350,7 @@ class _Decoder(nn.Module):
                 memory=memory,
                 memory_key_padding_mask=memory_key_padding_mask,
                 memory_spatial_shapes=spatial_shapes,
+                memory_level_shapes=level_shapes,
             )
 
             delta = self.bbox_embed[index](output)
@@ -432,10 +440,10 @@ class Transformer(nn.Module):
         text_self_attention_masks: Tensor,
     ) -> tuple[list[Tensor], list[Tensor], Tensor]:
         """Return ``(per-layer hidden states, per-layer reference boxes, fused text)``."""
-        src_flatten, mask_flatten, pos_flatten, spatial_shapes = [], [], [], []
+        src_flatten, mask_flatten, pos_flatten, level_shapes = [], [], [], []
         for level, (src, mask, pos) in enumerate(zip(srcs, masks, pos_embeds)):
             batch, channels, height, width = src.shape
-            spatial_shapes.append((height, width))
+            level_shapes.append((height, width))
             src_flatten.append(src.flatten(2).transpose(1, 2))
             mask_flatten.append(mask.flatten(1))
             pos_flatten.append(
@@ -445,8 +453,11 @@ class Transformer(nn.Module):
         src_flatten = torch.cat(src_flatten, 1)
         mask_flatten = torch.cat(mask_flatten, 1)
         pos_flatten = torch.cat(pos_flatten, 1)
+        # Two forms of the same sizes: a tensor for the arithmetic that divides by them, and the
+        # Python integers the loops and splits read -- never read back off the tensor, which would
+        # be a device sync per read and a value ``torch.export`` cannot trace through.
         spatial_shapes = torch.as_tensor(
-            spatial_shapes, dtype=torch.long, device=src_flatten.device
+            level_shapes, dtype=torch.long, device=src_flatten.device
         )
         valid_ratios = torch.stack([self.valid_ratio(m) for m in masks], 1)
 
@@ -454,6 +465,7 @@ class Transformer(nn.Module):
             src_flatten,
             pos=pos_flatten,
             spatial_shapes=spatial_shapes,
+            level_shapes=level_shapes,
             valid_ratios=valid_ratios,
             key_padding_mask=mask_flatten,
             memory_text=encoded_text,
@@ -465,7 +477,7 @@ class Transformer(nn.Module):
         # Language-guided query selection: score every image token against the prompt, keep the
         # best `num_queries`, and use their proposals as the decoder's starting boxes.
         output_memory, output_proposals = encoder_output_proposals(
-            memory, mask_flatten, spatial_shapes
+            memory, mask_flatten, level_shapes
         )
         output_memory = self.enc_output_norm(self.enc_output(output_memory))
 
@@ -485,6 +497,7 @@ class Transformer(nn.Module):
             memory_key_padding_mask=mask_flatten,
             refpoints_unsigmoid=refpoint.transpose(0, 1),
             spatial_shapes=spatial_shapes,
+            level_shapes=level_shapes,
             valid_ratios=valid_ratios,
             memory_text=memory_text,
             text_attention_mask=~text_token_mask,

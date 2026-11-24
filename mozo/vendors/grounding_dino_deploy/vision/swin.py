@@ -201,8 +201,12 @@ class _Stage(nn.Module):
 
     def _shift_mask(self, height: int, width: int, device: torch.device) -> Tensor:
         """The mask that stops a shifted window attending across the wrap-around seam."""
-        padded_h = -(-height // self.window_size) * self.window_size
-        padded_w = -(-width // self.window_size) * self.window_size
+        # A ceiling division, written so it stays one when traced. Upstream's ``-(-n // w)`` is
+        # the same number in Python, but ONNX divides integers by truncating toward zero, so the
+        # exported graph computed one row of windows too few and its mask stopped matching the
+        # windows it was applied to -- a reshape TensorRT refuses on any side not a multiple of 7.
+        padded_h = (height + self.window_size - 1) // self.window_size * self.window_size
+        padded_w = (width + self.window_size - 1) // self.window_size * self.window_size
         regions = torch.zeros((1, padded_h, padded_w, 1), device=device)
         slices = (
             slice(0, -self.window_size),

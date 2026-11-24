@@ -521,10 +521,15 @@ class TensorRTRunner:
     """A TensorRT engine built from an ONNX graph, callable on CUDA tensors.
 
     An engine is specific to the GPU and the TensorRT version that built it, so it cannot be
-    published: mozo publishes the graph, and the first load on a machine builds the engine and
-    keeps it beside the graph, in ``<graph>.engines/``, named for the precision, the GPU and the
-    TensorRT version. Every later load deserialises it in about a second. ``weights.remove``
-    deletes it with the model, and ``weights.cached`` reports it as ``"built"``.
+    published. The first load on a machine builds it from a graph and keeps it, named for the
+    graph, the GPU and the TensorRT version; every later load deserialises it in about a second.
+    Kept under a model's cache directory, ``weights.remove`` deletes it with the model and
+    ``weights.cached`` reports it as ``"built"``.
+
+    **Strongly typed: precision comes from the graph.** TensorRT 11 builds no other kind of
+    engine -- its fp16 switch is gone -- so an fp16 engine is built from a graph whose own types
+    are fp16, such as one exported under torch's fp16 autocast. That also makes the engine's
+    precision the graph author's decision rather than TensorRT's, op by op.
 
     **It takes and returns torch tensors on the device**, unlike the other runners here, which
     speak numpy. Those runtimes copy to the host by nature; this one would pay a device round
@@ -537,22 +542,34 @@ class TensorRTRunner:
     Args:
         path: The ``.onnx`` graph to build from.
         device: A CUDA device, ``"cuda"`` or ``"cuda:N"``.
-        fp16: Let TensorRT run layers in half precision. Its fp16 kernels are less precise than
-            torch's -- see the family's documentation for what that costs, measured.
+        engines: Directory the engine is kept in. Defaults to ``<graph>.engines/`` beside it.
+        export: Writes the graph to *path* when called with it. Given, the graph need not exist:
+            it is written only if an engine has to be built, and deleted once it has been, since
+            it can always be written again and an engine is all a load needs.
+        shapes: ``{input: (min, preferred, max)}`` for every input with a dynamic dimension --
+            the range the engine accepts, and the shape it is tuned for.
+        probe: Inputs to run a freshly built engine on once, refusing it if any output comes back
+            NaN. Zeros by default, which suits an image graph; a graph with masks needs real
+            inputs, because all-zero masks hide everything and NaN is then what torch gives too.
+        fp16: TensorRT 10's weakly typed fp16 switch, kept only for a graph that does not carry
+            fp16 types yet (OWLv2's). TensorRT 11 has no such switch, and asking for it there
+            raises rather than quietly building in fp32.
 
     Attributes:
         inputs: Input tensor names, in the order the engine declares them.
         outputs: Output tensor names, in the order the engine declares them.
         input_shape: The first input's shape.
-        engine_path: Where the engine is cached.
-        built: Whether this load built the engine, rather than finding it cached.
+        engine_path: Where the engine is kept.
+        built: Whether this load built the engine, rather than finding it kept.
 
     Examples:
-        >>> run = TensorRTRunner("onnx-fp32.onnx", device="cuda")        # doctest: +SKIP
+        >>> run = TensorRTRunner("model-fp16.onnx", device="cuda")        # doctest: +SKIP
         >>> (patches,) = run(pixels)                                       # doctest: +SKIP
     """
 
-    def __init__(self, path: str | Path, device: str = "cuda", *, fp16: bool = True) -> None:
+    def __init__(self, path: str | Path, device: str = "cuda", *, engines: str | Path | None = None,
+                 export=None, shapes: dict[str, tuple] | None = None, probe: tuple | None = None,
+                 fp16: bool = False) -> None:
         try:
             import tensorrt as trt
         except ImportError as error:  # pragma: no cover - depends on the install
@@ -562,6 +579,11 @@ class TensorRTRunner:
             ) from error
         import torch
 
+        if fp16 and not hasattr(trt.BuilderFlag, "FP16"):
+            raise RuntimeError_(
+                f"TensorRT {trt.__version__} has no fp16 switch: an fp16 engine is built from a "
+                "graph whose own types are fp16, and this graph's are not."
+            )
         self._torch, self._trt = torch, trt
         self.device = torch.device(device)
         if self.device.type != "cuda":
@@ -569,12 +591,13 @@ class TensorRTRunner:
         if self.device.index is None:
             self.device = torch.device("cuda", torch.cuda.current_device())
 
+        graph = Path(path)
         self._logger = trt.Logger(trt.Logger.ERROR)
         with torch.cuda.device(self.device):
-            self.engine_path = self._engine_path(Path(path), fp16)
+            self.engine_path = self._engine_path(graph, Path(engines) if engines else None, fp16)
             self.built = not self.engine_path.is_file()
             # A fresh build is deserialised from the bytes in hand rather than read back.
-            blob = (self._build(Path(path), fp16) if self.built
+            blob = (self._build(graph, export, shapes or {}, fp16) if self.built
                     else self.engine_path.read_bytes())
             engine = trt.Runtime(self._logger).deserialize_cuda_engine(blob)
             del blob
@@ -597,18 +620,19 @@ class TensorRTRunner:
         self._lock = Lock()
 
         if self.built:
-            self._check()
+            self._check(probe)
 
-    def _engine_path(self, graph: Path, fp16: bool) -> Path:
+    def _engine_path(self, graph: Path, engines: Path | None, fp16: bool) -> Path:
         import re
 
         props = self._torch.cuda.get_device_properties(self.device)
         gpu = re.sub(r"[^a-z0-9]+", "-", props.name.lower()).strip("-")
-        precision = "fp16" if fp16 else "fp32"
-        name = f"{precision}-{gpu}-sm{props.major}{props.minor}-trt{self._trt.__version__}.engine"
-        return graph.with_suffix(_ENGINES_SUFFIX) / name
+        flag = "-fp16" if fp16 else ""
+        name = (f"{graph.stem}{flag}-{gpu}-sm{props.major}{props.minor}"
+                f"-trt{self._trt.__version__}.engine")
+        return (engines or graph.with_suffix(_ENGINES_SUFFIX)) / name
 
-    def _build(self, graph: Path, fp16: bool):
+    def _build(self, graph: Path, export, shapes: dict, fp16: bool):
         """Build the engine on a thread of its own, wait for it, and return the serialised engine.
 
         TensorRT's builder switches the C locale of the thread that runs it to ASCII and does not
@@ -619,23 +643,34 @@ class TensorRTRunner:
         """
         from threading import Thread
 
+        exported = export is not None and not graph.is_file()
+        if exported:
+            graph.parent.mkdir(parents=True, exist_ok=True)
+            _log.warning("[mozo] exporting %s to build a TensorRT engine from.", graph.name)
+            export(graph)
+
         result: list = []
 
         def build() -> None:
             try:
                 with self._torch.cuda.device(self.device):
-                    result.append(self._build_here(graph, fp16))
+                    result.append(self._build_here(graph, shapes, fp16))
             except BaseException as error:  # handed back to the caller below
                 result.append(error)
 
         worker = Thread(target=build, name="mozo-tensorrt-build")
         worker.start()
         worker.join()
+        if exported:
+            # The graph and the weights an exporter may have written beside it: an engine is all
+            # a later load needs, and the graph can always be written again.
+            for leftover in graph.parent.glob(f"{graph.name}*"):
+                leftover.unlink(missing_ok=True)
         if isinstance(result[0], BaseException):
             raise result[0]
         return result[0]
 
-    def _build_here(self, graph: Path, fp16: bool):
+    def _build_here(self, graph: Path, shapes: dict, fp16: bool):
         import os
         import time
         import uuid
@@ -643,12 +678,13 @@ class TensorRTRunner:
         trt = self._trt
         _log.warning(
             "[mozo] building a TensorRT engine from %s for %s. This happens once per GPU and "
-            "TensorRT version and takes about a minute; later loads reuse it.",
+            "TensorRT version and takes a few minutes; later loads reuse it.",
             graph.name, self._torch.cuda.get_device_name(self.device),
         )
         start = time.perf_counter()
         builder = trt.Builder(self._logger)
-        network = builder.create_network(0)
+        typing = 0 if fp16 else 1 << int(trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED)
+        network = builder.create_network(typing)
         parser = trt.OnnxParser(network, self._logger)
         if not parser.parse_from_file(str(graph)):
             errors = "; ".join(str(parser.get_error(i)) for i in range(parser.num_errors))
@@ -656,6 +692,11 @@ class TensorRTRunner:
         config = builder.create_builder_config()
         if fp16:
             config.set_flag(trt.BuilderFlag.FP16)
+        if shapes:
+            profile = builder.create_optimization_profile()
+            for name, (low, preferred, high) in shapes.items():
+                profile.set_shape(name, low, preferred, high)
+            config.add_optimization_profile(profile)
         blob = builder.build_serialized_network(network, config)
         if blob is None:
             raise RuntimeError_(f"TensorRT could not build an engine from {graph.name}.")
@@ -670,17 +711,27 @@ class TensorRTRunner:
                      time.perf_counter() - start)
         return blob
 
-    def _check(self) -> None:
-        """Run a freshly built engine once and refuse it if anything comes back non-finite."""
+    def _check(self, probe: tuple | None) -> None:
+        """Run a freshly built engine once and refuse it if anything comes back NaN.
+
+        NaN, not non-finite: ``-inf`` is a legitimate output -- Grounding DINO masks the padding
+        of its logits with it -- and NaN never is.
+        """
         torch = self._torch
-        probe = torch.zeros(self.input_shape, dtype=self._dtypes[self.inputs[0]],
-                            device=self.device)
-        bad = [name for name, out in zip(self.outputs, self(probe))
-               if not torch.isfinite(out).all()]
+        if probe is None:
+            # Zeros at the shape the engine was optimised for: a fair test of an image graph,
+            # not of one whose masks would then hide every token.
+            probe = [torch.zeros(tuple(self._engine.get_tensor_profile_shape(name, 0)[1])
+                                 if -1 in self._engine.get_tensor_shape(name)
+                                 else tuple(self._engine.get_tensor_shape(name)),
+                                 dtype=self._dtypes[name], device=self.device)
+                     for name in self.inputs]
+        bad = [name for name, out in zip(self.outputs, self(*probe))
+               if out.is_floating_point() and torch.isnan(out).any()]
         if bad:
             self.engine_path.unlink(missing_ok=True)
             raise RuntimeError_(
-                f"the TensorRT engine built from this graph returned non-finite {', '.join(bad)} "
+                f"the TensorRT engine built from this graph returned NaN in {', '.join(bad)} "
                 "on a test input, so it was deleted. Run this model on torch instead."
             )
 

@@ -14,8 +14,9 @@ decoded span.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 import numpy as np
 import torch
@@ -23,7 +24,7 @@ import torch
 from .boxes import Detection, decode
 from .checkpoint import build
 from .config import Spec
-from .image import preprocess
+from .image import fit_square, preprocess
 from .network import phrase_masks
 from .text.tokenizer import Tokenizer
 
@@ -55,6 +56,18 @@ class Predictor:
         weights: Path to a published checkpoint.
         spec: Which variant it is.
         device: Where to run.
+        autocast: Run the forward under CUDA fp16 autocast. Not upstream's: Grounding DINO is
+            published and evaluated in fp32. Measured against it on 500 COCO images, autocast
+            keeps the AP and changes detections at the rate fp32 itself does when only its input
+            is rounded to fp16 (``docs/models/grounding-dino.md``).
+        input_size: Letterbox every image into this square, with a padding mask, instead of
+            upstream's aspect-preserving resize. ``None`` -- the default -- is upstream's resize.
+            A square is what a compiled graph needs; it changes the answers, because the picture
+            is then smaller than the resize makes it. See :func:`~.image.fit_square`.
+        forward: A compiled replacement for the network, called as the network is, with the
+            pixel mask last: ``forward(image, input_ids, token_type_ids, token_mask, attention,
+            position_ids, pixel_mask) -> (logits, boxes)``. The checkpoint is then not loaded at
+            all, and *weights* may be ``None``. Requires *input_size*: a graph has one shape.
 
     Attributes:
         spec: The variant's geometry.
@@ -65,15 +78,22 @@ class Predictor:
         >>> model(image, ["a cat", "a laptop"])             # doctest: +SKIP
     """
 
-    def __init__(self, weights: str | Path, spec: Spec, device: str = "cpu") -> None:
+    def __init__(self, weights: str | Path | None, spec: Spec, device: str = "cpu",
+                 autocast: bool = False, input_size: int | None = None,
+                 forward: Callable | None = None) -> None:
+        if forward is not None and input_size is None:
+            raise ValueError("a compiled forward runs at one shape; give it an input_size")
         self.spec = spec
         self.device = device
+        self.autocast = autocast
+        self.input_size = input_size
         self.tokenizer = Tokenizer()
         # Built once, and on the CPU: the text setup runs there. See __call__.
         self._separators = torch.tensor(
             self.tokenizer.convert_tokens_to_ids(list(SEPARATORS)), dtype=torch.long
         )
-        self.model = build(spec, weights, device=device)
+        self.model = build(spec, weights, device=device) if forward is None else None
+        self._forward = forward or self.model
 
     def __call__(
         self,
@@ -111,7 +131,15 @@ class Predictor:
             )
 
         source_height, source_width = image.shape[:2]
-        batch = preprocess(image, self.spec.short_side, self.spec.max_side)[None].to(self.device)
+        if self.input_size is None:
+            batch = preprocess(image, self.spec.short_side, self.spec.max_side)[None]
+            padding = ()
+        else:
+            # The boxes come back normalised to the picture, not to the square -- the mask is what
+            # tells the model where the picture ends -- so decoding below is the same either way.
+            canvas, mask_2d = fit_square(image, self.input_size)
+            batch, padding = canvas[None], (mask_2d[None].to(self.device),)
+        batch = batch.to(self.device)
 
         # The text setup is built on the CPU and moved once, rather than built where the model
         # lives. ``phrase_masks`` is twenty tiny integer kernels and a ``nonzero`` -- which on an
@@ -129,14 +157,18 @@ class Predictor:
                 "may not contain '.' or '?', which separate concepts."
             )
 
-        with torch.inference_mode():
-            logits, boxes = self.model(
+        # Entered only when asked: ``torch.autocast("cuda", enabled=False)`` still warns on a
+        # machine without CUDA, and the fp32 path should be exactly what it was.
+        half = torch.autocast("cuda", torch.float16) if self.autocast else nullcontext()
+        with torch.inference_mode(), half:
+            logits, boxes = self._forward(
                 batch,
                 input_ids.to(self.device),
                 torch.tensor([types], dtype=torch.long, device=self.device),
                 torch.tensor([mask], dtype=torch.bool, device=self.device),
                 attention.to(self.device),
                 position_ids.to(self.device),
+                *padding,
             )
 
         return decode(

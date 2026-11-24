@@ -19,6 +19,8 @@ implementation; that needs a checkout and does not run here.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from conftest import as_pixelflow_reports, published, require_weights
@@ -79,15 +81,17 @@ def test_every_published_variant_ships_its_terms(variant):
 
 @pytest.mark.parametrize("variant", ALL)
 def test_only_torch_is_published(variant):
-    """The input size is not fixed, so there is no graph to export. If that ever changes, this
-    test is the reminder that ``EXECUTES`` has to change with it."""
+    """The input size is the user's to choose, so no graph is published: a TensorRT engine is
+    exported from the checkpoint at the chosen size. If a graph is ever published, this test is
+    the reminder that ``DERIVES`` has to change with it."""
     from mozo.adapters.grounding_dino import GroundingDinoPredictor
 
     keys = published(FAMILY, variant)
     if not keys:
         pytest.skip(f"{FAMILY}/{variant} publishes nothing")
     assert keys == ["torch-fp32"]
-    assert GroundingDinoPredictor.EXECUTES == ("torch",)
+    assert GroundingDinoPredictor.EXECUTES == ("torch", "tensorrt")
+    assert GroundingDinoPredictor.DERIVES["tensorrt-fp16"] == "torch-fp32"
 
 
 # --- the prompt contract ---
@@ -257,3 +261,174 @@ def test_the_resize_preserves_aspect_and_caps_the_long_side():
     # Already square and already the target: returned untouched by the early branch.
     assert resized_size(800, 800, 800, 1333) == (800, 800)
     assert resized_size(100, 100, 800, 1333) == (800, 800)
+
+
+# --- reduced precision -----------------------------------------------------------------------------
+
+def test_cuda_runs_fp16_by_default():
+    """How derived runtimes are chosen is ``test_runtimes.py``'s; this pins the registry entry."""
+    from mozo.registry import DERIVES, EXECUTES
+    from mozo.runtimes import select_runtime
+    from mozo.weights import artifacts
+
+    def choose(device):
+        return select_runtime(device, artifacts("grounding_dino", "tiny"), "auto",
+                              executes=EXECUTES["grounding_dino"],
+                              derives=DERIVES["grounding_dino"])
+
+    assert choose("cuda") == "torch-fp16"
+    assert choose("cpu") == choose("mps") == "torch-fp32"
+
+
+def test_the_window_padding_is_upstreams_ceiling_at_every_size():
+    """Written as ``(n + w - 1) // w`` so it exports; upstream's ``-(-n // w)`` traces to a
+    truncating ONNX division. The two must agree on every size the backbone can see."""
+    for window in (7, 12):
+        for n in range(1, 2000):
+            assert (n + window - 1) // window * window == -(-n // window) * window
+
+
+def test_fp16_finds_what_fp32_finds_on_the_fixture(image):
+    """Not a parity gate -- fp16 moves borderline detections, as documented -- but the confident
+    ones on the fixture must survive: same phrases, boxes within a few pixels."""
+    import numpy as np
+    import torch
+
+    from mozo import weights
+
+    if not torch.cuda.is_available():
+        pytest.skip("needs CUDA")
+    if not weights.is_cached("grounding_dino", "tiny", "torch-fp32"):
+        pytest.skip("grounding_dino/tiny is not downloaded here")
+    from mozo.adapters.grounding_dino import GroundingDinoPredictor
+
+    prompts = list(PROMPTS)
+    want = GroundingDinoPredictor("tiny", "cuda", runtime="torch-fp32").predict(image, prompts)
+    got = GroundingDinoPredictor("tiny", "cuda", runtime="torch-fp16").predict(
+        image, prompts, threshold=0.3)
+    assert len(want) > 0
+    for found in want:
+        nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))
+        assert nearest.class_name == found.class_name
+        assert float(np.abs(np.subtract(nearest.bbox, found.bbox)).max()) < 5.0
+
+
+# --- a fixed square, and TensorRT ------------------------------------------------------------------
+
+@pytest.mark.parametrize("height, width", [(480, 640), (640, 480), (500, 4000), (800, 800), (3, 900)])
+def test_fit_square_fills_the_long_side_and_masks_the_rest(height, width):
+    """The long side is exactly the square's -- never a pixel past it, which upstream's resize
+    rule can be -- and the mask is True on padding and nowhere else."""
+    import numpy as np
+
+    from mozo.vendors.grounding_dino_deploy.image import fit_square, fitted_size
+
+    h, w = fitted_size(height, width, 800)
+    assert max(h, w) == 800 and min(h, w) >= 1
+    assert abs(h / w - height / width) < 0.01 + 1 / min(h, w)
+    canvas, padding = fit_square(np.full((height, width, 3), 200, np.uint8), 800)
+    assert canvas.shape == (3, 800, 800) and padding.shape == (800, 800)
+    assert not padding[:h, :w].any() and padding.sum() == 800 * 800 - h * w
+    assert (canvas[:, h:, :] == 0).all() and (canvas[:, :, w:] == 0).all()
+
+
+def test_a_compiled_forward_needs_a_square():
+    from mozo.vendors.grounding_dino_deploy import SPECS, Predictor
+
+    with pytest.raises(ValueError, match="input_size"):
+        Predictor(None, SPECS["tiny"], forward=lambda *inputs: None)
+
+
+def test_tensorrt_is_offered_on_cuda_and_never_chosen():
+    from mozo.registry import DERIVES, EXECUTES
+    from mozo.runtimes import select_runtime
+    from mozo.weights import artifacts
+
+    def choose(device, runtime="auto"):
+        return select_runtime(device, artifacts("grounding_dino", "tiny"), runtime,
+                              executes=EXECUTES["grounding_dino"],
+                              derives=DERIVES["grounding_dino"])
+
+    assert choose("cuda", "tensorrt-fp16") == "tensorrt-fp16"
+    assert choose("cuda") == "torch-fp16"
+
+
+def test_tensorrt_10_is_refused_with_the_reason(monkeypatch):
+    """10.13 miscompiles the position encoding; a user on it must be told, not handed boxes."""
+    import sys
+    import types
+
+    from mozo.adapters.grounding_dino import GroundingDinoPredictor
+    from mozo.runtimes import RuntimeError_
+
+    monkeypatch.setitem(sys.modules, "tensorrt", types.SimpleNamespace(__version__="10.13.0.35"))
+    adapter = GroundingDinoPredictor.__new__(GroundingDinoPredictor)
+    adapter.variant, adapter.device, adapter.input_size = "tiny", "cuda", 800
+    with pytest.raises(RuntimeError_, match="TensorRT 11 or later"):
+        adapter._engine(Path("unused.pth"))
+
+
+def test_a_missing_exporter_is_named_with_its_pip_line(monkeypatch):
+    """Checked before the checkpoint loads for a minute, not after: the export needs them."""
+    import importlib.util
+
+    from mozo.vendors.grounding_dino_deploy.export import require_exporter
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec",
+                        lambda name, *a: None if name == "onnxscript" else real(name, *a))
+    with pytest.raises(ImportError, match="pip install onnxscript"):
+        require_exporter()
+
+
+def test_the_profile_spans_every_token_input():
+    from mozo.vendors.grounding_dino_deploy.export import INPUTS, profile
+
+    ranges = profile(64, 256)
+    assert set(ranges) == set(INPUTS) - {"image", "pixel_mask"}
+    assert ranges["attention"] == ((1, 2, 2), (1, 64, 64), (1, 256, 256))
+    assert ranges["input_ids"] == ((1, 2), (1, 64), (1, 256))
+
+
+def test_input_size_is_checked():
+    from mozo.adapters.grounding_dino import GroundingDinoPredictor
+
+    with pytest.raises(ValueError, match="between 64 and 2048"):
+        GroundingDinoPredictor("tiny", "cpu", input_size=10)
+
+
+def _on_cuda(runtime, **options):
+    from importlib.util import find_spec
+
+    import torch
+
+    from mozo import weights
+
+    if not torch.cuda.is_available():
+        pytest.skip("needs CUDA")
+    if runtime.startswith("tensorrt"):
+        if find_spec("tensorrt") is None:
+            pytest.skip("needs tensorrt")
+        import tensorrt
+
+        if int(tensorrt.__version__.split(".")[0]) < 11:
+            pytest.skip("needs TensorRT 11 or later")
+    if not weights.is_cached("grounding_dino", "tiny", "torch-fp32"):
+        pytest.skip("grounding_dino/tiny is not downloaded here")
+    from mozo.adapters.grounding_dino import GroundingDinoPredictor
+
+    return GroundingDinoPredictor("tiny", "cuda", runtime=runtime, **options)
+
+
+def test_a_square_on_torch_and_on_tensorrt_agree(image):
+    """The same square on both: what TensorRT changes is precision, not preprocessing. Builds an
+    engine on the first run on a machine, which takes a few minutes."""
+    import numpy as np
+
+    want = _on_cuda("torch-fp32", input_size=800).predict(image, list(PROMPTS))
+    got = _on_cuda("tensorrt-fp16").predict(image, list(PROMPTS), threshold=0.3)
+    assert len(want) > 0
+    for found in want:
+        nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))
+        assert nearest.class_name == found.class_name
+        assert float(np.abs(np.subtract(nearest.bbox, found.bbox)).max()) < 5.0

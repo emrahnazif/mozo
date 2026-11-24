@@ -93,8 +93,9 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 #: The adapters read it from here, so there is one statement of it.
 EXECUTES: dict[str, tuple[str, ...]] = {
     **{family: ("torch",)
-       for family in ("ben2", "clip", "easyocr", "edgetam", "grounding_dino", "moebius",
-                      "sam2", "siglip2")},
+       for family in ("ben2", "clip", "easyocr", "edgetam", "moebius", "sam2", "siglip2")},
+    # A TensorRT engine exported from the checkpoint at the input size the user picks.
+    "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
     # Not "onnx": the vision graph is published to build TensorRT engines from, and ONNX Runtime
     # ran it twice as slow as torch on the CPU. See the OWLv2 PROVENANCE, under Export.
@@ -106,14 +107,16 @@ EXECUTES: dict[str, tuple[str, ...]] = {
 #:
 #: ``torch-fp16`` is the fp32 checkpoint with part of the network cast to half precision, so it
 #: has no file to publish. A TensorRT engine is specific to the GPU and the TensorRT version that
-#: built it, so it *cannot* be published: it is built from the published ONNX graph on first load
-#: and cached beside it. A derived runtime is offered only where its source is published, and it
+#: built it, so it *cannot* be published: it is built on first load and cached -- from a published
+#: ONNX graph (OWLv2), or from a graph exported from the checkpoint there and then, where the graph
+#: depends on an input size the user chooses (Grounding DINO). A derived runtime is offered only where its source is published, and it
 #: fetches its source's files, so ``fetch``, ``is_cached`` and ``download_size`` stay truthful.
 #:
-#: Each entry is a measured decision, not a capability: OWLv2's fp16 was measured on 500 COCO
-#: images against fp32's own noise floor before it was offered. See ``docs/models/owlv2.md``.
+#: Each entry is a measured decision, not a capability: each family's fp16 was measured on 500
+#: COCO images against fp32's own noise floor before it was offered. See the family's page.
 DERIVES: dict[str, dict[str, str]] = {
     "owlv2": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp32"},
+    "grounding_dino": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "torch-fp32"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``

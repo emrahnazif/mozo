@@ -137,6 +137,25 @@ to. It looks like an oversight and it is what the published weights were trained
 with. Reproduced exactly. mozo never pads a caption anyway — one caption per call — so it is
 unreachable in practice and would matter the moment a batched path existed.
 
+### 7. Written to export: level sizes as integers, an exact ceiling, a padding mask
+
+None of these changes a number on upstream's path; each is checked bit-exact against it.
+
+- **Feature-map sizes travel as Python integers** (`level_shapes`) beside the `spatial_shapes`
+  tensor, instead of being read back with `spatial_shapes.tolist()`. `torch.export` cannot follow
+  a value read off a tensor, and the read was a GPU sync per forward. 32 of 32 cases came out
+  identical, both variants, fp32 and fp16.
+- **Swin's ceiling division is `(n + w - 1) // w`**, not `-(-n // w)`. The two agree on every
+  positive size, but the second traces to ONNX `Div`, which truncates, so an exported graph had one
+  row of windows too few.
+- **`forward` takes an optional `pixel_mask`**, and `fit_square` (`image.py`) fits an image into a
+  fixed square with one. Upstream's code builds this mask for batched training and throws it away
+  for single images. mozo uses it only when the caller asks for a square (`input_size`, and always
+  on TensorRT, whose engine takes one shape), so the model ignores the padding. Without the mask,
+  AP on 500 COCO images fell 6–12 points.
+- **`export.py`** is mozo's own: it writes the graph a TensorRT engine is built from, with the
+  caption length dynamic.
+
 ## Traps that survive as tests
 
 Each of these runs, produces plausible output, and is wrong.

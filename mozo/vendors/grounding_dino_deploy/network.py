@@ -13,6 +13,7 @@ text token -- there is no class head, because there is no class list.
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor, nn
 
 from .config import Spec
@@ -160,6 +161,7 @@ class GroundingDino(nn.Module):
         token_mask: Tensor,
         self_attention_mask: Tensor,
         position_ids: Tensor,
+        pixel_mask: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         """Run one image against one caption.
 
@@ -170,6 +172,9 @@ class GroundingDino(nn.Module):
             token_mask: ``(batch, tokens)``, True for real tokens.
             self_attention_mask: ``(batch, tokens, tokens)`` from :func:`phrase_masks`.
             position_ids: ``(batch, tokens)`` from :func:`phrase_masks`.
+            pixel_mask: ``(batch, height, width)``, True where *image* is padding -- what
+                :func:`~.image.fit_square` returns. ``None`` for an image that is all picture,
+                which is upstream's single-image inference and this method's own path.
 
         Returns:
             ``(logits, boxes)`` from the last decoder layer -- ``(batch, queries, max_text_len)``
@@ -186,15 +191,24 @@ class GroundingDino(nn.Module):
         srcs = [self.input_proj[level](feature) for level, feature in enumerate(features)]
         srcs.append(self.input_proj[-1](features[-1]))
 
-        # No padding is ever added -- one image per call, resized rather than letterboxed -- so
-        # every mask is all-False. They are still carried because the encoder's valid-ratio and
-        # proposal maths read them, and inventing a padding-free shortcut there would be a
-        # second implementation of the same arithmetic. Derived from ``srcs`` rather than built
-        # alongside them, so the two cannot fall out of step.
-        masks = [
-            torch.zeros((src.shape[0], *src.shape[2:]), dtype=torch.bool, device=src.device)
-            for src in srcs
-        ]
+        # Without a pixel mask nothing is padding -- one image per call, resized rather than
+        # letterboxed -- so every mask is all-False. They are still carried because the encoder's
+        # valid-ratio and proposal maths read them, and inventing a padding-free shortcut there
+        # would be a second implementation of the same arithmetic. Derived from ``srcs`` rather
+        # than built alongside them, so the two cannot fall out of step.
+        #
+        # With one, each level's mask is the pixel mask resized to that level, nearest -- which
+        # is how upstream's backbone masks every level of a padded batch.
+        if pixel_mask is None:
+            masks = [
+                torch.zeros((src.shape[0], *src.shape[2:]), dtype=torch.bool, device=src.device)
+                for src in srcs
+            ]
+        else:
+            masks = [
+                F.interpolate(pixel_mask[None].float(), size=src.shape[-2:]).to(torch.bool)[0]
+                for src in srcs
+            ]
         positions = [
             image_position(
                 mask,

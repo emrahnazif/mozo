@@ -31,9 +31,12 @@ import numpy as np
 
 from .. import registry
 from ..image import load_image
-from ..runtimes import get_default_device, select_runtime
+from ..runtimes import (RuntimeError_, TensorRTRunner, _tensorrt_install_hint,
+                        free_device_memory, get_default_device, select_runtime)
 from ..vendors.grounding_dino_deploy import SPECS, VARIANTS, Predictor
-from ..weights import artifacts, resolve
+from ..vendors.grounding_dino_deploy.checkpoint import build
+from ..vendors.grounding_dino_deploy.export import example, export, profile, require_exporter
+from ..weights import _ENGINES_SUFFIX, artifacts, framework_of, resolve
 
 try:
     import pixelflow as pf
@@ -56,7 +59,12 @@ class GroundingDinoPredictor:
         variant: Which published model. ``tiny`` is Swin-T and 82% of upstream's own downloads;
             ``base`` is Swin-B and 8.3 box AP better on COCO zero-shot, for 35% more weights.
         device: Where to run. Defaults to the best available.
-        runtime: Which artifact to execute. ``auto`` picks the fastest published one.
+        runtime: Which artifact to execute. ``auto`` picks the fastest published one;
+            ``tensorrt-fp16`` must be asked for, and needs TensorRT 11 or later.
+        input_size: Fit every image into this square, padded, instead of upstream's resize to a
+            short side of 800. ``None`` -- the default -- is upstream's resize, except on
+            ``tensorrt-fp16``, which needs one fixed shape and uses 800. A smaller square is
+            faster and finds less: see the measured trade-off in the family's documentation.
         checkpoint_path: Your own checkpoint, instead of the published weights.
         revision: Which published revision to use. Defaults to the newest.
 
@@ -64,6 +72,7 @@ class GroundingDinoPredictor:
         variant: The variant in use.
         device: Where it runs.
         runtime: Which artifact is executing.
+        input_size: The square images are fitted into, or ``None`` for upstream's resize.
 
     Examples:
         >>> model = GroundingDinoPredictor()                            # doctest: +SKIP
@@ -76,11 +85,17 @@ class GroundingDinoPredictor:
     #: Upstream publishes exactly two checkpoints. See ``PROVENANCE.md``.
     VARIANTS = list(VARIANTS)
 
-    #: Which runtimes this adapter can execute. Only torch: the input size is not fixed -- the
-    #: image is resized rather than letterboxed, so its height and width depend on the
-    #: photograph -- and a graph exported at one shape cannot take another. Declared rather than
-    #: checked afterwards so ``auto`` cannot pick an artifact this would then have to refuse.
+    #: Frameworks this adapter executes, and runtimes it builds at load time. See the registry.
     EXECUTES = registry.EXECUTES[FAMILY]
+    DERIVES = registry.DERIVES[FAMILY]
+
+    #: The square a TensorRT engine runs at when no ``input_size`` is given. Measured on 500 COCO
+    #: images: 1.5 AP under upstream's resize for ``tiny`` and 1.9 for ``base``, at the smallest
+    #: square of the three measured and so the fastest. See ``docs/models/grounding-dino.md``.
+    TENSORRT_SIZE = 800
+
+    #: The caption length a TensorRT engine is tuned for. It accepts any up to the model's 256.
+    TENSORRT_TOKENS = 64
 
     def __init__(
         self,
@@ -88,6 +103,7 @@ class GroundingDinoPredictor:
         device: str | None = None,
         *,
         runtime: str = "auto",
+        input_size: int | None = None,
         checkpoint_path: str | Path | None = None,
         revision: str | None = None,
     ) -> None:
@@ -107,13 +123,62 @@ class GroundingDinoPredictor:
                 artifacts(FAMILY, variant, revision=revision),
                 runtime,
                 executes=self.EXECUTES,
+                derives=self.DERIVES,
             )
         )
 
+        if input_size is not None and not 64 <= input_size <= 2048:
+            raise ValueError(f"input_size must be between 64 and 2048 pixels, not {input_size}")
+        tensorrt = framework_of(self.runtime) == "tensorrt"
+        # A graph runs at one shape, so TensorRT always letterboxes; torch only when asked.
+        self.input_size = self.TENSORRT_SIZE if tensorrt and input_size is None else input_size
+
+        # Neither derived runtime has a file of its own: ``torch-fp16`` is the checkpoint under
+        # autocast, and a TensorRT engine is exported from it.
         weights = (Path(checkpoint_path) if checkpoint_path
-                   else resolve(FAMILY, variant, self.runtime, revision=revision))
-        self._predictor = Predictor(weights, SPECS[variant], device=self.device)
+                   else resolve(FAMILY, variant, "torch-fp32", revision=revision))
+        if tensorrt:
+            engine = self._engine(weights)
+            self._predictor = Predictor(None, SPECS[variant], device=self.device,
+                                        input_size=self.input_size,
+                                        forward=engine)
+        else:
+            self._predictor = Predictor(weights, SPECS[variant], device=self.device,
+                                        autocast=self.runtime == "torch-fp16",
+                                        input_size=self.input_size)
         _log.info("Grounding DINO %s ready on %s via %s.", variant, self.device, self.runtime)
+
+    def _engine(self, weights: Path) -> TensorRTRunner:
+        """The TensorRT engine for this variant at ``input_size``, built if this GPU has none.
+
+        Kept beside the checkpoint in ``torch-fp32.engines/``, so ``weights.remove`` takes it
+        with the model. When it has to be built, the graph is exported from the checkpoint --
+        under fp16 autocast, so the engine runs ``torch-fp16``'s precision -- and deleted after.
+        """
+        import tensorrt
+
+        if int(tensorrt.__version__.split(".")[0]) < 11:
+            raise RuntimeError_(
+                f"Grounding DINO needs TensorRT 11 or later; {tensorrt.__version__} is installed. "
+                "TensorRT 10 miscompiles its position encoding (measured with 10.13: boxes off "
+                "by up to the whole image). Upgrade it, which needs a torch built for CUDA 12 "
+                f"or 13: {_tensorrt_install_hint()}"
+            )
+        spec, device, size = SPECS[self.variant], self.device, self.input_size
+
+        def write(path: Path) -> None:
+            # Called only when this GPU has no engine yet, so a machine that has one needs no
+            # exporter; checked before the checkpoint loads, not a minute later.
+            require_exporter()
+            model = build(spec, weights, device=device)
+            export(model, path, size, fp16=True)
+            del model
+            free_device_memory()
+
+        engines = weights.with_suffix(_ENGINES_SUFFIX)
+        return TensorRTRunner(engines / f"square{size}-fp16.onnx", device, engines=engines,
+                              export=write, shapes=profile(self.TENSORRT_TOKENS, spec.max_text_len),
+                              probe=example(size, device))
 
     def predict(
         self,

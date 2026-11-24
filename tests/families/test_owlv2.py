@@ -293,8 +293,15 @@ def _on_cuda(runtime):
 
     if not torch.cuda.is_available():
         pytest.skip("needs CUDA")
-    if runtime.startswith("tensorrt") and find_spec("tensorrt") is None:
-        pytest.skip("needs tensorrt")
+    if runtime.startswith("tensorrt"):
+        if find_spec("tensorrt") is None:
+            pytest.skip("needs tensorrt")
+        import tensorrt
+
+        if not hasattr(tensorrt.BuilderFlag, "FP16"):
+            # Until OWLv2 publishes fp16 graphs: its engine is built with TensorRT 10's fp16
+            # switch, which TensorRT 11 removed; an fp16 graph is what 11 builds from.
+            pytest.skip("OWLv2's TensorRT runtime needs TensorRT 10 until its fp16 graph lands")
     if not weights.is_cached(FAMILY, "base-ensemble", runtime, device="cuda"):
         pytest.skip(f"owlv2/base-ensemble {runtime} is not downloaded here")
     from mozo.adapters.owlv2 import OwlV2Predictor

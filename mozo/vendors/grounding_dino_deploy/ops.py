@@ -24,7 +24,7 @@ __all__ = ["MultiScaleDeformableAttention", "deformable_attention"]
 
 def deformable_attention(
     value: Tensor,
-    spatial_shapes: Tensor,
+    level_shapes: list[tuple[int, int]],
     sampling_locations: Tensor,
     attention_weights: Tensor,
 ) -> Tensor:
@@ -32,7 +32,7 @@ def deformable_attention(
 
     Args:
         value: ``(batch, tokens, heads, channels)``, every level concatenated.
-        spatial_shapes: ``(levels, 2)`` of ``(height, width)``.
+        level_shapes: ``(height, width)`` of each level, as Python integers.
         sampling_locations: ``(batch, queries, heads, levels, points, 2)``, normalised to [0, 1].
         attention_weights: ``(batch, queries, heads, levels, points)``, already softmaxed.
 
@@ -42,18 +42,16 @@ def deformable_attention(
     batch, _, heads, channels = value.shape
     _, queries, _, levels, points, _ = sampling_locations.shape
 
-    # Read off the device once, not per level. `spatial_shapes` lives wherever the model does, so
-    # every `int(...)` on it is a device-to-host sync -- and this function runs twelve times per
-    # image. Measured on MPS, eight scalar extractions cost 2.94 ms against 0.40 ms for one
-    # `tolist()`, which is about 30 ms an image spent waiting rather than computing.
-    shapes = spatial_shapes.tolist()
-
-    per_level = value.split([height * width for height, width in shapes], dim=1)
+    # Python integers, never read back off a tensor. A tensor lives wherever the model does, so
+    # every read of one is a device-to-host sync -- measured on MPS, eight scalar extractions cost
+    # 2.94 ms against 0.40 ms for one `tolist()`, and this runs twelve times an image -- and it is
+    # a value ``torch.export`` cannot follow, which is what keeps the network exportable.
+    per_level = value.split([height * width for height, width in level_shapes], dim=1)
     # grid_sample wants [-1, 1]; the reference points are [0, 1].
     grids = 2 * sampling_locations - 1
 
     sampled = []
-    for level, (height, width) in enumerate(shapes):
+    for level, (height, width) in enumerate(level_shapes):
         # (batch, hw, heads, channels) -> (batch * heads, channels, height, width)
         source = (
             per_level[level]
@@ -116,6 +114,7 @@ class MultiScaleDeformableAttention(nn.Module):
         reference_points: Tensor,
         value: Tensor,
         spatial_shapes: Tensor,
+        level_shapes: list[tuple[int, int]],
         key_padding_mask: Tensor | None = None,
     ) -> Tensor:
         """Run one deformable attention step, batch-first throughout.
@@ -125,7 +124,8 @@ class MultiScaleDeformableAttention(nn.Module):
             reference_points: ``(batch, queries, levels, 2)`` or ``(..., 4)``. Two numbers is a
                 point; four is a box, and the sampling window then scales with its size.
             value: ``(batch, tokens, embed_dim)``.
-            spatial_shapes: ``(levels, 2)``.
+            spatial_shapes: ``(levels, 2)``, for the arithmetic that divides by each level's size.
+            level_shapes: The same sizes as Python integers, for the loops and splits.
             key_padding_mask: ``(batch, tokens)``, True where padded.
         """
         batch, queries, _ = query.shape
@@ -165,5 +165,5 @@ class MultiScaleDeformableAttention(nn.Module):
             )
 
         return self.output_proj(
-            deformable_attention(value, spatial_shapes, locations, weights)
+            deformable_attention(value, level_shapes, locations, weights)
         )

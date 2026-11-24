@@ -1,9 +1,9 @@
 # Grounding DINO: detect what you describe
 
 <!--
-summary: IDEA Research's open-vocabulary detector in mozo: boxes for descriptions as well as nouns, Apache-2.0, torch only.
+summary: IDEA Research's open-vocabulary detector in mozo: boxes for descriptions as well as nouns, Apache-2.0, torch, fp16 and TensorRT on CUDA.
 label: Grounding DINO
-keywords: mozo, grounding dino, open-vocabulary detection, zero-shot detection, text prompt
+keywords: mozo, grounding dino, open-vocabulary detection, zero-shot detection, text prompt, tensorrt, fp16
 -->
 
 Grounding DINO finds objects you describe in words. It answers the same question as
@@ -41,8 +41,8 @@ curl -X POST "http://localhost:8000/predict/grounding_dino/tiny?text=a%20laptop&
 
 | ID | Weights (torch) | Runtimes | Licence |
 |---|---|---|---|
-| `grounding_dino/tiny` | 694 MB | torch | Apache-2.0 |
-| `grounding_dino/base` | 938 MB | torch | Apache-2.0 |
+| `grounding_dino/tiny` | 694 MB | torch; fp16 and TensorRT on CUDA | Apache-2.0 |
+| `grounding_dino/base` | 938 MB | torch; fp16 and TensorRT on CUDA | Apache-2.0 |
 
 Upstream publishes no others. `tiny` (Swin-T) scores 48.4 box AP on COCO zero-shot and `base`
 (Swin-B) 56.7, for 35% more weights, by the authors' numbers. `tiny` is 82% of upstream's own
@@ -114,11 +114,80 @@ comes from the architecture. OWLv2's image encode depends only on the image, so 
 Grounding DINO mixes the text into the image features, so its image encode depends on the prompt
 and there is nothing to keep. If you ask one image many questions, that is the whole comparison.
 
-### Torch only
+### On CUDA: half precision and TensorRT
 
-The image is resized to a short side of 800, with the long side capped near 1333: the aspect ratio
-is preserved and nothing is padded. So unlike most families there is no fixed input size, and a
-graph exported at one shape cannot take another. No ONNX or CoreML artifact is published.
+On CUDA, `auto` runs Grounding DINO as `torch-fp16`: the same checkpoint, run under fp16
+autocast. There is nothing extra to download. `tensorrt-fp16` is faster still and has to be asked
+for, because it runs every image at one fixed square size (see below).
+
+Measured on an RTX 3090 with torch 2.13 and TensorRT 11.5, on 500 random COCO val2017 images.
+*Forward* is the model alone, with the 80 class names as one caption. *predict* is the whole call
+from a decoded image to detections, with 80 phrases. A detection "changes" when, compared with
+fp32 at the same image size, it crosses the 0.35 threshold one way or the other and is more than
+0.02 away from it. *Input rounded* is fp32 itself with only its input rounded to half precision:
+how often detections change on their own. *Resize* is upstream's preprocessing (short side 800, long
+side up to 1333); *800 square* fits the image into an 800×800 square and pads the rest.
+
+| Variant | Runtime | Images | Forward | predict | Speed | COCO AP | Detections that change |
+|---|---|---|---|---|---|---|---|
+| `tiny` | fp32 | resize | 121.9 ms | 136.5 ms | 1.0× | 50.77 | |
+| | input rounded | resize | | | | 50.74 | 0 of 4,118 |
+| | `torch-fp16` (`auto`) | resize | 79.8 ms | 94.5 ms | 1.45× | 50.76 | 4 (0.1%) |
+| | `tensorrt-fp16` | 800 square | 43.2 ms | 53.1 ms | 2.57× | 49.24 | 5 of 3,882 (0.1%) |
+| `base` | fp32 | resize | 167.0 ms | 182.4 ms | 1.0× | 60.16 | |
+| | input rounded | resize | | | | 60.06 | 3 of 3,616 |
+| | `torch-fp16` (`auto`) | resize | 103.2 ms | 118.0 ms | 1.55× | 60.08 | 3 (0.1%) |
+| | `tensorrt-fp16` | 800 square | 49.5 ms | 59.9 ms | 3.05× | 58.25 | 2 of 3,593 (0.1%) |
+
+Half precision barely moves anything: detections change about as rarely as they do on their own,
+on torch and on TensorRT alike. What `tensorrt-fp16` costs in AP comes from the square, not from
+TensorRT: fp32 torch at 800 square scores the same 49.19 and 58.37. Ask for
+`runtime="torch-fp32"` to get exactly the fp32 results. On torch 2.6, `torch-fp16` gained less:
+1.28× on `tiny` and 1.42× on `base`.
+
+### Choosing the square size
+
+A TensorRT engine takes one image shape, so every image is fitted into a square, aspect ratio
+kept, and the rest padded. The model is told which pixels are padding, so it does not read the
+border as part of the scene. Without that mask AP fell by 6 to 12 points. Pick the square with
+`input_size`; it defaults to 800 on `tensorrt-fp16`:
+
+```python
+from mozo import ModelManager
+
+model = ModelManager().get_model("grounding_dino", "base", runtime="tensorrt-fp16", input_size=1024)
+```
+
+A bigger square finds more small objects and costs time. Same machine and images as above,
+`predict` with 80 phrases, AP against upstream's resize on fp32 (50.77 `tiny`, 60.16 `base`):
+
+| Square | `tiny` predict | `tiny` AP | `base` predict | `base` AP |
+|---|---|---|---|---|
+| 800 (default) | 53.1 ms | 49.24 (−1.5) | 59.9 ms | 58.25 (−1.9) |
+| 1024 | 76.4 ms | 50.34 (−0.4) | 86.1 ms | 59.47 (−0.7) |
+| 1333 | 139.0 ms | 51.10 (+0.3) | 150.1 ms | 59.61 (−0.6) |
+
+1024 gives back most of the AP and is still about twice as fast as fp32. At 1333 the square holds
+more pixels than upstream's resize does for most photographs, so it is barely faster than fp32.
+`input_size` takes 64 to 2048 and also works on torch, which is how the table compares
+preprocessings on one runtime.
+
+### What TensorRT needs
+
+- **TensorRT 11 or later.** TensorRT 10 miscompiles the model's position encoding, so boxes come
+  out wrong, and mozo refuses it with that reason. TensorRT 11 needs a torch built for CUDA 12 or
+  13: `pip install tensorrt-cu12` or `tensorrt-cu13`, matching your torch.
+- **`onnx` and `onnxscript`**, to export the graph the engine is built from:
+  `pip install onnx onnxscript`. A machine that already has its engine needs neither.
+- **About 3.5 minutes the first time** for each GPU and square size: mozo exports the graph from
+  the checkpoint and builds the engine (193–223 s on the RTX 3090). The engine is kept beside the
+  checkpoint in mozo's cache and the graph is deleted. Every later load takes about half a second.
+  `weights.remove` deletes engines with the model. To pay that cost ahead of time, load the model
+  once when you build the machine or the image.
+
+No ONNX graph is published for Grounding DINO, because the square size is yours to choose. The
+graph is written on your machine for the size you ask for. Any caption up to the model's 256
+tokens runs on one engine.
 
 ### No `transformers` at run time
 

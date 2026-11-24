@@ -1,0 +1,12 @@
+mayaku_street_deploy
+Copyright 2026 the mayaku authors
+
+This product includes software from the Mayaku project (https://github.com/emrahnazif/mayaku),
+release v3.1.1 (PyPI: mayaku==3.1.1), extracted and reduced to the inference path of its street
+models. It is licensed under the Apache License, Version 2.0; see the LICENSE file in this
+directory. Mayaku's own NOTICE states that it bundles no third-party source code.
+
+Changes from upstream: quantisation-aware training, keypoints, oriented boxes, the evaluation
+decode, export and training code removed; the image is taken as RGB rather than BGR; the decode is
+written for one image. The files carrying upstream code say so in their headers. See
+PROVENANCE.md for what was kept, what was dropped, and how the two are held equal.

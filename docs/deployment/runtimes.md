@@ -19,7 +19,8 @@ when to override it.
 | YOLO11, YOLO26 | every variant | every variant | none |
 | ViTPose | every variant | every variant except `huge` | none |
 | SAM 3 | yes | none | yes (the image encoder) |
-| BEN2, CLIP, Depth Anything V2, EasyOCR, EdgeTAM, Granite Embedding R2, Grounding DINO, Moebius, OWLv2, SAM 2, SigLIP 2 | yes | none | none |
+| Granite Embedding R2 | yes | none | yes |
+| BEN2, CLIP, Depth Anything V2, EasyOCR, EdgeTAM, Grounding DINO, Moebius, OWLv2, SAM 2, SigLIP 2 | yes | none | none |
 
 Some of those families publish graphs mozo does not run yet, such as SAM 2's ONNX and CoreML and
 Moebius's ONNX; asking for one says so instead of quietly running torch. Where a family has no graph,
@@ -39,7 +40,8 @@ packages can run:
 
 CoreML needs `pip install 'mozo[coreml]'` and ONNX needs `pip install 'mozo[onnx]'`. Without them,
 `auto` simply never picks those graphs. In practice: on Apple silicon with the CoreML extra, RF-DETR,
-YOLOv8, YOLO12 and SAM 3 run as CoreML graphs, and everything else runs on torch.
+YOLOv8, YOLO12, SAM 3 and Granite Embedding R2 run as CoreML graphs, and everything else runs on
+torch.
 
 ## Choose one yourself
 

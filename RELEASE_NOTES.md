@@ -3,6 +3,11 @@
 - **Granite Embedding R2 downloads half as much: 95 MB instead of 191 MB.** The new revision,
   `2026-11-24`, stores the weights in bfloat16 as IBM publishes them, and mozo still runs them in
   float32. The vectors are bit-identical to `2026-11-20`'s, so an index you built keeps working.
+- **Granite Embedding R2 runs as a CoreML graph on Apple silicon.** With the `coreml` extra on
+  macOS 15 or later, `auto` picks it: 0.27–0.68× torch's time on the GPU, e.g. 394 ms against
+  1,471 ms for 8,192 tokens, and within 1.8e-07 of torch's vectors, so an index built on either
+  runtime serves queries from the other. Each text is padded to one of eight fixed lengths and the
+  padding is masked out; a text just past a length runs at up to 1.3× torch's time.
 - **`CoreMLRunner(path, function=)`** runs one function of a multifunction CoreML package, and
   `mozo.runtimes.coreml_functions(path)` lists them with their input shapes. A package is compiled
   once per process, however many of its functions are loaded.

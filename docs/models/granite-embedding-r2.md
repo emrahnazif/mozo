@@ -48,7 +48,7 @@ image:
 
 | ID | Vector | Context | Weights (torch) | Runtimes | Licence |
 |---|---|---|---|---|---|
-| `granite_embedding_r2/small` | 384-d | 8,192 tokens | 95 MB | torch | Apache-2.0 |
+| `granite_embedding_r2/small` | 384-d | 8,192 tokens | 95 MB | torch, coreml | Apache-2.0 |
 
 ## Inputs and outputs
 
@@ -105,14 +105,36 @@ What has been measured, and on which machines, is in the vendor's `PROVENANCE.md
 
 ### A vector does not depend on what was encoded beside it
 
-Texts are never padded, because a padded batch is not bit-identical to its rows run alone. On the
-CPU, texts of exactly the same length share one forward pass, which was measured identical to
+On torch, texts are never padded, because a padded batch is not bit-identical to its rows run alone.
+On the CPU, texts of exactly the same length share one forward pass, which was measured identical to
 running each alone. On other devices each text runs alone. So the same text always gets the same
 vector, whatever arrived with it.
 
 One consequence: for many short texts, such as search queries, the CPU can be the faster device,
 because only there do they share a forward pass. On an Apple M1 Max it was several times faster than
 the GPU for a batch of short queries.
+
+### On Apple silicon it runs as a CoreML graph
+
+With `pip install 'mozo[coreml]'`, `auto` runs Granite through CoreML on a Mac (macOS 15 or later).
+CoreML only reaches the GPU with a fixed input size, so the graph holds the model at eight fixed
+lengths, from 64 to 8,192 tokens, and each text is padded to the shortest one that fits. The padding
+is masked: no real token attends to it, so the vector is the one torch gives, within 1.8e-07. An
+index built on either runtime works with queries from the other.
+
+Measured on an Apple M1 Max, against torch on the same GPU:
+
+| Text length | CoreML | torch (MPS) |
+|---|---|---|
+| 64 tokens | 5.1 ms | 7.6 ms |
+| 512 tokens | 8.9 ms | 15.1 ms |
+| 2,048 tokens | 47.7 ms | 99.3 ms |
+| 8,192 tokens | 394 ms | 1,471 ms |
+
+A text that only just spills into the next length, such as 2,049 tokens, runs at 4,096 and costs
+1.0 to 1.3 times torch's time. Each length loads the first time a text needs it, in about a
+second, so a server that only sees short queries never loads the long ones. Pass
+`runtime="torch-fp32"` to run on torch instead.
 
 ### The scores are cosine similarities
 

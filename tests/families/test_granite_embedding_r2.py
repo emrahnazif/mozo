@@ -75,15 +75,15 @@ def test_every_published_variant_ships_its_terms(variant):
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
-def test_only_torch_is_published(variant):
-    """If a graph artifact is ever added, this is the reminder that ``EXECUTES`` changes with it."""
+def test_it_publishes_torch_and_coreml(variant):
+    """If another graph is ever added, this is the reminder that ``EXECUTES`` changes with it."""
     from mozo.adapters.granite_embedding_r2 import GraniteEmbeddingR2Predictor
 
     keys = published(FAMILY, variant)
     if not keys:
         pytest.skip(f"{FAMILY}/{variant} publishes nothing")
-    assert keys == ["torch-fp32"]
-    assert GraniteEmbeddingR2Predictor.EXECUTES == ("torch",)
+    assert sorted(keys) == ["coreml-fp32", "torch-fp32"]
+    assert GraniteEmbeddingR2Predictor.EXECUTES == ("torch", "coreml")
 
 
 # --- the geometry ---
@@ -101,6 +101,33 @@ def test_the_window_is_half_the_published_local_attention():
 
 def test_the_head_dimension():
     assert SPECS["small"].head_dim == 32
+
+
+# --- the bucketed graph, which needs no weights ---
+
+
+@pytest.mark.parametrize("length", [2, 17, 64, 65, 66, 130, 255, 256])
+def test_padding_to_a_bucket_does_not_move_the_vector(length):
+    """What a CoreML graph runs: padded to 256 and masked, against the network on the text alone.
+
+    Six layers keep it quick and still cover both kinds; the lengths straddle the 64-token window.
+    """
+    import dataclasses
+
+    import torch
+    import torch.nn.functional as F
+
+    from mozo.vendors.granite_embedding_r2_deploy.graph import Bucketed, padded
+    from mozo.vendors.granite_embedding_r2_deploy.network import Network
+
+    torch.manual_seed(0)
+    network = Network(dataclasses.replace(SPECS["small"], layers=6)).eval()
+    ids = torch.randint(5, 50000, (1, length))
+    with torch.inference_mode():
+        want = F.normalize(network(ids)[:, 0], p=2, dim=1)
+        got = Bucketed(network)(torch.from_numpy(padded(ids[0].tolist(), 256)).long(),
+                                torch.tensor([length]))
+    assert (got - want).abs().max() < 1e-6
 
 
 # --- the tokenizer, which needs no weights ---
@@ -214,3 +241,39 @@ def test_it_says_which_revision_produced_the_vectors(predictor):
 def test_it_refuses_a_text_over_the_context_before_running(predictor):
     with pytest.raises(ValueError, match=f"over the {CONTEXT}-token context"):
         predictor.encode_text("hello" + " hello" * CONTEXT)
+
+
+# --- the CoreML graph, on a Mac with coremltools ---
+
+
+@pytest.fixture(scope="module")
+def graph():
+    """The small variant as its CoreML package, built once for the file."""
+    pytest.importorskip("coremltools")
+    require_weights(FAMILY, "small")
+    from mozo.adapters.granite_embedding_r2 import GraniteEmbeddingR2Predictor
+    from mozo.weights import WeightsError
+
+    try:
+        return GraniteEmbeddingR2Predictor("small", device="mps", runtime="coreml-fp32")
+    except WeightsError as error:
+        pytest.skip(str(error))
+
+
+def test_coreml_agrees_with_torch(graph, predictor):
+    """Lengths that fill a bucket, spill into the next, and need the longest.
+
+    Not bit-identical -- no graph runtime is -- but close enough that an index built on one runtime
+    serves queries from the other: measured 1.8e-07 at worst.
+    """
+    texts = ["a forklift", "word " * 63, "word " * 64, "Granite embeds text " * 120, "x " * 8000]
+    np.testing.assert_allclose(graph.encode_text(texts), predictor.encode_text(texts), atol=1e-6)
+
+
+def test_coreml_loads_only_the_lengths_it_needs(graph):
+    """A short query loads the shortest length and nothing else."""
+    from mozo.adapters.granite_embedding_r2 import GraniteEmbeddingR2Predictor
+
+    fresh = GraniteEmbeddingR2Predictor("small", device="mps", runtime="coreml-fp32")
+    fresh.encode_text("a forklift")
+    assert sorted(fresh._encoder._runners) == [64]

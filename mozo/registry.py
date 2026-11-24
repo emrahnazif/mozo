@@ -92,9 +92,10 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 #: downloaded", "how much is left to fetch" -- without importing an adapter and torch with it.
 #: The adapters read it from here, so there is one statement of it.
 EXECUTES: dict[str, tuple[str, ...]] = {
-    family: ("torch",)
-    for family in ("ben2", "clip", "easyocr", "edgetam", "granite_embedding_r2", "grounding_dino",
-                   "moebius", "owlv2", "sam2", "siglip2")
+    **{family: ("torch",)
+       for family in ("ben2", "clip", "easyocr", "edgetam", "grounding_dino", "moebius", "owlv2",
+                      "sam2", "siglip2")},
+    "granite_embedding_r2": ("torch", "coreml"),
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``

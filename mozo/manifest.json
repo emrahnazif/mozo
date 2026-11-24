@@ -536,6 +536,11 @@
               "sha256": "e97a281f7465ee7ec79dfa6757989a5947d3977f49b904ff8506c4e2e82559d1",
               "size": 1071
             },
+            "coreml-fp32": {
+              "path": "granite_embedding_r2/small/2026-11-24/coreml-fp32.zip",
+              "sha256": "006eb719dfe0667faae3f33e8a2f6b25d93efa2552fc016f289c607e7c10bb39",
+              "size": 89559915
+            },
             "torch-fp32": {
               "path": "granite_embedding_r2/small/2026-11-24/torch-fp32.pth",
               "sha256": "5b39871460fcd827523bfccaa39533948bc19e4f9803e21537179b00e3f78359",

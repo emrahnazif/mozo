@@ -205,8 +205,49 @@ NVIDIA is unmeasured.
 
 ## Export
 
-ONNX is built and measured, and not published. `tools/export/granite_embedding_r2.py` produces
-this, from the vendored encoder rather than the reference, and writes nothing into `weights/`.
+CoreML is published; ONNX is built and measured, and not. `tools/export/granite_embedding_r2.py`
+produces both from the vendored encoder rather than the reference. Its ONNX run writes nothing into
+`weights/`; `--coreml` writes `coreml-fp32.zip`, and only once every length agrees with torch.
+
+### CoreML
+
+**Fixed lengths, because CoreML reaches the GPU only with a fixed shape.** Measured on an Apple M1
+Max, coremltools 9.0: a `RangeDim` input segfaults inside CoreML on load, at any upper bound, and
+`EnumeratedShapes` loads but runs on the CPU alone, 3–29× slower than torch on MPS. So the package
+holds `graph.Bucketed` at 64, 128, 256 … 8,192 tokens, one function each (`tokens_<N>`), sharing
+one copy of the weights: 192 MB unzipped, 90 MB zipped. macOS 15 is the minimum, for multifunction
+packages.
+
+**Padded and masked.** A text is padded at the end to the shortest length that fits, and every
+layer hides the padded keys, so no real token sees them. Against the network on the unpadded text,
+in torch: 1.8e-07 or less, and zero at a full length.
+
+**Positions are derived from the ids.** Built with `torch.arange` they are trace-time constants,
+and the converter folded every mask into the package: 290 MB, and 40 s to load, every load. A
+precompiled `.mlmodelc` still took 10.7 s. Derived as `cumsum(ones_like(ids)) - 1`, nothing folds:
+192 MB, and about 1 s to load the first length, 0.6 s each after (the package compiles once). An additive float mask folded anyway (728 MB for one length), so the
+mask stays bool.
+
+**fp32.** An fp16 package was a little faster on the GPU (37 against 46 ms at 2,048 tokens) and
+moved vectors by up to 1e-3. In a mixed index — fp16 documents, fp32 queries — the top result
+changed for 1–1.5% of queries, so an index would depend on the runtime. The Neural Engine executes
+only fp16, and won only at 128 tokens.
+
+Against torch on MPS, synchronised, interleaved, at the shortest text that needs each length and
+the longest that fits it:
+
+| Length | Text | max\|Δ\| | CoreML | torch MPS | ratio |
+|---|---|---|---|---|---|
+| 64 | 33 / 64 | ≤8.2e-08 | 5.1 / 5.1 ms | 8.3 / 7.6 ms | 0.61 / 0.68× |
+| 128 | 65 / 128 | ≤7.6e-08 | 6.3 / 4.7 ms | 8.3 / 6.7 ms | 0.76 / 0.71× |
+| 256 | 129 / 256 | ≤1.8e-07 | 5.4 / 5.4 ms | 7.1 / 8.9 ms | 0.75 / 0.61× |
+| 512 | 257 / 512 | ≤1.2e-07 | 8.7 / 8.9 ms | 10.0 / 15.1 ms | 0.87 / 0.59× |
+| 1,024 | 513 / 1,024 | ≤8.4e-08 | 18.2 / 18.4 ms | 16.8 / 35.2 ms | 1.08 / 0.52× |
+| 2,048 | 1,025 / 2,048 | ≤1.8e-07 | 46.8 / 47.7 ms | 38.7 / 99.3 ms | 1.21 / 0.48× |
+| 4,096 | 2,049 / 4,096 | ≤8.8e-08 | 146 / 147 ms | 109 / 362 ms | 1.34 / 0.41× |
+| 8,192 | 4,097 / 8,192 | ≤1.8e-07 | 395 / 394 ms | 392 / 1,471 ms | 1.01 / 0.27× |
+
+### ONNX
 
 **It exports cleanly**: the TorchScript exporter at opset 17, 191 MB in float32, with batch and
 sequence length dynamic. Both masks are built inside the graph from the length — the reason the

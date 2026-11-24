@@ -17,7 +17,14 @@ what was *read* off pictures: EasyOCR's text, embedded here, is searchable by me
 shortened without saying so is a different chunk.
 
 **An index is tied to the weights that built it.** A vector from one variant or revision means
-nothing against a vector from another, so a stored index has to record :attr:`revision`.
+nothing against a vector from another, so a stored index has to record :attr:`revision`. Not the
+runtime: torch and CoreML agree to 1.8e-07, the size of two attention kernels disagreeing.
+
+**On Apple silicon it runs as a CoreML graph**, when ``coremltools`` is installed. CoreML runs a
+fixed shape on the GPU and a flexible one only on the CPU, so the package holds the network at a
+few fixed lengths, sharing one set of weights, and a text is padded to the smallest that fits and
+masked (:mod:`~mozo.vendors.granite_embedding_r2_deploy.graph`). 0.27-0.67x torch's time on MPS
+where a text fills its length; 1.0-1.34x where it only just spills into the next one.
 """
 
 from __future__ import annotations
@@ -25,13 +32,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from pathlib import Path
+from threading import Lock
 from typing import Union
 
 import numpy as np
 
 from .. import registry
-from ..runtimes import get_default_device, select_runtime
-from ..vendors.granite_embedding_r2_deploy import SPECS, VARIANTS, Encoder
+from ..runtimes import CoreMLRunner, coreml_functions, get_default_device, select_runtime
+from ..vendors.granite_embedding_r2_deploy import CONTEXT, SPECS, VARIANTS, Encoder
+from ..vendors.granite_embedding_r2_deploy.graph import padded
+from ..vendors.granite_embedding_r2_deploy.tokenizer import Tokenizer
 from ..weights import artifacts, resolve, revision_of
 
 __all__ = ["GraniteEmbeddingR2Predictor"]
@@ -67,7 +77,7 @@ class GraniteEmbeddingR2Predictor:
     #: The variants carried. The vendor's ``config.py`` says why only the small one.
     VARIANTS = list(VARIANTS)
 
-    #: Which runtimes this adapter can execute. Only torch, until an exported graph earns its place.
+    #: Which runtimes this adapter can execute: torch, and the CoreML graph on Apple silicon.
     EXECUTES = registry.EXECUTES[FAMILY]
 
     def __init__(
@@ -101,8 +111,10 @@ class GraniteEmbeddingR2Predictor:
         #: vector is only comparable against others from the same weights, so an index built from
         #: these has to record it -- which means the model has to be able to say.
         self.revision = None if checkpoint_path else revision_of(FAMILY, variant, revision=revision)
-        # Nothing is built here; the first encode builds the tokenizer and the network.
-        self._encoder = Encoder(weights, SPECS[variant], device=self.device)
+        # No network is built here: torch builds it on the first encode, CoreML each length on the
+        # first text that needs it.
+        self._encoder = (_Graph(weights) if self.runtime.startswith("coreml")
+                         else Encoder(weights, SPECS[variant], device=self.device))
         _log.info("Granite Embedding R2 %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def encode_text(self, text: Union[str, Sequence[str]]) -> "np.ndarray":
@@ -116,4 +128,42 @@ class GraniteEmbeddingR2Predictor:
             ValueError: If no text is given, if one is blank, if one is over 8,192 tokens, or if
                 one contains an unpaired surrogate.
         """
-        return self._encoder.encode_text(text).numpy()
+        return np.asarray(self._encoder.encode_text(text))
+
+
+class _Graph:
+    """The CoreML package: the encoder at fixed lengths, one function per length.
+
+    Each length is loaded the first time a text needs it -- about a second each -- so a server
+    that only ever sees short queries never loads the 8,192-token graph. The lengths are read off
+    the package's own input shapes, so nothing here has to agree with how the export named them.
+    """
+
+    def __init__(self, package: Path) -> None:
+        self._package = package
+        # Built here rather than on first use: 70 ms of tables, against ~1 s for each graph.
+        self._tokenizer = Tokenizer(CONTEXT)
+        self._lengths = {shape[1]: name for name, shape in coreml_functions(package).items()}
+        self._runners: dict[int, CoreMLRunner] = {}
+        self._lock = Lock()
+
+    def _runner(self, tokens: int) -> CoreMLRunner:
+        """The function for the shortest length that holds *tokens*, loaded once."""
+        length = min(n for n in self._lengths if n >= tokens)
+        runner = self._runners.get(length)
+        if runner is None:
+            with self._lock:
+                runner = self._runners.get(length)
+                if runner is None:
+                    runner = CoreMLRunner(self._package, function=self._lengths[length])
+                    self._runners[length] = runner
+        return runner
+
+    def encode_text(self, texts: str | Sequence[str]) -> np.ndarray:
+        """``(N, width)`` unit vectors, as the torch encoder returns them. One text per call."""
+        out = []
+        for row in self._tokenizer(texts):
+            runner = self._runner(len(row))
+            out.append(runner(padded(row, runner.input_shape[1]),
+                              length=np.array([len(row)], dtype=np.int32))[0])
+        return np.concatenate(out)

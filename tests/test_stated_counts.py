@@ -191,44 +191,61 @@ def test_the_licence_breakdown_states_the_manifest_s_counts():
     assert stated == dict(Counter(licences().values()))
 
 
-def _licence_tables(readme: str):
-    """Yield ``(family, variant tokens, stated licence)`` for each row of a "Weights licence" table.
+def _licence_tables(document: str):
+    """Yield ``(family, variants cell, stated licence)`` for each row of a model table.
 
-    A blank family cell continues the row above, as Depth Anything's three rows do, and a token
-    ending in a hyphen (``indoor-``) stands for every variant it begins.
+    The family is the linked page's name (``depth-anything-v2.md`` is ``depth_anything_v2``), and
+    a blank model cell continues the row above, as Depth Anything's rows do.
     """
     column = family = None
-    for line in readme.splitlines():
+    for line in document.splitlines():
         if not line.startswith("|"):
             column = None
             continue
         cells = [cell.strip() for cell in line.strip("|").split("|")]
-        if "Weights licence" in cells:
-            column = cells.index("Weights licence")
+        if "Licence" in cells:
+            column = cells.index("Licence")
             continue
         if column is None or set(line) <= set("|-"):
             continue
-        family = cells[0].strip("`") or family
-        yield family, re.findall(r"`([^`]+)`", cells[1]), cells[column]
+        page = re.search(r"\(/?docs/models/([\w-]+)\.md\)", cells[0])
+        family = page.group(1).replace("-", "_") if page else family
+        yield family, cells[1], cells[column]
 
 
-def test_every_readme_table_states_each_variant_s_manifest_licence():
-    """The tables are where a reader picks a model, so a wrong licence there is the costly one."""
+def test_the_model_list_states_each_variant_s_manifest_licence():
+    """All models lists every variant, and is where a licence is looked up variant by variant.
+
+    A token ending in a hyphen (``indoor-``) stands for every variant it begins.
+    """
     published = licences()
     seen, wrong = set(), []
-    for family, tokens, stated in _licence_tables((ROOT / "README.md").read_text()):
-        for token in tokens:
+    document = (ROOT / "docs" / "models" / "all-models.md").read_text()
+    for family, variants, stated in _licence_tables(document):
+        for token in re.findall(r"`([^`]+)`", variants):
             matched = [variant for fam, variant in published
                        if fam == family and (variant == token
                                              or token.endswith("-") and variant.startswith(token))]
-            assert matched, f"the README lists {family}/{token}, which mozo does not publish"
+            assert matched, f"all-models lists {family}/{token}, which mozo does not publish"
             for variant in matched:
                 seen.add((family, variant))
                 expected = published[family, variant]
                 if stated != expected:
-                    wrong.append(f"{family}/{variant}: README says {stated}, manifest {expected}")
+                    wrong.append(f"{family}/{variant}: all-models says {stated}, manifest {expected}")
     assert not wrong, "\n".join(wrong)
     assert seen == set(published), f"no licence stated for {sorted(set(published) - seen)}"
+
+
+def test_the_readme_names_every_licence_a_family_carries():
+    """The README lists families rather than variants, so each row must name every licence its
+    variants carry -- Depth Anything's two -- and no other."""
+    published = licences()
+    names = set(published.values())
+    rows = list(_licence_tables((ROOT / "README.md").read_text()))
+    assert {family for family, _, _ in rows} == {family for family, _ in published}
+    for family, _, stated in rows:
+        carried = {name for (fam, _), name in published.items() if fam == family}
+        assert {name for name in names if name in stated} == carried, f"{family}: {stated}"
 
 
 def test_the_readme_states_how_many_workflow_nodes_there_are():

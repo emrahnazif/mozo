@@ -102,7 +102,7 @@ A depth map at the image's resolution, in metres or relative.
 |---|---|---|---|---|
 | [Depth Anything V2](/docs/models/depth-anything-v2.md) | `small` (relative) | Apache-2.0 | torch | 99 MB |
 | | `base` `large` (relative) | CC-BY-NC-4.0 | torch | 390 MB–1.3 GB |
-| | `indoor-` and `outdoor-` × `small` `base` `large` (metres) | Apache-2.0 | torch | 99 MB–1.3 GB |
+| | `indoor-` and `outdoor-`, three sizes each (metres) | Apache-2.0 | torch | 99 MB–1.3 GB |
 
 ## Background removal
 

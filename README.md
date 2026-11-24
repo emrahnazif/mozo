@@ -32,125 +32,113 @@ A model on its own is rarely the job. Detect, then blur the faces, then save —
 **workflow**, and mozo runs those too: as a graph you draw in the browser, a JSON file you keep in
 version control, or one call from Python. Same models, same process, no extra install.
 
-## Model Catalog
+## Models
+
+Grouped by what they do. Each name links to the model's page, with examples, every parameter and
+how it behaves; [all models](docs/models/all-models.md) lists every variant with its download size.
+A model is named `family/variant`, such as `rfdetr/medium`.
 
 ### Object detection
 
-A box, a class and a confidence per object.
+A box, a class and a confidence for each object.
 
-| Family | Variants | Weights licence | Runtimes |
+| Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| `rfdetr` | `nano` `small` `medium` `large` | Apache-2.0 | torch, onnx, coreml |
-| `yolov8` | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx, coreml |
-| `yolov11` | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx |
-| `yolov12` | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx, coreml |
-| `yolov26` | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx |
+| [RF-DETR](docs/models/rfdetr.md) | nano → large | Apache-2.0 | torch, onnx, coreml |
+| [YOLOv8](docs/models/yolov8.md) | nano → xlarge | AGPL-3.0 | torch, onnx, coreml |
+| [YOLO11](docs/models/yolov11.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
+| [YOLO12](docs/models/yolov12.md) | nano → xlarge | AGPL-3.0 | torch, onnx, coreml |
+| [YOLO26](docs/models/yolov26.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
 
 ### Instance segmentation
 
-A box and a mask per object, from one pass. Same families and same call as detection above — the
-variant is what decides whether masks come back.
+A box and a mask for each object, in one pass. Same call as detection: the `seg-` variants return
+masks.
 
-| Family | Variants | Weights licence | Runtimes |
+| Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| `rfdetr` | `seg-nano` `seg-small` `seg-medium` `seg-large` | Apache-2.0 | torch, onnx, coreml |
-| `yolov11` | `seg-nano` `seg-small` `seg-medium` `seg-large` `seg-xlarge` | AGPL-3.0 | torch, onnx |
-| `yolov26` | `seg-nano` `seg-small` `seg-medium` `seg-large` `seg-xlarge` | AGPL-3.0 | torch, onnx |
+| [RF-DETR](docs/models/rfdetr.md) | nano → large | Apache-2.0 | torch, onnx, coreml |
+| [YOLO11](docs/models/yolov11.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
+| [YOLO26](docs/models/yolov26.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
 
 ### Keypoints
 
-COCO's 17 person joints per detection, as `(x, y, confidence)` in source-image pixels. RF-DETR
-finds people and joints in one pass; ViTPose is top-down and takes detections as an argument —
-[details](docs/models/vitpose.md).
+COCO's 17 joints for each person.
 
-| Family | Variants | Weights licence | Runtimes |
+| Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| `rfdetr` | `keypoint-preview` | Apache-2.0 | torch |
-| `vitpose` | `small` `base` `large` `huge` | Apache-2.0 | torch, onnx (not `huge`) |
+| [RF-DETR](docs/models/rfdetr.md) | preview | Apache-2.0 | torch |
+| [ViTPose](docs/models/vitpose.md) | small → huge | Apache-2.0 | torch, onnx (not huge) |
 
-### Text-prompted
+### Detection from words
 
-Boxes for anything you can name, from a phrase rather than a fixed class list.
+Boxes for anything you can name, instead of a fixed class list.
 
-| Family | Variants | Weights licence | Prompt |
+| Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| `grounding_dino` | `tiny` `base` | Apache-2.0 | descriptions, ≤256 tokens total |
-| `owlv2` | `base` `base-ensemble` `large` `large-ensemble` | Apache-2.0 | phrases, ≤16 tokens |
-| `sam3` | `sam3` | SAM License | phrases, ≤32 tokens — or a click, as below |
+| [Grounding DINO](docs/models/grounding-dino.md) | tiny, base | Apache-2.0 | torch |
+| [OWLv2](docs/models/owlv2.md) | base, large | Apache-2.0 | torch |
+| [SAM 3](docs/models/sam3.md) | one | SAM License | torch, coreml |
 
-### Zero-shot classification and embeddings
+### Segmentation from a click or a box
 
-Name your classes in words and each is scored against the image — or take the vectors instead, and
-make a corpus embedded once searchable by words afterwards. Scores are similarities, not
-probabilities — [details](docs/models/clip.md).
+Point at something and get its mask.
 
-| Family | Variants | Weights licence | Prompt | Output |
-|---|---|---|---|---|
-| `clip` | `base` `base-16` `large` `large-336` | MIT | phrases, ≤77 tokens each | a score per phrase, or 512/768-d vectors |
-| `siglip2` | `base-224` `base-256` `so400m-384` `so400m16-256` `giant-384` | Apache-2.0 | phrases, ≤64 tokens each | a probability per phrase, or 768/1152/1536-d vectors |
+| Model | Sizes | Licence | Runtimes |
+|---|---|---|---|
+| [SAM 2](docs/models/sam2.md) | tiny → large | Apache-2.0 | torch |
+| [EdgeTAM](docs/models/edgetam.md) | one | Apache-2.0 | torch |
+| [SAM 3](docs/models/sam3.md) | one | SAM License | torch, coreml |
+
+### Classification from words, and image embeddings
+
+Name your classes in words and score each against the image, or keep the vectors and search images
+by text.
+
+| Model | Sizes | Licence | Runtimes |
+|---|---|---|---|
+| [CLIP](docs/models/clip.md) | base, large | MIT | torch |
+| [SigLIP 2](docs/models/siglip2.md) | base → giant | Apache-2.0 | torch |
 
 ### Text embeddings
 
-English text in, one vector out, and texts that mean the same thing land close together: search
-documentation, notes, or what EasyOCR read off an image, by meaning rather than by keyword. Text
-only — these vectors do not share a space with CLIP's or SigLIP 2's, so they cannot search
-pictures by words. Served through `/encode` alone — [details](docs/models/granite-embedding-r2.md).
+English text in, one vector out, for searching documents by meaning.
 
-| Family | Variants | Weights licence | Input | Output |
-|---|---|---|---|---|
-| `granite_embedding_r2` | `small` | Apache-2.0 | text, ≤8,192 tokens each | 384-d vectors |
-
-### Promptable segmentation
-
-A mask from a click or a box. Returns detections, one row per mask.
-
-| Family | Variants | Weights licence | Prompt |
+| Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| `sam2` | `tiny` `small` `base_plus` `large` | Apache-2.0 | points, box, or both |
-| `edgetam` | `edgetam` | Apache-2.0 | points, box, or both |
-| `sam3` | `sam3` | SAM License | points, box, or both |
+| [Granite Embedding R2](docs/models/granite-embedding-r2.md) | small | Apache-2.0 | torch, coreml |
 
 ### Text recognition
 
-Text in the image, one detection per line. A variant is a script, not a language: `latin` alone
-covers 41 languages.
+Every line of text in the image, in five scripts; `latin` alone covers 41 languages.
 
-| Family | Variants (scripts) | Weights licence |
-|---|---|---|
-| `easyocr` | `english` `latin` `chinese-simplified` `japanese` `korean` | Apache-2.0 |
+| Model | Sizes | Licence | Runtimes |
+|---|---|---|---|
+| [EasyOCR](docs/models/easyocr.md) | one per script | Apache-2.0 | torch |
 
 ### Depth
 
-An `HxW` float32 map. Six of the nine variants predict metres and three are relative and unitless;
-`model.unit` says which, and is `None` rather than a guess.
+A depth map at the image's resolution, in metres or relative.
 
-| Family | Variants | Weights licence | Unit |
+| Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| `depth_anything_v2` | `small` | Apache-2.0 | relative, unitless |
-| | `base` `large` | CC-BY-NC-4.0 | relative, unitless |
-| | `indoor-` and `outdoor-`, three sizes each | Apache-2.0 | metres |
+| [Depth Anything V2](docs/models/depth-anything-v2.md) | small → large | Apache-2.0; CC-BY-NC-4.0 for relative base and large | torch |
 
 ### Background removal
 
-A per-pixel opacity matte, not a binary mask — which is the difference between keeping a head of
-hair and cutting it off. [Details](docs/models/ben2.md).
+A soft opacity matte for the foreground that keeps hair.
 
-| Family | Variants | Weights licence | Output |
+| Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| `ben2` | `base` | MIT | an `HxW` uint8 alpha matte |
+| [BEN2](docs/models/ben2.md) | base | MIT | torch |
 
 ### Object removal
 
-Give it a frame and a mask and it repaints the hole so the thing was never there — pair the mask
-with SAM 3 or EdgeTAM. It answers with a sample rather than an estimate —
-[details](docs/models/moebius.md).
+An image and a mask in, the masked thing painted out.
 
-| Family | Variants | Weights licence | Output |
+| Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| `moebius` | `general` `places2` | Apache-2.0 | an `HxWx3` image |
-
-How each family behaves and why — OWLv2 suppressing nothing, the encoder cache, EasyOCR's line
-ordering, prompt semantics — is on each family's page under [docs/models/](docs/models/all-models.md).
+| [Moebius](docs/models/moebius.md) | general, places2 | Apache-2.0 | torch |
 
 ## Install
 

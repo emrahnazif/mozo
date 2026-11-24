@@ -76,8 +76,8 @@ Boxes for anything you can name, instead of a fixed class list.
 
 | Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| [Grounding DINO](docs/models/grounding-dino.md) | tiny, base | Apache-2.0 | torch |
-| [OWLv2](docs/models/owlv2.md) | base, large | Apache-2.0 | torch |
+| [Grounding DINO](docs/models/grounding-dino.md) | tiny, base | Apache-2.0 | torch; fp16 and tensorrt on CUDA |
+| [OWLv2](docs/models/owlv2.md) | base, large | Apache-2.0 | torch; fp16 and tensorrt on CUDA |
 | [SAM 3](docs/models/sam3.md) | one | SAM License | torch, coreml |
 
 ### Segmentation from a click or a box
@@ -152,10 +152,13 @@ That is the whole install — twelve ordinary dependencies, not one of them a mo
 # Optional runtimes, for the families that publish those artifacts
 pip install 'mozo[onnx]'     # onnxruntime
 pip install 'mozo[coreml]'   # coremltools, macOS only
+pip install tensorrt-cu12    # or -cu13, matching your torch's CUDA; TensorRT 11 or later
 ```
 
 No family needs an extra. The extras add *ways to execute* a model, not models: without them
-`runtime="auto"` simply does not select those artifacts.
+`runtime="auto"` simply does not select those artifacts. TensorRT is not an extra because its
+wheel has to match your torch's CUDA version; [Runtimes](docs/deployment/runtimes.md#tensorrt)
+says which one to install and which models use it.
 
 ## Using it
 

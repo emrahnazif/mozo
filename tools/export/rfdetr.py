@@ -18,7 +18,7 @@ and ONNX legitimately select different queries and 90% of the output disagrees w
 correct. On a photograph the scores separate and selection is stable. Raw-tensor tolerances test
 the tie-breaking of ``topk``; only the detections test the model.
 
-Three artifacts are produced per variant, all landing in
+Two artifacts are produced per variant, and a third with ``--fp16``, all landing in
 ``weights/rfdetr/<variant>/<revision>/`` where the manifest generator picks them up by stem:
 
 ``onnx-fp32``    the graph, exported from the torch model.
@@ -27,12 +27,20 @@ Three artifacts are produced per variant, all landing in
                  than torch on Apple silicon (10.8 ms against 53.3 ms on nano) at a worst output
                  delta of 0.001.
 
-There is deliberately no fp16 path. It was built, measured against upstream on ten photographs,
-and removed: fp16 lost a detection on three of eight variants and moved a score by 0.1119 where
-fp32 moves 0.0005; on Apple silicon it was no faster (52 ms against 53), on CPU it was 3-9x
+``onnx-fp16``    ``--fp16``: the detection variants (nano to large) only, for TensorRT on CUDA.
+                 Exported on CUDA under fp16 autocast, so the graph carries autocast's types --
+                 matrix products in fp16, norms and softmax in fp32 -- and a strongly typed
+                 engine runs exactly those. Measured on 500 COCO images (RTX 3090, TensorRT
+                 11.5): about 6x torch fp32, changing 0.2-0.5% of detections above 0.5 against
+                 the 0-0.1% fp32 changes on its own. Checked through ONNX Runtime on the CPU
+                 against torch autocast's own distance from fp32; see :data:`FP16_MARGIN`.
+
+fp16 as a whole-file runtime anywhere else stays out. In August it was measured against upstream
+on ten photographs: it lost a detection on three of eight variants and moved a score by 0.1119
+where fp32 moves 0.0005; on Apple silicon it was no faster (52 ms against 53), on CPU it was 3-9x
 *slower* (2097 ms against 236), and through CoreML it was both wrong and slower (delta 5.06 at
-16.5 ms against 0.001 at 10.8). Upstream's own guidance agrees. Should CUDA tensor cores ever
-justify revisiting it, start from the measurements rather than from this note.
+16.5 ms against 0.001 at 10.8). On CUDA, torch autocast is slower than fp32 for nano to medium
+(the model is launch-bound at batch 1); only a compiled engine turns fp16 into speed.
 
 CoreML goes through ``rfdetr[coreml]`` rather than coremltools directly. Calling coremltools
 straight fails on this architecture -- ``meshgrid`` via the traced path, an unsupported ``__and__``
@@ -58,8 +66,9 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 # This file is called rfdetr.py, so its own directory would shadow the package it imports.
 sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != Path(__file__).resolve().parent]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tools"))
 
-from common import fixtures  # noqa: E402
+from common import fixtures, require_one_file  # noqa: E402
 from mozo.runtimes import OnnxRunner  # noqa: E402
 from mozo.vendors.rfdetr_deploy import Predictor  # noqa: E402
 from mozo.weights import resolve  # noqa: E402
@@ -90,6 +99,19 @@ SCORE_TOLERANCE = 0.01
 
 #: Detections below this are noise and would make the count comparison meaningless.
 THRESHOLD = 0.5
+
+#: How much farther from fp32 the fp16 graph may be than torch autocast is, and floors for when
+#: autocast happens to land almost exactly. Measured on the fixture through ONNX Runtime on the
+#: CPU, against fp32 (graph / autocast): boxes 0.15/0.33, 4.14/1.42, 0.26/0.27, 0.81/0.76 px for
+#: nano, small, medium, large; scores 0.0030/0.0115, 0.0057/0.0055, 0.0012/0.0017, 0.0014/0.0210;
+#: one detection unmatched on nano on both sides, none elsewhere.
+FP16_MARGIN = 2.0
+FP16_BOX_FLOOR_PX = 5.0
+FP16_SCORE_FLOOR = 0.02
+FP16_OPSET = 18  # the opset-17 TorchScript path cannot export autocast's casts around Resize
+
+#: The variants an fp16 graph is published for: the ones it was measured on.
+FP16_VARIANTS = ("nano", "small", "medium", "large")
 
 #: Where the photographs used for verification live.
 
@@ -240,16 +262,108 @@ def export_variant(variant: str, revision: str | None, weights_dir: Path) -> Non
     print(f"  coreml-fp32 {coreml.stat().st_size / 1e6:.1f} MB")
 
 
+def _drift(want: dict, got: dict) -> tuple[int, float, float]:
+    """Detections of *want* with no same-class IoU>0.5 partner in *got*, and the largest box and
+    score moves among those that have one."""
+    from torchvision.ops import box_iou
+
+    if not len(want["scores"]):
+        return len(got["scores"]), 0.0, 0.0
+    if not len(got["scores"]):
+        return len(want["scores"]), 0.0, 0.0
+    overlap = box_iou(want["boxes"], got["boxes"]) * (want["labels"][:, None] == got["labels"][None])
+    best, match = overlap.max(1)
+    kept = best > 0.5
+    unmatched = int((~kept).sum()) + max(0, len(got["scores"]) - int(kept.sum()))
+    if not kept.any():
+        return unmatched, 0.0, 0.0
+    return (unmatched, float((want["boxes"][kept] - got["boxes"][match[kept]]).abs().max()),
+            float((want["scores"][kept] - got["scores"][match[kept]]).abs().max()))
+
+
+def export_fp16(variant: str, revision: str | None, weights_dir: Path) -> None:
+    """Export the autocast graph of one detection variant, verify it, and place it in the tree."""
+    if variant not in FP16_VARIANTS:
+        raise SystemExit(f"rfdetr/{variant}: fp16 is published for {', '.join(FP16_VARIANTS)} only, "
+                         "the variants it was measured on.")
+    if not torch.cuda.is_available():
+        raise SystemExit("the fp16 graph is exported on CUDA, under fp16 autocast")
+    print(f"\n=== rfdetr/{variant} onnx-fp16")
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    checkpoint = resolve("rfdetr", variant, revision=revision)
+    reference = Predictor.from_pretrained(f"rfdetr-{variant}", weights=checkpoint, device="cpu")
+    half = Predictor.from_pretrained(f"rfdetr-{variant}", weights=checkpoint, device="cuda")
+
+    def detections(raw, sizes):
+        return _detections(reference, tuple(r.float().cpu() for r in raw), sizes)[0]
+
+    images = []
+    with torch.inference_mode():
+        for image in fixtures():
+            want = reference.predict(str(image), threshold=THRESHOLD)[0]
+            batch, sizes = reference.preprocess([str(image)])
+            with torch.autocast("cuda", torch.float16):
+                out = half.model(batch.cuda())
+            autocast = detections((out["pred_boxes"], out["pred_logits"]), sizes)
+            images.append((image, batch, sizes, want, _drift(want, autocast)))
+
+    half.model.export()
+    destination = weights_dir / "rfdetr" / variant / checkpoint.parent.name / "onnx-fp16.onnx"
+    resolution = half.spec.resolution
+    dummy = torch.randn(1, 3, resolution, resolution, device="cuda")
+    with torch.inference_mode():
+        arity = len(half.model(dummy))
+    names = OUTPUT_NAMES[:arity]
+    with tempfile.TemporaryDirectory() as scratch:
+        staged = Path(scratch) / "onnx-fp16.onnx"
+        with torch.no_grad(), torch.autocast("cuda", torch.float16):
+            torch.onnx.export(half.model, (dummy,), str(staged), input_names=[INPUT_NAME],
+                              output_names=list(names),
+                              dynamic_axes={name: {0: "batch"} for name in (INPUT_NAME, *names)},
+                              opset_version=FP16_OPSET, dynamo=False)
+        require_one_file(staged)
+        print(f"  exported  {resolution}x{resolution}, opset {FP16_OPSET}, fp16 autocast, "
+              f"outputs {', '.join(names)}, dynamic batch")
+        del half
+        torch.cuda.empty_cache()
+
+        runner = OnnxRunner(staged, device="cpu")
+        for image, batch, sizes, want, (ac_lost, ac_box, ac_score) in images:
+            raw = runner(batch.numpy())
+            lost, box, score = _drift(want, detections(tuple(torch.from_numpy(a) for a in raw),
+                                                       sizes))
+            box_limit = max(FP16_MARGIN * ac_box, FP16_BOX_FLOOR_PX)
+            score_limit = max(FP16_MARGIN * ac_score, FP16_SCORE_FLOOR)
+            if lost > ac_lost or box > box_limit or score > score_limit:
+                raise SystemExit(
+                    f"{image.name}: the fp16 graph is farther from fp32 than torch autocast is -- "
+                    f"{lost} unmatched against {ac_lost}, boxes {box:.2f} px (limit "
+                    f"{box_limit:.2f}), scores {score:.4f} (limit {score_limit:.4f}). Not writing "
+                    "this artifact.")
+            print(f"  {image.name:<24} {len(want['scores']):>3} detections   unmatched {lost} "
+                  f"({ac_lost})   boxes {box:.2f} px ({ac_box:.2f})   scores {score:.4f} "
+                  f"({ac_score:.4f})   [autocast in brackets]")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(staged, destination)
+    print(f"  onnx-fp16 {destination.stat().st_size / 1e6:.1f} MB")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("variants", nargs="+", help="variant names, e.g. small seg-medium")
     parser.add_argument("--revision", default=None, help="published revision to export (default: latest)")
     parser.add_argument("--weights-dir", type=Path, default=ROOT / "weights",
                         help="local weights tree to write into (default: ./weights)")
+    parser.add_argument("--fp16", action="store_true",
+                        help="export only the onnx-fp16 graph (detection variants, needs CUDA)")
     args = parser.parse_args()
 
     for variant in args.variants:
-        export_variant(variant, args.revision, args.weights_dir)
+        if args.fp16:
+            export_fp16(variant, args.revision, args.weights_dir)
+        else:
+            export_variant(variant, args.revision, args.weights_dir)
 
     print("\nRun tools/generate_manifest.py to pick these up.")
     return 0

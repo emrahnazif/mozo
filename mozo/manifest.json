@@ -846,6 +846,11 @@
               "sha256": "cfd019047d8954a0e8e17bfd69720e5cfe0242cc3126224df7b8bb6c9984640a",
               "size": 3575
             },
+            "onnx-fp16": {
+              "path": "rfdetr/large/2026-08-18/onnx-fp16.onnx",
+              "sha256": "f18d7bcdcc2fd9040dd4f584abcd4eb2388b6d1e4f97d35992f3d1842a1d296a",
+              "size": 63186409
+            },
             "onnx-fp32": {
               "path": "rfdetr/large/2026-08-18/onnx-fp32.onnx",
               "sha256": "f8f45dbaf0afe5f7ea674ec591a1d7b317dc4609dcb236632568d7d9f00ea007",
@@ -881,6 +886,11 @@
               "sha256": "cfd019047d8954a0e8e17bfd69720e5cfe0242cc3126224df7b8bb6c9984640a",
               "size": 3575
             },
+            "onnx-fp16": {
+              "path": "rfdetr/medium/2026-08-18/onnx-fp16.onnx",
+              "sha256": "2bc37c09a7a30335efd28b9b3bf362821fcd9d799184eef61821cbbf45eece9f",
+              "size": 62203367
+            },
             "onnx-fp32": {
               "path": "rfdetr/medium/2026-08-18/onnx-fp32.onnx",
               "sha256": "cf478545e367ff5ed64f64664508ec4fa53b8d3cf4aff4769671ba0a5221b15e",
@@ -915,6 +925,11 @@
               "path": "rfdetr/nano/2026-08-18/labels.json",
               "sha256": "cfd019047d8954a0e8e17bfd69720e5cfe0242cc3126224df7b8bb6c9984640a",
               "size": 3575
+            },
+            "onnx-fp16": {
+              "path": "rfdetr/nano/2026-08-18/onnx-fp16.onnx",
+              "sha256": "bb35cd86ebe39739f1a385a78600ef86a30676c1fd8ab13be970c81d52039488",
+              "size": 55090515
             },
             "onnx-fp32": {
               "path": "rfdetr/nano/2026-08-18/onnx-fp32.onnx",
@@ -1090,6 +1105,11 @@
               "path": "rfdetr/small/2026-08-18/labels.json",
               "sha256": "cfd019047d8954a0e8e17bfd69720e5cfe0242cc3126224df7b8bb6c9984640a",
               "size": 3575
+            },
+            "onnx-fp16": {
+              "path": "rfdetr/small/2026-08-18/onnx-fp16.onnx",
+              "sha256": "07305211940f49bdab9a07d86de414533f92bf914762db8fe3188412502ec478",
+              "size": 58782109
             },
             "onnx-fp32": {
               "path": "rfdetr/small/2026-08-18/onnx-fp32.onnx",

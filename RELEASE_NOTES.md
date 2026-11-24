@@ -1,3 +1,9 @@
+## Unreleased
+
+- **`Workflow.save` never leaves a half-written file.** It writes the whole file beside the old one
+  and then moves it into place, so a save cut short by a killed process or a full disk leaves the
+  previous workflow as it was. The file keeps its permissions.
+
 # Mozo v1.13.0: Short workflow files and an editor that lays itself out
 
 - **A shorter workflow file.** A workflow can be written as its nodes alone, one per line with its

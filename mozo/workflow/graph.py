@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 from dataclasses import dataclass, field
 from itertools import chain
 from pathlib import Path
@@ -387,8 +389,23 @@ class Workflow:
         return document.write(self)
 
     def save(self, path: str | Path) -> None:
-        """Write the workflow to a JSON file, one node per line."""
-        Path(path).write_text(document.dumps(self.to_dict()), encoding="utf-8")
+        """Write the workflow to a JSON file, one node per line.
+
+        Written whole beside *path* and then moved over it, so a save cut short -- the process
+        killed, the disk full -- leaves the previous file as it was, never half of a new one.
+        """
+        path = Path(path)
+        partial = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            with open(partial, "w", encoding="utf-8") as file:
+                file.write(document.dumps(self.to_dict()))
+                file.flush()
+                os.fsync(file.fileno())
+            if path.exists():
+                shutil.copymode(path, partial)     # keep the permissions the file was given
+            os.replace(partial, path)
+        finally:
+            partial.unlink(missing_ok=True)
 
     # --- Shape ---
 

@@ -465,6 +465,28 @@ class TestTheFileFormat:
             '    {"id": "b", "type": "brighten"}\n'
             '  ]\n}\n')
 
+    def test_a_save_cut_short_leaves_the_previous_file_whole(self, tmp_path, monkeypatch):
+        path = tmp_path / "w.json"
+        workflow = Workflow.from_dict(document({"a": ("make", {})}, []))
+        workflow.save(path)
+        before = path.read_text()
+
+        def full(*args):
+            raise OSError("No space left on device")
+        monkeypatch.setattr("mozo.workflow.graph.os.fsync", full)
+        with pytest.raises(OSError, match="No space"):
+            Workflow.from_dict(document({"b": ("make", {"width": 3})}, [])).save(path)
+        assert path.read_text() == before
+        assert [p.name for p in tmp_path.iterdir()] == ["w.json"]
+
+    def test_a_save_keeps_the_file_s_permissions(self, tmp_path):
+        path = tmp_path / "w.json"
+        workflow = Workflow.from_dict(document({"a": ("make", {})}, []))
+        workflow.save(path)
+        path.chmod(0o640)
+        workflow.save(path)
+        assert path.stat().st_mode & 0o777 == 0o640
+
     def test_a_node_with_no_position_is_saved_without_one(self):
         """Not as ``{}``: the editor lays out a node with none, and ``{}`` reads as a position."""
         saved = Workflow.from_dict(document({"a": ("make", {})}, [])).to_dict()

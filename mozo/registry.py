@@ -129,7 +129,7 @@ DERIVES: dict[str, dict[str, str]] = {
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
     # The same shape as RF-DETR's, measured the same way (RTX 3090, 500 street-validation images
     # per variant): the fp32 engine changed no detection and left box and mask AP identical, at
-    # 1.6-1.9x torch's forward pass; fp16 changed none either, moving AP by at most 0.1, and is
+    # 1.4-1.9x torch's forward pass; fp16 changed none either, moving AP by at most 0.1, and is
     # offered on request only. See docs/models/mayaku-street.md.
     "mayaku_street": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }

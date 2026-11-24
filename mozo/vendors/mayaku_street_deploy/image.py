@@ -15,8 +15,9 @@ import cv2
 import numpy as np
 import torch
 
-#: Mid-grey padding, upstream's ``PAD``.
-PAD = 114
+#: Mid-grey padding, upstream's ``PAD``. ``BORDER`` is the name every mozo detection vendor gives
+#: it, so ``tests/test_vendor_agreement.py`` can find the border this one writes.
+PAD = BORDER = 114
 
 
 def fitted(hw: tuple[int, int], r: float) -> tuple[int, int]:
@@ -25,7 +26,7 @@ def fitted(hw: tuple[int, int], r: float) -> tuple[int, int]:
     return round(hw[0] * r), round(hw[1] * r)
 
 
-def letterbox(image: np.ndarray, canvas: tuple[int, int]) -> tuple[np.ndarray, dict]:
+def place(image: np.ndarray, canvas: tuple[int, int]) -> tuple[np.ndarray, dict]:
     """Fit an ``HxWx3`` uint8 image into the (H, W) canvas, centred, grey around it.
 
     Returns the ``(H, W, 3)`` canvas and the meta ``{"ratio", "pad": (left, top), "shape": (h, w)}``
@@ -61,12 +62,21 @@ def planar(canvas: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(out)
 
 
-def unletterbox(boxes: torch.Tensor, meta: dict) -> torch.Tensor:
-    """xyxy boxes in canvas pixels -> the original image's pixels, clipped to it."""
+def letterbox(image: np.ndarray, size: int) -> tuple[torch.Tensor, float, int, int]:
+    """The network's input for *image* on a square canvas of side *size*, and where the image went:
+    ``(batch, gain, pad_x, pad_y)``, the shape every mozo detection vendor's letterbox returns."""
+    canvas, meta = place(image, (size, size))
+    return planar(canvas), meta["ratio"], *meta["pad"]
+
+
+def to_original(boxes: torch.Tensor, gain: float, pad_x: int, pad_y: int,
+                shape: tuple[int, int]) -> torch.Tensor:
+    """xyxy boxes in canvas pixels -> the original image's pixels, clipped to it. Upstream's
+    ``unletterbox``: subtract the padding, divide by the gain, clip."""
     boxes = boxes.clone()
-    ratio, pad, (h, w) = meta["ratio"], meta["pad"], meta["shape"]
-    boxes[..., 0::2] = (boxes[..., 0::2] - pad[0]) / ratio
-    boxes[..., 1::2] = (boxes[..., 1::2] - pad[1]) / ratio
+    h, w = shape
+    boxes[..., 0::2] = (boxes[..., 0::2] - pad_x) / gain
+    boxes[..., 1::2] = (boxes[..., 1::2] - pad_y) / gain
     boxes[..., 0::2] = boxes[..., 0::2].clip(0, w)
     boxes[..., 1::2] = boxes[..., 1::2].clip(0, h)
     return boxes

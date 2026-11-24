@@ -1,4 +1,4 @@
-# All 82 models, by task
+# All 86 models, by task
 
 <!--
 summary: Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size.
@@ -6,7 +6,7 @@ label: All models
 keywords: mozo, model catalogue, computer vision models, licences, runtimes
 -->
 
-Mozo serves 82 variants across 18 families. A model is named `family/variant`, the same in Python
+Mozo serves 86 variants across 19 families. A model is named `family/variant`, the same in Python
 (`mozo.get_model("rfdetr/medium")`) and over HTTP (`/predict/rfdetr/medium`). Each family's page
 has examples, every parameter, and how the model behaves.
 
@@ -20,6 +20,7 @@ A box, a class and a confidence for each object.
 | Family | Variants | Licence | Runtimes | Size |
 |---|---|---|---|---|
 | [RF-DETR](/docs/models/rfdetr.md) | `nano` `small` `medium` `large` | Apache-2.0 | torch, onnx, coreml | 136–405 MB |
+| [Mayaku street](/docs/models/mayaku-street.md) | `nano` `medium` | Apache-2.0 | torch, onnx, tensorrt | 22–138 MB |
 | [YOLOv8](/docs/models/yolov8.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx, coreml | 7–137 MB |
 | [YOLO11](/docs/models/yolov11.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx | 6–115 MB |
 | [YOLO12](/docs/models/yolov12.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx, coreml | 6–119 MB |
@@ -33,6 +34,7 @@ masks come back.
 | Family | Variants | Licence | Runtimes | Size |
 |---|---|---|---|---|
 | [RF-DETR](/docs/models/rfdetr.md) | `seg-nano` `seg-small` `seg-medium` `seg-large` | Apache-2.0 | torch, onnx, coreml | 135–145 MB |
+| [Mayaku street](/docs/models/mayaku-street.md) | `seg-nano` `seg-medium` | Apache-2.0 | torch, onnx, tensorrt | 23–139 MB |
 | [YOLO11](/docs/models/yolov11.md) | `seg-nano` `seg-small` `seg-medium` `seg-large` `seg-xlarge` | AGPL-3.0 | torch, onnx | 6–125 MB |
 | [YOLO26](/docs/models/yolov26.md) | `seg-nano` `seg-small` `seg-medium` `seg-large` `seg-xlarge` | AGPL-3.0 | torch, onnx | 7–142 MB |
 

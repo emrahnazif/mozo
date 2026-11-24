@@ -244,7 +244,8 @@ def test_classes_cannot_suppress_each_other_across_the_padded_edge(vendor):
     against a box of 1010, an overlap of 0.98, which suppresses.
     """
     if not suppresses(vendor.__package__):
-        pytest.skip(f"{vendor.__name__} is NMS-free: its network returns a detection list")
+        pytest.skip(f"{vendor.__name__} exposes no YOLO-form suppress: NMS-free, or (Mayaku street) "
+                    "torchvision's batched_nms reproduced from upstream as it is")
 
     # (4 + classes, anchors): two anchors, two classes, centre-form boxes sharing one position
     # that runs far off the left and top edges.

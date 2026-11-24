@@ -94,7 +94,7 @@ def _upstream_stages(predictor, bgr: np.ndarray, conf: float) -> dict:
 
 
 def _vendor_stages(detector: Detector, rgb: np.ndarray, conf: float) -> dict:
-    canvas, meta = vimage.letterbox(rgb, detector.spec.canvas)
+    canvas, _ = vimage.place(rgb, detector.spec.canvas)
     batch = vimage.planar(canvas)
     maps = detector.forward(batch)
     spec = detector.spec

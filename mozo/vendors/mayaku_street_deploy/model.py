@@ -13,7 +13,7 @@ import torch
 
 from .blocks import STRIDES
 from .decode import postprocess
-from .image import letterbox, planar, unletterbox
+from .image import letterbox, to_original
 from .mask import COORD_SCALE, decode_masks
 from .network import KERNEL_LAYOUT, MASK_CH, TIERS, Tier, build_network, read_checkpoint
 
@@ -89,11 +89,10 @@ def check_sidecar(sidecar: dict[str, Any], spec: Spec, source: str) -> None:
         "preprocess": ((sidecar["preprocess"]["resize"], sidecar["preprocess"]["pad_value"],
                         sidecar["preprocess"]["channels"]), ("letterbox", 114, "RGB")),
     }
-    if spec.seg:
-        mask = sidecar["mask"]
-        want["mask"] = ((mask["stride"], mask["channels"], mask["coord_scale"],
-                         tuple(map(tuple, mask["kernel_layout"]))),
-                        (cfg.mask_stride, MASK_CH, COORD_SCALE, KERNEL_LAYOUT))
+    mask = sidecar.get("mask")
+    want["mask"] = ((mask["stride"], mask["channels"], mask["coord_scale"],
+                     tuple(map(tuple, mask["kernel_layout"]))) if mask else None,
+                    (cfg.mask_stride, MASK_CH, COORD_SCALE, KERNEL_LAYOUT) if spec.seg else None)
     wrong = {k: v for k, (v, expected) in want.items() if v != expected}
     if wrong:
         raise ValueError(f"{source} is not the street checkpoint this variant expects: {wrong}")
@@ -126,15 +125,16 @@ def detect(
     """
     if not 0 <= conf < 1:
         raise ValueError(f"conf must be in [0, 1), got {conf}")
-    canvas, meta = letterbox(image, spec.canvas)
+    batch, gain, pad_x, pad_y = letterbox(image, spec.canvas[0])
+    meta = {"ratio": gain, "pad": (pad_x, pad_y), "shape": image.shape[:2]}
     # Decoded on the CPU whatever ran the graph, as upstream does for every device but CUDA, so
     # the answer does not depend on where the forward pass ran.
-    preds = [p.float().cpu() for p in forward(planar(canvas))]
+    preds = [p.float().cpu() for p in forward(batch)]
     dets, anchors, points, stride = postprocess(
         preds, spec.num_classes, spec.cfg.reg_max, conf, spec.iou, spec.topk, spec.max_det)
     masks = decode_masks(preds, dets, anchors, points, stride, meta) if spec.seg else None
     det = dets.float()
-    return unletterbox(det[:, :4], meta), det[:, 4], det[:, 5].long(), masks
+    return to_original(det[:, :4], gain, pad_x, pad_y, meta["shape"]), det[:, 4], det[:, 5].long(), masks
 
 
 @dataclass

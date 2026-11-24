@@ -3,6 +3,9 @@
 - **Granite Embedding R2 downloads half as much: 95 MB instead of 191 MB.** The new revision,
   `2026-11-24`, stores the weights in bfloat16 as IBM publishes them, and mozo still runs them in
   float32. The vectors are bit-identical to `2026-11-20`'s, so an index you built keeps working.
+- **`CoreMLRunner(path, function=)`** runs one function of a multifunction CoreML package, and
+  `mozo.runtimes.coreml_functions(path)` lists them with their input shapes. A package is compiled
+  once per process, however many of its functions are loaded.
 - **`Workflow.save` never leaves a half-written file.** It writes the whole file beside the old one
   and then moves it into place, so a save cut short by a killed process or a full disk leaves the
   previous workflow as it was. The file keeps its permissions.

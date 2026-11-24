@@ -23,6 +23,7 @@ __all__ = [
     "CoreMLRunner",
     "OnnxRunner",
     "RuntimeError_",
+    "coreml_functions",
     "executable",
     "get_default_device",
     "make_runner",
@@ -37,6 +38,7 @@ import logging
 import shutil
 import zipfile
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import numpy as np
@@ -306,6 +308,37 @@ def _unpacked(archive: Path) -> Path:
     return unpacked
 
 
+#: Each package compiled once per process, by its unpacked path. CoreML compiles a whole package
+#: to load any function of it, so without this every function loaded the package's every function
+#: again: about 0.8 s of each load, and a temporary copy of all its weights.
+_compiled: dict[Path, str] = {}
+_compiling = Lock()
+
+
+def _compile(package: Path) -> str:
+    """The compiled ``.mlmodelc`` for *package*, compiled the first time it is asked for."""
+    import coremltools as ct
+
+    with _compiling:
+        if package not in _compiled:
+            _compiled[package] = ct.utils.compile_model(str(package))
+        return _compiled[package]
+
+
+def coreml_functions(path: str | Path) -> dict[str, tuple]:
+    """Each function of a multifunction CoreML package, with its first input's shape.
+
+    Read from the package's specification alone, so nothing is compiled or loaded. Empty for a
+    package with one function. A package can hold one graph at several fixed shapes, sharing its
+    weights; the shapes are what a caller chooses between, so they are what this returns.
+    """
+    import coremltools as ct
+
+    spec = ct.utils.load_spec(str(_unpacked(Path(path))))
+    return {function.name: tuple(function.input[0].type.multiArrayType.shape)
+            for function in spec.description.functions}
+
+
 class CoreMLRunner:
     """A CoreML package loaded for inference, callable on a batch.
 
@@ -322,6 +355,11 @@ class CoreMLRunner:
     that wanted fp16 would need this class to grow a compute-units argument first; see
     ``tools/export/sam3.py`` for why none does.
 
+    Args:
+        path: The package, or the zip it travels as.
+        function: Which function of a multifunction package to run, by name; ``None`` for the
+            default. :func:`coreml_functions` lists them.
+
     Attributes:
         inputs: Input tensor names, in the order the package declares them.
         outputs: Output tensor names, in the order the package declares them.
@@ -333,7 +371,7 @@ class CoreMLRunner:
         >>> boxes, logits = run(batch)                        # doctest: +SKIP
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, function: str | None = None) -> None:
         try:
             import coremltools as ct
         except ImportError as error:  # pragma: no cover - depends on the install
@@ -341,8 +379,13 @@ class CoreMLRunner:
                 "coremltools is not installed, so CoreML artifacts cannot be run."
             ) from error
 
-        self._model = ct.models.MLModel(str(_unpacked(Path(path))))
-        description = self._model.get_spec().description
+        package = _unpacked(Path(path))
+        description = ct.utils.load_spec(str(package)).description
+        if description.functions:
+            # A multifunction package declares its inputs per function, not at the top.
+            function = function or description.defaultFunctionName
+            description = next(f for f in description.functions if f.name == function)
+        self._model = ct.models.CompiledMLModel(_compile(package), function_name=function)
         self.inputs: list[str] = [i.name for i in description.input]
         self.outputs: list[str] = [o.name for o in description.output]
         self.input_shape: tuple = tuple(description.input[0].type.multiArrayType.shape)

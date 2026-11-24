@@ -113,11 +113,20 @@ EXECUTES: dict[str, tuple[str, ...]] = {
 #: only where its source is published, and it fetches its source's files, so ``fetch``,
 #: ``is_cached`` and ``download_size`` stay truthful.
 #:
+#: Deriving ``tensorrt-fp32`` opts a family into ``auto`` choosing it on CUDA
+#: (:data:`mozo.runtimes._PREFERENCE`): add it only with measured exactness and speed.
+#:
 #: Each entry is a measured decision, not a capability: each family's fp16 was measured on 500
 #: COCO images against fp32's own noise floor before it was offered. See the family's page.
 DERIVES: dict[str, dict[str, str]] = {
     "owlv2": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp16"},
     "grounding_dino": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "torch-fp32"},
+    # ``tensorrt-fp32`` from the published graph, for every variant that publishes one, and
+    # ``auto`` takes it on CUDA where TensorRT is installed: on an RTX 3090, 500 COCO images per
+    # variant, not one detection changed and AP was identical, at 1.65x (``large``) to 2.55x
+    # (``seg-nano``) torch fp32 -- RF-DETR is launch-bound at batch 1. fp16 only where an fp16
+    # graph is published (the detection variants), and only on request.
+    "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``

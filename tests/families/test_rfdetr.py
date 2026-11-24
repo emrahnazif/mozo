@@ -211,6 +211,92 @@ class TestRuntimeAgreement:
         assert select_runtime("cpu", artifacts("rfdetr", "small")) == "torch-fp32"
 
 
+class TestTensorRT:
+    """TensorRT on CUDA: fp32 exact and chosen by ``auto``, fp16 on request for detection."""
+
+    @staticmethod
+    def _choose(device, variant, runtime="auto"):
+        from mozo.registry import DERIVES
+
+        return select_runtime(device, artifacts("rfdetr", variant), runtime,
+                              derives=DERIVES["rfdetr"])
+
+    def test_auto_picks_the_exact_engine_on_cuda_when_tensorrt_is_usable(self, monkeypatch):
+        import mozo.runtimes as runtimes
+
+        monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: True)
+        for variant in DETECTION + SEGMENTATION:
+            assert self._choose("cuda", variant) == "tensorrt-fp32", variant
+        # No graph published, so no engine to build: torch, as before.
+        assert self._choose("cuda", "keypoint-preview") == "torch-fp32"
+        assert self._choose("cpu", "small") == "torch-fp32"
+
+    def test_without_tensorrt_cuda_stays_on_torch(self, monkeypatch):
+        import mozo.runtimes as runtimes
+
+        monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: False)
+        assert self._choose("cuda", "small") == "torch-fp32"
+
+    def test_fp16_is_offered_for_the_detection_variants_only_and_never_auto(self, monkeypatch):
+        """It was measured on those four; masks and keypoints were not."""
+        import mozo.runtimes as runtimes
+        from mozo.runtimes import RuntimeError_
+
+        monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: True)
+        for variant in DETECTION:
+            assert self._choose("cuda", variant, "tensorrt-fp16") == "tensorrt-fp16"
+        with pytest.raises(RuntimeError_, match="not published"):
+            self._choose("cuda", "seg-small", "tensorrt-fp16")
+
+    @staticmethod
+    def _on_cuda(runtime):
+        torch = pytest.importorskip("torch")
+        from mozo.runtimes import _tensorrt_unusable
+
+        if not torch.cuda.is_available():
+            pytest.skip("needs CUDA")
+        if runtime.startswith("tensorrt") and (problem := _tensorrt_unusable()) is not None:
+            pytest.skip(problem)
+        from mozo.registry import DERIVES
+
+        require_weights("rfdetr", "nano", DERIVES["rfdetr"].get(runtime, runtime))
+        from mozo.adapters.rfdetr import RFDETRPredictor
+
+        return RFDETRPredictor("nano", device="cuda", runtime=runtime)
+
+    def test_the_fp32_engine_matches_ieee_torch(self, image):
+        """Against torch with TF32 off: torch's CUDA default runs convolutions in TF32, which
+        the engine (built with TF32 cleared) does not."""
+        import torch
+
+        engine = self._on_cuda("tensorrt-fp32")
+        reference = self._on_cuda("torch-fp32")
+        previous = torch.backends.cudnn.allow_tf32
+        torch.backends.cudnn.allow_tf32 = False
+        try:
+            want = reference.predict(image, threshold=THRESHOLD)
+        finally:
+            torch.backends.cudnn.allow_tf32 = previous
+        got = engine.predict(image, threshold=THRESHOLD)
+        assert len(want) == len(got) > 0
+        assert [d.class_name for d in want] == [d.class_name for d in got]
+        worst = max(max(abs(a - b) for a, b in zip(x.bbox, y.bbox)) for x, y in zip(want, got))
+        assert worst <= BOX_TOLERANCE
+
+    def test_the_fp16_engine_keeps_the_confident_detections(self, image):
+        """Not a parity gate -- fp16 moves borderline detections, as documented -- but the
+        confident ones on the fixture must survive: same class, boxes within a few pixels."""
+        import numpy as np
+
+        want = self._on_cuda("torch-fp32").predict(image, threshold=0.7)
+        got = self._on_cuda("tensorrt-fp16").predict(image, threshold=0.4)
+        assert len(want) > 0
+        for found in want:
+            nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))
+            assert nearest.class_name == found.class_name
+            assert float(np.abs(np.subtract(nearest.bbox, found.bbox)).max()) < 5.0
+
+
 class TestCallerSuppliedNames:
     def test_caller_labels_override_the_published_ones(self, predictor_for, image):
         require_weights("rfdetr", "small", "torch-fp32")

@@ -19,6 +19,8 @@ identical whichever runtime produced the numbers in between.
 
 from __future__ import annotations
 
+import functools
+
 __all__ = [
     "CoreMLRunner",
     "OnnxRunner",
@@ -127,6 +129,11 @@ def get_default_device() -> str:
 #: the last-resort branch below still takes whatever is executable when nothing preferred is
 #: published, and a variant shipping only fp16 would get it. Absence is a preference, not a veto.
 #:
+#: ``tensorrt-fp32`` leads on CUDA, so a family that derives it (:data:`mozo.registry.DERIVES`)
+#: opts into ``auto`` choosing it there; each entry records the measurement that justified it --
+#: exact against fp32, and faster. It is executable only with TensorRT 11 or later installed
+#: (:func:`executable`), so a machine without it stays on torch.
+#:
 #: CoreML leads on Apple silicon because it was measured to: RF-DETR nano runs 10.8 ms through
 #: CoreML against 53.3 ms on torch MPS, five times faster, at a worst output delta of 0.001.
 #: That is the one entry here that overrides torch, and it is the one with the widest margin.
@@ -137,7 +144,7 @@ def get_default_device() -> str:
 #: here; only one of them dramatically. A family whose margin came out under 1.0 would belong in
 #: ``EXECUTES`` or unpublished, not in a third preference table.
 _PREFERENCE: dict[str, tuple[str, ...]] = {
-    "cuda": ("torch-fp16", "torch-fp32", "onnx-fp32"),
+    "cuda": ("tensorrt-fp32", "torch-fp16", "torch-fp32", "onnx-fp32"),
     "cpu": ("torch-fp32", "onnx-fp32"),
     "mps": ("coreml-fp32", "torch-fp32", "onnx-fp32"),
 }
@@ -147,7 +154,12 @@ _PREFERENCE: dict[str, tuple[str, ...]] = {
 #: dependency and always present; the rest are the caller's to install. Which frameworks *name*
 #: a runtime is a fact about artifact keys and lives in :mod:`mozo.weights`; what it takes to
 #: execute one is this module's business.
-_REQUIRES = {"onnx": "onnxruntime", "coreml": "coremltools", "tensorrt": "tensorrt"}
+_REQUIRES = {"onnx": "onnxruntime", "coreml": "coremltools"}
+
+#: Frameworks whose availability is more than an importable module, checked by a function
+#: instead of :data:`_REQUIRES`. TensorRT goes by version: a TensorRT 10 machine has the module,
+#: and ``auto`` choosing a runtime the runner then refuses would break the default path.
+_AVAILABLE = {"tensorrt": lambda: _tensorrt_usable()}
 
 #: Runtimes that run on one kind of device only, by runtime name or by framework. TensorRT is
 #: NVIDIA's. ``torch-fp16`` is offered on CUDA alone because that is the only device it was
@@ -192,18 +204,28 @@ def runnable(published: list[str], derives: dict[str, str] | None = None) -> lis
                       if source in offered and runtime not in offered]
 
 
-def executable(published: list[str], derives: dict[str, str] | None = None) -> list[str]:
+def executable(published: list[str], derives: dict[str, str] | None = None,
+               device: str | None = None) -> list[str]:
     """Return the runtimes this machine can actually run, not merely the ones published.
 
     Publishing a CoreML artifact does not put ``coremltools`` on the machine reading the
     manifest, and ``auto`` choosing a runtime whose library is missing would make the default
     path fail on a working install. Asking for one by name still raises -- with instructions --
     because that is a request that cannot be honoured rather than a preference to work around.
+
+    Given *device*, runtimes that cannot run there are dropped first, so checking a library is
+    only paid for where it could matter: a CPU load never imports TensorRT.
     """
     from importlib.util import find_spec
 
+    def installed(framework: str) -> bool:
+        if (check := _AVAILABLE.get(framework)) is not None:
+            return check()
+        module = _REQUIRES.get(framework)
+        return module is None or find_spec(module) is not None
+
     return [runtime for runtime in runnable(published, derives)
-            if (module := _REQUIRES.get(framework_of(runtime))) is None or find_spec(module)]
+            if (device is None or _runs_on(runtime, device)) and installed(framework_of(runtime))]
 
 
 #: ONNX Runtime reports input types as strings; these are the ones an artifact can declare.
@@ -296,8 +318,7 @@ def select_runtime(
             )
         return requested
 
-    usable = [key for key in executable(published, derives)
-              if key in supported and _runs_on(key, device)]
+    usable = [key for key in executable(published, derives, device) if key in supported]
     for key in _PREFERENCE.get(device.split(":")[0], _PREFERENCE["cpu"]):
         if key in usable:
             return key
@@ -521,6 +542,13 @@ def _tensorrt_install_hint() -> str:
 #: The oldest TensorRT mozo builds engines with. 10.13 miscompiles Grounding DINO's position
 #: encoding, and 11 is the first to build strongly typed engines only.
 _TENSORRT_MIN = 11
+
+
+@functools.lru_cache(maxsize=1)
+def _tensorrt_usable() -> bool:
+    """Whether TensorRT can run here, asked once per process: importing it takes a second, and
+    :func:`executable` asks on every model load whose family derives a TensorRT runtime."""
+    return _tensorrt_unusable() is None
 
 
 def _tensorrt_unusable() -> str | None:

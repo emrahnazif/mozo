@@ -25,11 +25,12 @@ import numpy as np
 import torch
 
 from ..labels import resolve as labels_for
-from ..runtimes import get_default_device, make_runner, select_runtime
+from .. import registry
+from ..runtimes import TensorRTRunner, get_default_device, make_runner, select_runtime
 from ..image import load_image
 from ..vendors.rfdetr_deploy import Predictor, get_spec
 from ..vendors.rfdetr_deploy.models.postprocess import PostProcess
-from ..weights import artifacts, resolve
+from ..weights import artifacts, framework_of, parts, resolve
 
 try:
     import pixelflow as pf
@@ -43,13 +44,18 @@ class _ProcessingOnly(Predictor):
     """The vendor's pre/post-processing without its model, for the graph runtimes.
 
     ``Predictor.device`` reads it off the model's parameters, which is the one thing a
-    model-less predictor cannot answer. It is always the CPU here: a graph is fed CPU numpy
-    whatever device ends up executing it.
+    model-less predictor cannot answer, so it is given instead: the CPU for ONNX Runtime and
+    CoreML, which are fed numpy, and the engine's GPU for TensorRT, so the image is normalised
+    where it will run rather than on the CPU and copied after.
     """
+
+    def __init__(self, *args, device: torch.device, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._device = device
 
     @property
     def device(self) -> torch.device:
-        return torch.device("cpu")
+        return self._device
 
 
 class RFDETRPredictor:
@@ -102,20 +108,33 @@ class RFDETRPredictor:
 
         if checkpoint_path is None:
             self.runtime = select_runtime(
-                self.device, artifacts("rfdetr", variant, revision=revision), runtime)
+                self.device, artifacts("rfdetr", variant, revision=revision), runtime,
+                derives=registry.DERIVES["rfdetr"])
         else:
             # A checkpoint mozo did not publish: the architecture is known, the graph is not.
             self.runtime = "torch-fp32"
 
         self._runner = None
-        if not self.runtime.startswith("torch"):
+        self._tensorrt = framework_of(self.runtime) == "tensorrt"
+        if self._tensorrt:
+            # Built from the graph it derives from (``registry.DERIVES``), once per GPU and
+            # TensorRT version. The published graph has a dynamic batch axis; the adapter runs one
+            # image at a time, so the engine is built for exactly that shape.
+            side = get_spec(f"rfdetr-{variant}").resolution
+            shape = (1, 3, side, side)
+            self._runner = TensorRTRunner(
+                parts("rfdetr", variant, self.runtime, revision=revision)[""], self.device,
+                shapes={"images": (shape, shape, shape)})
+        elif not self.runtime.startswith("torch"):
             artifact = resolve("rfdetr", variant, self.runtime, revision=revision)
             self._runner = make_runner(artifact, self.runtime, device=self.device)
+        if self._runner is not None:
             # The graph carries the architecture, so nothing torch-side is loaded here. Only the
             # spec is needed, and it costs no weights: pre- and post-processing are pure maths
             # over the variant's resolution and query count. Loading the checkpoint anyway would
             # cost a second, larger download and 128 MB of parameters that never run.
-            self._predictor = self._build_processing_only()
+            self._predictor = self._build_processing_only(
+                self._runner.device if self._tensorrt else torch.device("cpu"))
         else:
             weights = (Path(checkpoint_path) if checkpoint_path
                        else resolve("rfdetr", variant, self.runtime, revision=revision))
@@ -133,12 +152,11 @@ class RFDETRPredictor:
             )
         _log.info("RF-DETR %s ready on %s via %s.", variant, self.device, self.runtime)
 
-    def _build_processing_only(self) -> Predictor:
-        """Build the vendor's pre/post-processing without its model.
+    def _build_processing_only(self, device: torch.device) -> Predictor:
+        """Build the vendor's pre/post-processing without its model, preprocessing on *device*.
 
-        The predictor is used for :meth:`preprocess` and :attr:`postprocess` alone on the ONNX
-        path, and neither touches ``model``. Its ``device`` property would, but nothing asks:
-        an ONNX batch is always handed over as CPU numpy.
+        The predictor is used for :meth:`preprocess` and :attr:`postprocess` alone on the graph
+        paths, and neither touches ``model``.
         """
         spec = get_spec(f"rfdetr-{self.variant}")
         return _ProcessingOnly(
@@ -150,10 +168,14 @@ class RFDETRPredictor:
                 trace_alpha=spec.postprocess_trace_alpha,
             ),
             class_names=[],
+            device=device,
         )
 
     def _forward(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
         """Run the batch through whichever runtime is loaded, returning named raw outputs."""
+        if self._tensorrt:
+            # Torch tensors on the device in and out: no host round trip.
+            return dict(zip(self._runner.outputs, self._runner(batch)))
         if self._runner is None:
             with torch.inference_mode():
                 return self._predictor.model(batch)
@@ -196,7 +218,8 @@ class RFDETRPredictor:
         outputs = {name: value.float() if torch.is_tensor(value) else value
                    for name, value in outputs.items()}
         results = self._predictor.postprocess(
-            outputs, target_sizes=torch.tensor(sizes, device=batch.device), score_threshold=threshold
+            outputs, target_sizes=torch.tensor(sizes, device=outputs["pred_logits"].device),
+            score_threshold=threshold
         )
         result = results[0]
         # Dropped before the filter below, not after: the keypoint path ignores the threshold it

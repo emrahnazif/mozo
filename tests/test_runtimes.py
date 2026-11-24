@@ -109,7 +109,7 @@ class TestDerivedRuntimes:
     def test_auto_never_lands_on_a_runtime_the_device_cannot_run(self, monkeypatch):
         """Even through the last-resort branch, which takes whatever is executable."""
         import mozo.runtimes as module
-        monkeypatch.setitem(module._REQUIRES, "tensorrt", "json")  # importable everywhere
+        monkeypatch.setattr(module, "_tensorrt_usable", lambda: True)
         with pytest.raises(RuntimeError_, match="nothing this model publishes can run here"):
             select_runtime("cpu", ["onnx-fp32"], executes=("tensorrt",), derives=DERIVES)
         assert select_runtime("cuda", ["onnx-fp32"], executes=("tensorrt",),
@@ -122,8 +122,39 @@ class TestDerivedRuntimes:
     def test_auto_does_not_prefer_tensorrt(self, monkeypatch):
         """TensorRT fp16 moves about 2% of confident OWLv2 detections; a user has to choose it."""
         import mozo.runtimes as module
-        monkeypatch.setitem(module._REQUIRES, "tensorrt", "json")
+        monkeypatch.setattr(module, "_tensorrt_usable", lambda: True)
         assert select_runtime("cuda", BOTH, derives=DERIVES).startswith("torch")
+
+    def test_auto_prefers_exact_tensorrt_fp32_where_derived(self, monkeypatch):
+        """RF-DETR's fp32 engine was measured exact and 1.65-2.55x torch on CUDA."""
+        import mozo.runtimes as module
+        from mozo.registry import DERIVES as REGISTRY
+
+        derives = REGISTRY["rfdetr"]
+        monkeypatch.setattr(module, "_tensorrt_usable", lambda: True)
+        assert select_runtime("cuda", BOTH, derives=derives) == "tensorrt-fp32"
+        assert select_runtime("cpu", BOTH, derives=derives) == "torch-fp32"
+
+    def test_a_cpu_load_never_asks_about_tensorrt(self, monkeypatch):
+        """Importing TensorRT takes a second; a load that could not use it must not pay it."""
+        import mozo.runtimes as module
+
+        def refuse():
+            raise AssertionError("asked about TensorRT for a CPU load")
+
+        monkeypatch.setattr(module, "_tensorrt_usable", refuse)
+        assert select_runtime("cpu", BOTH, derives={"tensorrt-fp32": "onnx-fp32"}) == "torch-fp32"
+
+    def test_without_a_usable_tensorrt_auto_stays_on_torch(self, monkeypatch):
+        """A TensorRT 10 machine has the module; picking a runtime the runner refuses would
+        break the default path."""
+        import mozo.runtimes as module
+        from mozo.registry import DERIVES as REGISTRY
+
+        derives = REGISTRY["rfdetr"]
+        monkeypatch.setattr(module, "_tensorrt_usable", lambda: False)
+        assert select_runtime("cuda", BOTH, derives=derives) == "torch-fp32"
+        assert select_runtime("cuda", BOTH, "tensorrt-fp32", derives=derives) == "tensorrt-fp32"
 
     def test_the_family_filter_applies_to_derived_runtimes_too(self):
         with pytest.raises(RuntimeError_, match="can only execute torch"):

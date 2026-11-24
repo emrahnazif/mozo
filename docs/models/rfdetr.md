@@ -1,9 +1,9 @@
 # RF-DETR: detection, segmentation and keypoints
 
 <!--
-summary: Roboflow's real-time transformer detector in mozo: boxes, masks or person joints, Apache-2.0, on torch, ONNX and CoreML.
+summary: Roboflow's real-time transformer detector in mozo: boxes, masks or person joints, Apache-2.0, on torch, ONNX, CoreML and TensorRT.
 label: RF-DETR
-keywords: mozo, rf-detr, object detection, instance segmentation, keypoints, roboflow
+keywords: mozo, rf-detr, object detection, instance segmentation, keypoints, roboflow, tensorrt
 -->
 
 RF-DETR is Roboflow's real-time transformer detector. It finds objects of COCO's 80 classes and
@@ -49,17 +49,18 @@ Every detection carries every PixelFlow field, including the ones that are `null
 
 | ID | Task | Weights (torch) | Runtimes | Licence |
 |---|---|---|---|---|
-| `rfdetr/nano` | detection | 366 MB | torch, onnx, coreml | Apache-2.0 |
-| `rfdetr/small` | detection | 386 MB | torch, onnx, coreml | Apache-2.0 |
-| `rfdetr/medium` | detection | 405 MB | torch, onnx, coreml | Apache-2.0 |
-| `rfdetr/large` | detection | 136 MB | torch, onnx, coreml | Apache-2.0 |
-| `rfdetr/seg-nano` | instance segmentation | 135 MB | torch, onnx, coreml | Apache-2.0 |
-| `rfdetr/seg-small` | instance segmentation | 135 MB | torch, onnx, coreml | Apache-2.0 |
-| `rfdetr/seg-medium` | instance segmentation | 143 MB | torch, onnx, coreml | Apache-2.0 |
-| `rfdetr/seg-large` | instance segmentation | 145 MB | torch, onnx, coreml | Apache-2.0 |
+| `rfdetr/nano` | detection | 366 MB | torch, onnx, coreml, tensorrt fp32 and fp16 | Apache-2.0 |
+| `rfdetr/small` | detection | 386 MB | torch, onnx, coreml, tensorrt fp32 and fp16 | Apache-2.0 |
+| `rfdetr/medium` | detection | 405 MB | torch, onnx, coreml, tensorrt fp32 and fp16 | Apache-2.0 |
+| `rfdetr/large` | detection | 136 MB | torch, onnx, coreml, tensorrt fp32 and fp16 | Apache-2.0 |
+| `rfdetr/seg-nano` | instance segmentation | 135 MB | torch, onnx, coreml, tensorrt fp32 | Apache-2.0 |
+| `rfdetr/seg-small` | instance segmentation | 135 MB | torch, onnx, coreml, tensorrt fp32 | Apache-2.0 |
+| `rfdetr/seg-medium` | instance segmentation | 143 MB | torch, onnx, coreml, tensorrt fp32 | Apache-2.0 |
+| `rfdetr/seg-large` | instance segmentation | 145 MB | torch, onnx, coreml, tensorrt fp32 | Apache-2.0 |
 | `rfdetr/keypoint-preview` | person keypoints | 164 MB | torch | Apache-2.0 |
 
-`runtime="auto"`, the default, picks CoreML on Apple silicon (`mps`) and torch on CUDA and CPU.
+`runtime="auto"`, the default, picks CoreML on Apple silicon (`mps`), a TensorRT engine on CUDA
+when TensorRT 11 or later is installed (see [below](#on-cuda-tensorrt)), and torch otherwise.
 Each graph is checked against the torch model before it is published: the same detections, classes
 and count on real photographs, with boxes within 0.2 px and scores within 0.01. To choose one
 yourself, ask a `ModelManager` for it by name:
@@ -70,6 +71,45 @@ from mozo import ModelManager
 model = ModelManager().get_model("rfdetr", "small", runtime="onnx-fp32")   # pip install 'mozo[onnx]'
 model.runtime      # 'onnx-fp32'
 ```
+
+### On CUDA: TensorRT
+
+With TensorRT 11 or later installed (`pip install tensorrt-cu12` or `-cu13`, matching your torch's
+CUDA; see [Runtimes](/docs/deployment/runtimes.md#tensorrt)), `auto` runs RF-DETR on CUDA as
+`tensorrt-fp32`: a TensorRT engine built from the published ONNX graph, in full IEEE fp32. It finds
+exactly what torch finds, faster. The first load on a machine builds the engine, in about 12 s,
+and keeps it in mozo's cache; later loads take under a second. Without TensorRT, `auto` stays on
+torch. `runtime="tensorrt-fp16"` is faster again and has to be asked for.
+
+Measured on an RTX 3090 with torch 2.13 and TensorRT 11.5, on 500 random COCO val2017 images.
+Time is the model's forward pass. A detection "changes" when, against torch fp32, it scores above
+0.52 on one side with no same-class partner (IoU above 0.5) above 0.5 on the other. *Input
+rounded* is fp32 with only its input rounded to half precision: how often detections change on
+their own.
+
+| Variant | torch fp32 | `tensorrt-fp32` (`auto`) | `tensorrt-fp16` | Input rounded |
+|---|---|---|---|---|
+| `nano` | 8.6 ms, AP 50.21 | 3.5 ms, 2.4×, AP 50.20, 0 changes | 1.3 ms, 6.4×, AP 50.25, 4 of 2,301 (0.2%) | 0 |
+| `small` | 11.0 ms, AP 55.39 | 5.4 ms, 2.0×, AP 55.39, 0 | 1.9 ms, 5.9×, AP 55.39, 8 of 2,531 (0.3%) | 3 |
+| `medium` | 12.9 ms, AP 57.22 | 6.9 ms, 1.9×, AP 57.22, 0 | 2.2 ms, 5.9×, AP 57.08, 14 of 2,601 (0.5%) | 3 |
+| `large` | 17.6 ms, AP 59.23 | 10.6 ms, 1.7×, AP 59.23, 0 | 2.9 ms, 6.0×, AP 59.26, 6 of 2,648 (0.2%) | 1 |
+| `seg-nano` | 12.8 ms, AP 51.40 | 5.0 ms, 2.6×, AP 51.39, 0 | | |
+| `seg-small` | 14.7 ms, AP 54.08 | 6.3 ms, 2.3×, AP 54.08, 0 | | |
+| `seg-medium` | 18.4 ms, AP 56.65 | 8.5 ms, 2.2×, AP 56.63, 0 | | |
+| `seg-large` | 24.2 ms, AP 58.36 | 12.3 ms, 2.0×, AP 58.35, 0 | | |
+
+The segmentation engines' masks differ from torch's on at most 0.05% of pixels. RF-DETR is limited
+by launching kernels at one image at a time, which a compiled engine removes, so even the fp32
+engine is faster. Torch's own fp16 does not help: under autocast it is slower than fp32 for `nano`
+to `medium`.
+
+`tensorrt-fp16` is offered for the four detection variants, the ones it was measured on. It
+changes a few borderline detections, about as many as `torch-fp16` does on OWLv2, and AP does not
+move. It downloads an fp16 graph of 55–63 MB to build from, and its first build takes about 45 s.
+
+The fp32 engine is closer to exact fp32 than torch's default CUDA path, which runs convolutions in
+TF32. Against torch with `torch.backends.cudnn.allow_tf32 = False`, the engine's boxes agree to
+0.01 px on the example photograph.
 
 ## Inputs and outputs
 

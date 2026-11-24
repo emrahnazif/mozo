@@ -44,7 +44,7 @@ A box, a class and a confidence for each object.
 
 | Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| [RF-DETR](docs/models/rfdetr.md) | nano → large | Apache-2.0 | torch, onnx, coreml |
+| [RF-DETR](docs/models/rfdetr.md) | nano → large | Apache-2.0 | torch, onnx, coreml; tensorrt on CUDA |
 | [YOLOv8](docs/models/yolov8.md) | nano → xlarge | AGPL-3.0 | torch, onnx, coreml |
 | [YOLO11](docs/models/yolov11.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
 | [YOLO12](docs/models/yolov12.md) | nano → xlarge | AGPL-3.0 | torch, onnx, coreml |
@@ -57,7 +57,7 @@ masks.
 
 | Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
-| [RF-DETR](docs/models/rfdetr.md) | nano → large | Apache-2.0 | torch, onnx, coreml |
+| [RF-DETR](docs/models/rfdetr.md) | nano → large | Apache-2.0 | torch, onnx, coreml; tensorrt on CUDA |
 | [YOLO11](docs/models/yolov11.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
 | [YOLO26](docs/models/yolov26.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
 

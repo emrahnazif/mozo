@@ -1,5 +1,18 @@
 ## Unreleased
 
+- **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
+  TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
+  TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection
+  changed and AP was identical, on every detection and segmentation variant. RF-DETR spends most of
+  a call launching kernels, which a compiled engine removes. The first load on a machine builds
+  the engine in about 12 s and keeps it in the cache. Without TensorRT, nothing changes: `auto`
+  stays on torch. `keypoint-preview` publishes no graph and stays on torch.
+- **RF-DETR's detection variants can run through TensorRT in fp16, about 6 times faster than
+  fp32.** Ask for `runtime="tensorrt-fp16"`. AP does not move and 0.2–0.5% of detections above
+  0.5 come out differently than in fp32. `auto` never picks it. Each of `nano`, `small`, `medium`
+  and `large` now publishes an fp16 ONNX graph, 55–63 MB, to build it from; only those loads
+  download it.
+
 - **OWLv2 runs about 4.3 times faster on CUDA by default (4.8 times for `large`)**, measured with
   torch 2.13; 4.4 and 5.5 times with torch 2.6. `auto` now
   picks `torch-fp16` on CUDA: the same checkpoint, with the image tower's blocks in half precision

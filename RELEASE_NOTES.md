@@ -1,4 +1,4 @@
-## Unreleased
+# Mozo v1.14.0: Granite Embedding R2 on CoreML, at half the download
 
 - **Granite Embedding R2 downloads half as much: 95 MB instead of 191 MB.** The new revision,
   `2026-11-24`, stores the weights in bfloat16 as IBM publishes them, and mozo still runs them in

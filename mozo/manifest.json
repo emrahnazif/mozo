@@ -696,10 +696,10 @@
               "sha256": "d9e9d637e55d8ba8f594499b30e31385571acec9fbe0e833dffa8309b6a14316",
               "size": 673
             },
-            "onnx-fp32": {
-              "path": "owlv2/base/2026-08-21/onnx-fp32.onnx",
-              "sha256": "b8a744982ec98708283b452e8fbee548f41c4618b8157505af2d9b9e7e2f4f0d",
-              "size": 353817761
+            "onnx-fp16": {
+              "path": "owlv2/base/2026-08-21/onnx-fp16.onnx",
+              "sha256": "bb6c68e74ef6474c93735de241aa626a50327dcf799dba7e2e19639ab0b1ce2d",
+              "size": 177816000
             },
             "torch-fp32": {
               "path": "owlv2/base/2026-08-21/torch-fp32.pth",
@@ -726,10 +726,10 @@
               "sha256": "11acbbbfb6c00c3e3be481a12771230e7e7dd2152cb6225e6d8e903430809adc",
               "size": 732
             },
-            "onnx-fp32": {
-              "path": "owlv2/base-ensemble/2026-08-21/onnx-fp32.onnx",
-              "sha256": "de3229c4d21dfb8de00b2a75c248534ea01cf05f9c5dae2f278fa62864dfe478",
-              "size": 353817761
+            "onnx-fp16": {
+              "path": "owlv2/base-ensemble/2026-08-21/onnx-fp16.onnx",
+              "sha256": "dd340e189610ba80e985ce52ea262c75056316dba0bb47b045343ae7ef053105",
+              "size": 177816000
             },
             "torch-fp32": {
               "path": "owlv2/base-ensemble/2026-08-21/torch-fp32.pth",
@@ -756,10 +756,10 @@
               "sha256": "fc5e7bdbf34dc154622bd734bfc6444d119fb2d422cec95b242df2d896246771",
               "size": 675
             },
-            "onnx-fp32": {
-              "path": "owlv2/large/2026-08-21/onnx-fp32.onnx",
-              "sha256": "ac7ff5a2df6bcf22957a9ed0faec727118c3dac606d7beae7248bcef04c6663c",
-              "size": 1233205729
+            "onnx-fp16": {
+              "path": "owlv2/large/2026-08-21/onnx-fp16.onnx",
+              "sha256": "35d5365e2d9b4b5b398261a2898eec3e76f1cdfeefed1b4eb8fd8fed8653eb93",
+              "size": 618361706
             },
             "torch-fp32": {
               "path": "owlv2/large/2026-08-21/torch-fp32.pth",
@@ -786,10 +786,10 @@
               "sha256": "55b88be896d0b5eca7a5c3857a29515c11b9c248fcab78b0c0aebd9a14c717c2",
               "size": 734
             },
-            "onnx-fp32": {
-              "path": "owlv2/large-ensemble/2026-08-21/onnx-fp32.onnx",
-              "sha256": "aa2aceb499690fa2243c308fc3f73002dc844345349dbd9bb5863d7f49098d30",
-              "size": 1233205729
+            "onnx-fp16": {
+              "path": "owlv2/large-ensemble/2026-08-21/onnx-fp16.onnx",
+              "sha256": "32bb9c6f2d65319f7b5ea2708fd0d3b5d8eaecccc1cd757a64b4779920535301",
+              "size": 618361706
             },
             "torch-fp32": {
               "path": "owlv2/large-ensemble/2026-08-21/torch-fp32.pth",

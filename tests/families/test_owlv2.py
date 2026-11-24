@@ -271,7 +271,11 @@ def _choose(device, runtime="auto"):
 
 
 def test_cuda_runs_fp16_by_default_and_tensorrt_on_request():
-    """How derived runtimes are chosen is ``test_runtimes.py``'s; this pins OWLv2's entry."""
+    """How derived runtimes are chosen is ``test_runtimes.py``'s; this pins OWLv2's entry. The
+    engine is built from the fp16 graph: TensorRT 11 engines are strongly typed."""
+    from mozo.registry import DERIVES
+
+    assert DERIVES[FAMILY]["tensorrt-fp16"] == "onnx-fp16"
     assert _choose("cuda") == "torch-fp16"
     assert _choose("cuda", "tensorrt-fp16") == "tensorrt-fp16"
     assert _choose("cpu") == "torch-fp32"
@@ -282,7 +286,7 @@ def test_the_published_graph_is_not_run_through_onnx_runtime():
     from mozo.runtimes import RuntimeError_
 
     with pytest.raises(RuntimeError_, match="can only execute torch, tensorrt"):
-        _choose("cuda", "onnx-fp32")
+        _choose("cuda", "onnx-fp16")
 
 
 def _on_cuda(runtime):

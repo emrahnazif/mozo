@@ -109,8 +109,10 @@ class OwlV2Predictor(Preparing):
         # come from the checkpoint, which is why a TensorRT load fetches it beside the graph.
         tower = None
         if framework_of(self.runtime) == "tensorrt":
+            # The graph's own types are fp16 -- ``torch-fp16``'s split -- and the engine is
+            # strongly typed, so it runs exactly those.
             engine = TensorRTRunner(parts(FAMILY, variant, self.runtime, revision=revision)[""],
-                                    device=self.device, fp16=self.runtime.endswith("-fp16"))
+                                    device=self.device)
             tower = lambda pixels: engine(pixels)[0]  # noqa: E731
 
         # ``torch-fp16`` has no file of its own: it is the fp32 checkpoint, rounded after loading.

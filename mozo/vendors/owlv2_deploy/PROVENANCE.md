@@ -87,20 +87,25 @@ kernel. `registry.EXECUTES` keeps ONNX Runtime off this family for that reason.
 
 **Through TensorRT, on CUDA.** Split along the seam in `network.py` — `encode_image`, pixels to
 patch features, with the class-token merge and final norm — the vision tower is 89% of a cold call
-and the part a compiled runtime speeds up. `tools/export/owlv2.py` exports it (354 MB for `base`,
-1,233 MB for `large`, batch 1, opset 17) and checks it through ONNX Runtime on the CPU before
-writing it: features within 2.7e-03, boxes within 0.08 px over the 50 best patches, scores within
-1.5e-05. On the user's machine, `mozo.runtimes.TensorRTRunner` builds an fp16 engine from it once
-per GPU and TensorRT version. The text tower and heads stay the checkpoint's.
+and the part a compiled runtime speeds up. `tools/export/owlv2.py` exports it after
+`half_trunk()`, so the graph's own types are `torch-fp16`'s (178 MB for `base`, 618 MB for
+`large`, batch 1, opset 18, through `torch.export`), and checks it through ONNX Runtime on the CPU
+before writing it: its detections may be no farther from fp32 than `torch-fp16`'s, with a 2×
+margin. On the user's machine, `mozo.runtimes.TensorRTRunner` builds a strongly typed engine from
+it once per GPU and TensorRT version (TensorRT 11 or later), which runs exactly those types. The
+text tower and heads stay the checkpoint's.
 
-On an RTX 3090 (TensorRT 10.13, 500 COCO val2017 images, `base-ensemble`), the engine runs the
-tower in 13.7 ms against torch fp32's 106.2 — 7.7× — at the same COCO AP (50.00 against 50.01).
-Its fp16 GEMMs are less exact than torch's, and that is not repairable from outside: per-layer fp32
-pins, strongly-typed graphs, and fp32 LayerNorm, softmax and residual stream all left the drift
-where it was, and attention-only and MLP-only fp16 engines each drift about 15× torch's fp16. So
-about 2.4% of detections above 0.3 cross that threshold against fp32, and `tensorrt-fp16` is
-offered, documented, and never chosen by `auto`. TensorRT fp32 and TF32 engines agree with torch to
-under 1e-4 and 0.008 in score respectively, at only 1.14× and 1.29×, so neither is offered.
+On an RTX 3090 (TensorRT 11.5, torch 2.13, 500 COCO val2017 images), the engine runs the tower
+7.2× (`base-ensemble`) to 8.2× (`large`) faster than torch fp32, at the same COCO AP. Its fp16
+arithmetic is less exact than torch's on this model, even running torch's own types: fp32
+softmax, fp32 block norms, an autocast-typed graph, fp32 projections or fp32 attention products
+all left the drift in place, and only the whole MLP in fp32 removed it -- at which point the
+engine is slower than `torch-fp16`. TensorRT 11 exposes no control over accumulation precision.
+TensorRT 10.13, whose builder chose the fp16 kernels itself, measured the same (2.4% on
+`base-ensemble`). So 2.5–4.8% of detections above 0.3 cross that threshold against fp32, and
+`tensorrt-fp16` is offered, documented, and never chosen by `auto`. TensorRT fp32 engines, with
+TF32 off as the runner builds them, match torch exactly but run only 1.14× faster, so they are not
+offered.
 
 ## Half precision
 

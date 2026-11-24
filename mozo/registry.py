@@ -108,14 +108,15 @@ EXECUTES: dict[str, tuple[str, ...]] = {
 #: ``torch-fp16`` is the fp32 checkpoint with part of the network cast to half precision, so it
 #: has no file to publish. A TensorRT engine is specific to the GPU and the TensorRT version that
 #: built it, so it *cannot* be published: it is built on first load and cached -- from a published
-#: ONNX graph (OWLv2), or from a graph exported from the checkpoint there and then, where the graph
-#: depends on an input size the user chooses (Grounding DINO). A derived runtime is offered only where its source is published, and it
-#: fetches its source's files, so ``fetch``, ``is_cached`` and ``download_size`` stay truthful.
+#: fp16 ONNX graph (OWLv2), or from a graph exported from the checkpoint there and then, where the
+#: graph depends on an input size the user chooses (Grounding DINO). A derived runtime is offered
+#: only where its source is published, and it fetches its source's files, so ``fetch``,
+#: ``is_cached`` and ``download_size`` stay truthful.
 #:
 #: Each entry is a measured decision, not a capability: each family's fp16 was measured on 500
 #: COCO images against fp32's own noise floor before it was offered. See the family's page.
 DERIVES: dict[str, dict[str, str]] = {
-    "owlv2": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp32"},
+    "owlv2": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp16"},
     "grounding_dino": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "torch-fp32"},
 }
 

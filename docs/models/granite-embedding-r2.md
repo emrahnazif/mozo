@@ -34,7 +34,7 @@ curl -X POST "http://localhost:8000/encode/granite_embedding_r2/small?text=how%2
 ```
 
 ```json
-{"model": "granite_embedding_r2/small", "revision": "2026-11-20", "dim": 384, "embeddings": [[0.05614, -0.00832, ...]]}
+{"model": "granite_embedding_r2/small", "revision": "2026-11-24", "dim": 384, "embeddings": [[0.05614, -0.00832, ...]]}
 ```
 
 `/predict` answers `501` and says where to go instead, because the model answers nothing about an
@@ -48,7 +48,7 @@ image:
 
 | ID | Vector | Context | Weights (torch) | Runtimes | Licence |
 |---|---|---|---|---|---|
-| `granite_embedding_r2/small` | 384-d | 8,192 tokens | 191 MB | torch | Apache-2.0 |
+| `granite_embedding_r2/small` | 384-d | 8,192 tokens | 95 MB | torch | Apache-2.0 |
 
 ## Inputs and outputs
 
@@ -124,6 +124,10 @@ zero: compare scores against each other, or against a threshold you calibrate on
 A vector from one variant or revision means nothing against a vector from another. A stored index
 is tied to both, and changing either means embedding the corpus again. `/encode` returns `model`
 and `revision` with every response for that reason, and the model has `.revision`.
+
+One exception: revision `2026-11-24` is `2026-11-20`'s weights stored as IBM ships them, in
+bfloat16, and runs in float32 just the same. Its vectors are bit-identical, so an index built on
+either revision works with the other; only the download halved.
 
 ### The same text gets the same tokens on every Python
 

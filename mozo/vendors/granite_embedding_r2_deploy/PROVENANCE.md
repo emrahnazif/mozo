@@ -54,7 +54,9 @@ one reference, not two.
 
 The checkpoint is consumed as IBM publishes it, modulo one repack: `tools/fetch` verifies
 `model.safetensors` against the Hub's sha256 and writes the same tensors as an ordinary state dict,
-cast from bfloat16 to float32. That cast is exact. No tensor is renamed or dropped.
+still in bfloat16 (95 MB). The encoder upcasts them to float32 when loading, which is exact, and
+runs in float32. No tensor is renamed or dropped. Revision `2026-11-20` stored the same tensors
+already cast to float32 (191 MB); its vectors and `2026-11-24`'s are bit-identical.
 
 **The tokenizer is ModernBERT's.** IBM's model card calls it newly trained; measured, its
 vocabulary, merges, added tokens, pre-tokenizer and post-processor all equal

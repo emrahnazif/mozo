@@ -83,7 +83,7 @@ not share a space with CLIP's or SigLIP 2's.
 
 | Family | Variants | Licence | Runtimes | Size |
 |---|---|---|---|---|
-| [Granite Embedding R2](/docs/models/granite-embedding-r2.md) | `small` | Apache-2.0 | torch | 191 MB |
+| [Granite Embedding R2](/docs/models/granite-embedding-r2.md) | `small` | Apache-2.0 | torch | 95 MB |
 
 ## Text recognition
 

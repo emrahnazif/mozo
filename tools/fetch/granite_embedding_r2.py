@@ -15,10 +15,12 @@ fetches. The safetensors file's sha256 is read from ``/api/models/<repo>/revisio
 fetch time, so a mismatch means the bytes changed under us rather than that someone transcribed a
 digest wrongly.
 
-**IBM stores the weights in bfloat16, and mozo publishes them in float32.** The artifact key is
-``torch-fp32``, and that should be true of the file -- ``tools/fetch/clip.py`` casts its mixed-
-precision archives to fp32 for the same reason. bfloat16 to float32 is exact: every bfloat16
-value is a float32 value, so the cast moves no number. The file doubles, to 191 MB.
+**IBM stores the weights in bfloat16, and mozo publishes them that way.** The artifact key is
+``torch-fp32`` because the key names what runs: the encoder loads the file into float32 and runs
+in float32. Storing it in bfloat16 costs nothing -- every bfloat16 value is a float32 value, so
+the upcast at load is exact and the vectors are bit-identical to a float32 file's -- and halves
+the download, to 95 MB. Revision ``2026-11-20`` published the same tensors cast to float32 (191
+MB); ``2026-11-24`` is those tensors as IBM stores them, and its vectors are identical.
 
 **``pytorch_model.bin`` is not used.** The repository publishes the same weights twice; the
 safetensors file is read, because a pickle is not something to load from the internet. That
@@ -53,7 +55,7 @@ from mozo.vendors.granite_embedding_r2_deploy.tokenizer import VOCAB_PATH  # noq
 _HF = "https://huggingface.co"
 
 #: The revision this family is published under.
-REVISION = "2026-11-20"
+REVISION = "2026-11-24"
 
 #: The upstream commit every file is read from, per variant. A commit rather than ``main``, so
 #: what is fetched cannot move.
@@ -87,8 +89,8 @@ def _notice(variant: str, sha256: str) -> str:
         "         model card's metadata. The repository is not gated.\n\n"
         "This file is not the byte stream IBM serves. tools/fetch/granite_embedding_r2.py\n"
         "verifies model.safetensors against the sha256 the Hub records, then writes the same\n"
-        "tensors back out as an ordinary checkpoint, cast from bfloat16 to float32. That cast is\n"
-        "exact -- every bfloat16 value is a float32 value -- and no tensor is renamed or dropped.\n"
+        "tensors back out as an ordinary checkpoint, still in bfloat16. mozo upcasts them to\n"
+        "float32 when loading, which is exact, and no tensor is renamed or dropped.\n"
         f"The source file is:\n           model.safetensors  sha256 {sha256}\n\n"
         "The tokenizer vocabulary shipped inside mozo derives from tokenizer.json in this same\n"
         "repository, under the same licence.\n"
@@ -96,7 +98,7 @@ def _notice(variant: str, sha256: str) -> str:
 
 
 def fetch(variant: str, revision: str, weights_dir: Path) -> None:
-    """Download one variant's checkpoint, verify it, cast it, and place it with its notice."""
+    """Download one variant's checkpoint, verify it, and place it with its notice."""
     target = weights_dir / "granite_embedding_r2" / variant / revision / "torch-fp32.pth"
     staged = target.with_name("model.safetensors")
 
@@ -110,9 +112,9 @@ def fetch(variant: str, revision: str, weights_dir: Path) -> None:
         dtypes = {str(tensor.dtype) for tensor in state.values()}
         if dtypes != {"torch.bfloat16"}:
             raise SystemExit(f"expected every tensor in bfloat16, found {sorted(dtypes)}; the "
-                             "cast below is only known to be exact from bfloat16")
-        print(f"  {variant:6s} casting {len(state)} tensors bfloat16 -> float32")
-        torch.save({key: tensor.float() for key, tensor in state.items()}, target)
+                             "upcast at load is only known to be exact from bfloat16")
+        print(f"  {variant:6s} writing {len(state)} tensors, bfloat16 as published")
+        torch.save(state, target)
         staged.unlink()
 
     (target.parent / "NOTICE").write_text(_notice(variant, sha256))

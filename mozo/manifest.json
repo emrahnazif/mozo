@@ -502,7 +502,7 @@
       }
     },
     "granite_embedding_r2/small": {
-      "latest": "2026-11-20",
+      "latest": "2026-11-24",
       "revisions": {
         "2026-11-20": {
           "artifacts": {
@@ -520,6 +520,26 @@
               "path": "granite_embedding_r2/small/2026-11-20/torch-fp32.pth",
               "sha256": "50ee06aba0433a8f01c2a7caa76106aafab797895d807ebc4e794ac5be63dee7",
               "size": 190672949
+            }
+          },
+          "license": "Apache-2.0"
+        },
+        "2026-11-24": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "granite_embedding_r2/small/2026-11-24/LICENSE",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "size": 11358
+            },
+            "NOTICE": {
+              "path": "granite_embedding_r2/small/2026-11-24/NOTICE",
+              "sha256": "e97a281f7465ee7ec79dfa6757989a5947d3977f49b904ff8506c4e2e82559d1",
+              "size": 1071
+            },
+            "torch-fp32": {
+              "path": "granite_embedding_r2/small/2026-11-24/torch-fp32.pth",
+              "sha256": "5b39871460fcd827523bfccaa39533948bc19e4f9803e21537179b00e3f78359",
+              "size": 95348021
             }
           },
           "license": "Apache-2.0"

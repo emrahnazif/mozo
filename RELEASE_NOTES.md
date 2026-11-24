@@ -1,5 +1,8 @@
 ## Unreleased
 
+- **Granite Embedding R2 downloads half as much: 95 MB instead of 191 MB.** The new revision,
+  `2026-11-24`, stores the weights in bfloat16 as IBM publishes them, and mozo still runs them in
+  float32. The vectors are bit-identical to `2026-11-20`'s, so an index you built keeps working.
 - **`Workflow.save` never leaves a half-written file.** It writes the whole file beside the old one
   and then moves it into place, so a save cut short by a killed process or a full disk leaves the
   previous workflow as it was. The file keeps its permissions.

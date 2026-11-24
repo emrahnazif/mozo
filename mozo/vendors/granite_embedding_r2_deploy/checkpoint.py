@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Loading a published checkpoint into the encoder, strictly.
 
-The checkpoint is IBM's ``ModernBertModel`` state dict, cast from bfloat16 to float32 when mozo
-published it (an exact cast). Its keys are this package's module names unchanged, so the load is
-one ``load_state_dict`` with ``strict=True`` -- and that strictness is what holds
-:mod:`~mozo.vendors.granite_embedding_r2_deploy.config` against the file. A width, depth or
-vocabulary written down wrong fails here, as does a norm the checkpoint has no weight for (layer
-0's, which upstream makes an ``nn.Identity``).
+The checkpoint is IBM's ``ModernBertModel`` state dict, in bfloat16 as IBM stores it; the load
+copies it into the float32 encoder, an exact upcast. Its keys are this package's module names
+unchanged, so the load is one ``load_state_dict`` with ``strict=True`` -- and that strictness is
+what holds :mod:`~mozo.vendors.granite_embedding_r2_deploy.config` against the file. A width,
+depth or vocabulary written down wrong fails here, as does a norm the checkpoint has no weight for
+(layer 0's, which upstream makes an ``nn.Identity``).
 
 There is nothing to drop. The published repository is the bare encoder: no masked-language-model
 head, no classifier, no pooler.

@@ -93,4 +93,50 @@ the `tower` aux arm, export, the CLI, the download client, and the dependencies 
 
 ## Parity
 
-(filled in from the gate run below)
+`tools/verify/mayaku_street.py`, 2026-11-25, `mayaku` 3.1.1 on torch 2.13.0+cu130, CPU: all four
+variants, 23 images (the fixture photograph, 16 street-validation images across all six sources,
+and six constructed cases: an empty grey frame, a tiny image, extreme wide and tall crops, an
+image already 800x800, noise at an odd size), at thresholds 0.4 and 0.05. 184 runs, 8,002
+detections, every stage `torch.equal`: the canvas, the input tensor, all 6 or 10 raw maps, the
+decoded detections in canvas pixels, boxes, scores, class ids and masks. mozo's own path
+(registry, weights, adapter, PixelFlow) matched the vendor exactly on every run. The fused weights
+themselves were also compared, all 250-286 tensors equal.
+
+**The gate fails when it should**, at the stage each change reaches and no earlier
+(`--falsify all`, seg-nano): padding 114 -> 115 fails at the canvas; multiplying by 1/255 instead
+of dividing fails at the input tensor; a BatchNorm epsilon x1.001 in the RepVGG fusion fails at
+the raw maps; NMS IoU 0.5 -> 0.51 fails at the decoded detections; the mask coordinate scale
+8 -> 8.0001 fails at the masks only.
+
+## Upstream behaviour reproduced, not fixed
+
+- **Class-wise NMS can merge two classes at the image edge.** Upstream calls
+  `torchvision.ops.batched_nms`, which for at most 1,000 boxes on the CPU (always, after the top
+  1,000) separates classes by offsetting them `max coordinate + 1` apart. Canvas boxes can start at negative coordinates (a
+  side regressed up to 15 strides out from an anchor near the edge), and then two classes' bands
+  can overlap and suppress each other. Measured with torchvision 0.28: two identical boxes at -1000..10 of classes 0 and 1 keep one.
+  Rare, and what the published numbers were measured with,
+  so kept; it is why this vendor exposes no YOLO-form `suppress` for
+  `tests/test_vendor_agreement.py` to check.
+
+## Export
+
+`onnx-fp32`: the fused graph at 1x3x800x800, opset 17, five op types only (Conv, Relu, Add,
+nearest Resize, MaxPool: nano 125 / 101 / 40 / 6 / 24). Fixed shape on purpose: the global-context
+pooling unrolls `max(h, w) - 1` max-pools at trace time. `onnx-fp16`: exported on CUDA under fp16
+autocast, opset 18, fp32 input, for TensorRT. Measured on an RTX 3090 / i9-10900X, 500 street
+validation images per variant, against torch fp32 on the CPU (graph only, median):
+
+| variant | torch CPU | ORT CPU | torch CUDA | ORT CUDA | TRT fp32 | TRT fp16 |
+|---|---|---|---|---|---|---|
+| nano | 66 ms | 29 ms | 7.9 ms | 5.3 ms | 4.2 ms | 2.8 ms |
+| medium | 199 ms | 104 ms | 14.2 ms | 12.9 ms | 10.0 ms | 4.2 ms |
+| seg-nano | 72 ms | 32 ms | 9.6 ms | 6.8 ms | 5.9 ms | 3.8 ms |
+| seg-medium | 206 ms | 103 ms | 16.0 ms | 14.7 ms | 11.7 ms | 5.2 ms |
+
+No runtime changed a confident detection (above 0.52 one side, no same-class IoU>0.5 partner above
+0.5 the other). Box / mask AP on those images at threshold 0.05: torch, ORT CPU and TRT fp32
+identical (nano 38.88 / 31.78, medium 49.87 / 41.62); TRT fp16 within 0.1 (38.84, 38.83 / 31.68,
+49.83, 49.88 / 41.67); ORT CUDA within 0.02 but not count-identical (ONNX Runtime's CUDA provider
+defaults to TF32 on Ampere). Published: `onnx-fp32` and `onnx-fp16` for all four; `tensorrt-fp32`
+is what `auto` picks on CUDA, `tensorrt-fp16` on request.

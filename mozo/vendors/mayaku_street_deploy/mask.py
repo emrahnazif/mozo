@@ -117,10 +117,10 @@ class _Axis:
     def __init__(self, meta, dim, cells, mask_stride, c0, c1):
         dev = c0.device
         n = meta["shape"][dim]
-        size, offset = n, meta["pad"][1 - dim]                    # pad is (left, top)
+        offset = meta["pad"][1 - dim]                             # pad is (left, top)
         fit = fitted(meta["shape"], meta["ratio"])[dim]
         self.cells, self.n, self.c0, self.c1 = cells, n, c0, c1
-        self.weights, lo, hi = _axis(cells, mask_stride, offset, fit, size, dev)
+        self.weights, lo, hi = _axis(cells, mask_stride, offset, fit, n, dev)
         ok = (lo[None] >= c0[:, None]) & (hi[None] < c1[:, None])
         self.r0 = ok.to(torch.uint8).argmax(1)
         self.r1 = self.r0 + ok.sum(1)

@@ -31,7 +31,7 @@ from .. import registry
 from ..image import load_image
 from ..labels import resolve as labels_for
 from ..runtimes import TensorRTRunner, get_default_device, make_runner, select_runtime
-from ..vendors.mayaku_street_deploy import Detector, detect, get_spec, output_names
+from ..vendors.mayaku_street_deploy import SPECS, Detector, detect, get_spec, output_names
 from ..weights import artifacts, framework_of, parts, resolve
 
 try:
@@ -61,7 +61,7 @@ class MayakuStreetPredictor:
         device: The device actually in use.
     """
 
-    VARIANTS = ("nano", "medium", "seg-nano", "seg-medium")
+    VARIANTS = tuple(SPECS)
 
     def __init__(
         self,
@@ -84,12 +84,12 @@ class MayakuStreetPredictor:
 
         self._detector = None
         self._runner = None
-        names: Any = None
+        self._tensorrt = framework_of(self.runtime) == "tensorrt"
+        self._outputs = output_names(self.spec.seg)
         if self.runtime.startswith("torch"):
             self._detector = Detector(
                 resolve(FAMILY, variant, self.runtime, revision=revision), variant, self.device)
-            names = self._detector.names
-        elif framework_of(self.runtime) == "tensorrt":
+        elif self._tensorrt:
             # Built once per GPU and TensorRT version from the graph it derives from
             # (``registry.DERIVES``). The graph has a fixed 1x3x800x800 input, so no profile.
             self._runner = TensorRTRunner(parts(FAMILY, variant, self.runtime, revision=revision)[""],
@@ -98,7 +98,7 @@ class MayakuStreetPredictor:
             self._runner = make_runner(resolve(FAMILY, variant, self.runtime, revision=revision),
                                        self.runtime, device=self.device)
         # A graph carries no vocabulary, so those runtimes read the published labels.
-        self._labels = labels_for(FAMILY, variant, caller=labels, checkpoint=names,
+        self._labels = labels_for(FAMILY, variant, caller=labels, checkpoint=self._detector.names if self._detector else None,
                                   revision=revision, published=True)
         _log.info("Mayaku street %s ready on %s via %s.", variant, self.device, self.runtime)
 
@@ -108,12 +108,12 @@ class MayakuStreetPredictor:
         to declare its outputs in an order of its own."""
         if self._detector is not None:
             return self._detector.forward(batch)
-        if framework_of(self.runtime) == "tensorrt":
+        if self._tensorrt:
             found = dict(zip(self._runner.outputs, self._runner(batch)))
         else:
             found = {name: torch.from_numpy(array)
                      for name, array in zip(self._runner.outputs, self._runner(batch.numpy()))}
-        return [found[name] for name in output_names(self.spec.seg)]
+        return [found[name] for name in self._outputs]
 
     def predict(
         self,

@@ -347,6 +347,15 @@ found traps it had not predicted, and the predicted ones were mostly real.
 - **Second passes are part of the model.** EasyOCR re-runs low-contrast crops and keeps the better
   read.
 
+- **`torchvision.ops.batched_nms` separates classes by `max + 1`.** For up to 1,000 boxes on the
+  CPU it offsets each class by the largest coordinate plus one, which stops separating once boxes
+  reach negative coordinates (a letterbox edge): two classes at -1000..10 suppress each other.
+  `tests/test_vendor_agreement.py` catches the same bug in a hand-written NMS; a vendor whose
+  upstream calls torchvision inherits it and must keep it to stay exact (Mayaku street).
+- **Stale `.pyc` on the CIFS share.** An edit to `mozo/__init__.py` kept serving the old
+  docstring until `__pycache__` was deleted. When a test reads text you just changed and disagrees,
+  clear the cache before believing it.
+
 ### Things that are upstream's behaviour, not bugs to fix
 
 Reproduce them, and record them:

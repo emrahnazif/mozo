@@ -33,6 +33,7 @@ that thing reaches and at no earlier one. See :data:`FALSIFY`.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import sys
 import warnings
@@ -44,19 +45,20 @@ import torch
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
+sys.path.insert(0, str(ROOT / "tools"))
 os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 
 import mozo  # noqa: E402
+from common import fixtures  # noqa: E402
 from conftest import as_pixelflow_reports  # noqa: E402
 from mozo.image import load_image  # noqa: E402
-from mozo.vendors.mayaku_street_deploy import Detector, decode as vdecode  # noqa: E402
+from mozo.vendors.mayaku_street_deploy import SPECS, Detector, detect, decode as vdecode  # noqa: E402
 from mozo.vendors.mayaku_street_deploy import image as vimage, mask as vmask  # noqa: E402
 from mozo.vendors.mayaku_street_deploy import blocks as vblocks  # noqa: E402
 from mozo.weights import resolve  # noqa: E402
 
 FAMILY = "mayaku_street"
-VARIANTS = ("nano", "medium", "seg-nano", "seg-medium")
-FIXTURES = ROOT / "tests" / "fixtures" / "images"
+VARIANTS = tuple(SPECS)
 #: The checkpoint's own threshold, and a low one where marginal detections are compared too.
 THRESHOLDS = (0.4, 0.05)
 STAGES = ("canvas", "input", "maps", "canvas dets", "boxes", "scores", "classes", "masks")
@@ -79,7 +81,6 @@ def _synthetic(photo: np.ndarray) -> dict[str, np.ndarray]:
 def _upstream_stages(predictor, bgr: np.ndarray, conf: float) -> dict:
     from mayaku.inference.decode import postprocess, predict_decode
     from mayaku.inference.preprocess import letterbox_batch, network_input
-    import dataclasses
 
     x, metas = letterbox_batch([bgr], tuple(predictor.sidecar["canvas_hw"]))
     batch = network_input(x, torch.device("cpu"))
@@ -100,11 +101,10 @@ def _vendor_stages(detector: Detector, rgb: np.ndarray, conf: float) -> dict:
     spec = detector.spec
     dets = vdecode.postprocess(maps, spec.num_classes, spec.cfg.reg_max, conf, spec.iou, spec.topk,
                                spec.max_det)[0]
-    found = detector.predict(rgb, conf=conf)
+    # The maps already computed, handed to the full path, so the network runs once per image.
+    boxes, scores, classes, masks = detect(rgb, lambda _batch: maps, spec, conf)
     return {"canvas": canvas, "input": batch, "maps": maps, "canvas dets": dets,
-            "boxes": torch.from_numpy(found.boxes), "scores": torch.from_numpy(found.scores),
-            "classes": torch.from_numpy(found.class_ids),
-            "masks": None if found.masks is None else torch.from_numpy(found.masks)}
+            "boxes": boxes, "scores": scores, "classes": classes, "masks": masks}
 
 
 def _equal(a, b) -> bool:
@@ -117,9 +117,8 @@ def _equal(a, b) -> bool:
     return a.shape == b.shape and torch.equal(a, b)
 
 
-def _mozo_matches(variant: str, rgb: np.ndarray, conf: float, vendor: dict) -> bool:
-    found = mozo.ModelManager().get_model(FAMILY, variant, device="cpu", runtime="torch-fp32") \
-        .predict(rgb, threshold=conf)
+def _mozo_matches(model, rgb: np.ndarray, conf: float, vendor: dict) -> bool:
+    found = model.predict(rgb, threshold=conf)
     boxes, scores = as_pixelflow_reports(vendor["boxes"].numpy(), vendor["scores"].numpy(),
                                          vendor["classes"].numpy())
     rows = found.to_dict()
@@ -144,7 +143,6 @@ FALSIFY = {
 
 
 def _multiplied_planar(canvas):
-    h, w, _ = canvas.shape
     return torch.from_numpy((canvas[None].transpose(0, 3, 1, 2) * np.float32(1 / 255))
                             .astype(np.float32))
 
@@ -195,7 +193,7 @@ def main() -> int:
         apply()
         print(f"falsify {args.falsify}: expecting the first failure at '{expect}'")
 
-    paths = args.images or sorted(FIXTURES.glob("*.jpg"))
+    paths = args.images or fixtures()
     images = {p.name: load_image(str(p)) for p in paths}
     images.update(_synthetic(next(iter(images.values()))))
     first_failures, compared = set(), 0
@@ -203,6 +201,8 @@ def main() -> int:
         checkpoint = resolve(FAMILY, variant, "torch-fp32")
         detector = Detector(checkpoint, variant)
         upstream = Predictor.from_checkpoint(checkpoint, device="cpu") if reference else None
+        served = None if args.falsify else mozo.ModelManager().get_model(
+            FAMILY, variant, device="cpu", runtime="torch-fp32")
         for conf in THRESHOLDS:
             for name, rgb in images.items():
                 vendor = _vendor_stages(detector, rgb, conf)
@@ -210,7 +210,7 @@ def main() -> int:
                 if upstream is not None:
                     want = _upstream_stages(upstream, np.ascontiguousarray(rgb[..., ::-1]), conf)
                     failed = [s for s in STAGES if not _equal(want[s], vendor[s])]
-                if not args.falsify and not _mozo_matches(variant, rgb, conf, vendor):
+                if served is not None and not _mozo_matches(served, rgb, conf, vendor):
                     failed.append("mozo")
                 compared += len(vendor["scores"])
                 if failed:

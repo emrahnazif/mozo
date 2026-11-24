@@ -13,7 +13,7 @@ import torch
 
 from .blocks import STRIDES
 from .decode import postprocess
-from .image import letterbox, to_original
+from .image import PAD, letterbox, to_original
 from .mask import COORD_SCALE, decode_masks
 from .network import KERNEL_LAYOUT, MASK_CH, TIERS, Tier, build_network, read_checkpoint
 
@@ -87,7 +87,7 @@ def check_sidecar(sidecar: dict[str, Any], spec: Spec, source: str) -> None:
                      predict["multi_label"]),
                     (spec.conf, spec.iou, spec.topk, spec.max_det, False)),
         "preprocess": ((sidecar["preprocess"]["resize"], sidecar["preprocess"]["pad_value"],
-                        sidecar["preprocess"]["channels"]), ("letterbox", 114, "RGB")),
+                        sidecar["preprocess"]["channels"]), ("letterbox", PAD, "RGB")),
     }
     mask = sidecar.get("mask")
     want["mask"] = ((mask["stride"], mask["channels"], mask["coord_scale"],
@@ -133,8 +133,8 @@ def detect(
     dets, anchors, points, stride = postprocess(
         preds, spec.num_classes, spec.cfg.reg_max, conf, spec.iou, spec.topk, spec.max_det)
     masks = decode_masks(preds, dets, anchors, points, stride, meta) if spec.seg else None
-    det = dets.float()
-    return to_original(det[:, :4], gain, pad_x, pad_y, meta["shape"]), det[:, 4], det[:, 5].long(), masks
+    return (to_original(dets[:, :4], gain, pad_x, pad_y, meta["shape"]), dets[:, 4],
+            dets[:, 5].long(), masks)
 
 
 @dataclass

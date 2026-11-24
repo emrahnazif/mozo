@@ -42,11 +42,11 @@ def place(image: np.ndarray, canvas: tuple[int, int]) -> tuple[np.ndarray, dict]
     out[top + nh:] = PAD
     out[top:top + nh, :left] = PAD
     out[top:top + nh, left + nw:] = PAD
-    place = out[top:top + nh, left:left + nw]
+    slot = out[top:top + nh, left:left + nw]
     if (nw, nh) != (w, h):
-        cv2.resize(image, (nw, nh), dst=place, interpolation=cv2.INTER_LINEAR)
+        cv2.resize(image, (nw, nh), dst=slot, interpolation=cv2.INTER_LINEAR)
     else:
-        place[...] = image
+        slot[...] = image
     return out, {"ratio": r, "pad": (left, top), "shape": (h, w)}
 
 

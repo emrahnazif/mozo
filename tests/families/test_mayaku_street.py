@@ -39,6 +39,11 @@ EXPECTED_NAMES = {"person", "face"}
 BOX_TOLERANCE = 1e-2 + COORD_STEP
 
 
+def _mask_iou(a: np.ndarray, b: np.ndarray) -> float:
+    union = np.logical_or(a, b).sum()
+    return 1.0 if union == 0 else float(np.logical_and(a, b).sum() / union)
+
+
 @pytest.fixture(scope="module")
 def predictor_for():
     """Predictors built once per (variant, runtime), dropped when the variant changes."""
@@ -74,6 +79,18 @@ class TestRegistry:
         assert entry["task_type"] == "object_detection"
         assert list(entry["variants"]) == list(MayakuStreetPredictor.VARIANTS)
         assert set(ALL) == set(MayakuStreetPredictor.VARIANTS)
+
+    def test_the_default_threshold_is_the_checkpoints_own(self):
+        """0.4 is written in the adapter and the node too; the vendor's spec owns it."""
+        import inspect
+
+        from mozo.adapters.mayaku_street import MayakuStreetPredictor
+        from mozo.vendors.mayaku_street_deploy import SPECS
+        from mozo.workflow.nodes import model as nodes
+
+        owned = {spec.conf for spec in SPECS.values()}
+        assert owned == {inspect.signature(MayakuStreetPredictor.predict).parameters["threshold"].default}
+        assert owned == {inspect.signature(inspect.unwrap(nodes.mayaku_street)).parameters["threshold"].default}
 
     def test_the_vendor_specs_cover_every_variant(self):
         from mozo.adapters.mayaku_street import MayakuStreetPredictor
@@ -226,8 +243,7 @@ class TestRuntimes:
         assert worst <= BOX_TOLERANCE
         if variant in SEGMENTATION:
             for x, y in zip(want, got):
-                union = np.logical_or(x.masks[0], y.masks[0]).sum()
-                assert np.logical_and(x.masks[0], y.masks[0]).sum() / union >= 0.999
+                assert _mask_iou(x.masks[0], y.masks[0]) >= 0.999
 
 
 class TestTensorRT:
@@ -280,8 +296,7 @@ class TestTensorRT:
         worst = max(max(abs(a - b) for a, b in zip(x.bbox, y.bbox)) for x, y in zip(want, got))
         assert worst <= 0.1
         for x, y in zip(want, got):
-            union = np.logical_or(x.masks[0], y.masks[0]).sum()
-            assert np.logical_and(x.masks[0], y.masks[0]).sum() / union >= 0.99
+            assert _mask_iou(x.masks[0], y.masks[0]) >= 0.99
 
     def test_the_fp16_engine_keeps_the_confident_detections(self, predictor_for, image):
         want = predictor_for("nano").predict(image, threshold=0.7)

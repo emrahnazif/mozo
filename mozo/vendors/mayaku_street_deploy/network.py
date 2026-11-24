@@ -225,17 +225,13 @@ class StreetNetwork(nn.Module):
 
     def __init__(self, cfg: Tier, nc: int, seg: bool):
         super().__init__()
-        self.cfg, self.nc, self.seg = cfg, nc, seg
+        self.seg = seg
         self.backbone = Backbone(cfg)
         self.neck = FPG(cfg.width, cfg.neck, cfg.paths)
         self.head = Head(cfg.neck, nc, reg_max=cfg.reg_max, n_conv=cfg.head_conv,
                          width=cfg.head_width)
         self.aux = (MaskBranch(per_level(cfg.neck, len(STRIDES)), self.head.widths,
                                cfg.aux_width, cfg.stem) if seg else None)
-
-    @property
-    def output_names(self) -> list[str]:
-        return output_names(self.seg)
 
     def forward(self, x):
         stem, feats = self.backbone(x)

@@ -65,7 +65,7 @@ def postprocess(preds, nc, reg_max, conf, iou, topk, max_det):
     """
     head = preds[:2 * len(STRIDES)]
     shapes = [tuple(c.shape[2:]) for c in head[0::2]]
-    # Strided views, not copies: the decode reads only the anchors above the threshold.
+    # Upstream's own flattening (one concatenation per kind), kept as it is for exactness.
     cls, dist = flatten_levels(head[0::2], nc)[0], flatten_levels(head[1::2], 4 * reg_max)[0]
     points, stride = anchor_grid(shapes, STRIDES, device=cls.device, dtype=cls.dtype)
     # The threshold is applied to the logit, never to a sigmoid: comparing logits is what upstream

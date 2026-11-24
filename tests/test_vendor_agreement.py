@@ -244,8 +244,8 @@ def test_classes_cannot_suppress_each_other_across_the_padded_edge(vendor):
     against a box of 1010, an overlap of 0.98, which suppresses.
     """
     if not suppresses(vendor.__package__):
-        pytest.skip(f"{vendor.__name__} exposes no YOLO-form suppress: NMS-free, or (Mayaku street) "
-                    "torchvision's batched_nms reproduced from upstream as it is")
+        pytest.skip(f"{vendor.__name__} exposes no YOLO-form suppress (NMS-free, or a suppression "
+                    "reproduced from its upstream; its PROVENANCE says which)")
 
     # (4 + classes, anchors): two anchors, two classes, centre-form boxes sharing one position
     # that runs far off the left and top edges.
@@ -276,7 +276,7 @@ def test_the_vendors_agree_on_their_suppression_defaults():
     defaults = {}
     for package in VENDOR_PACKAGES:
         if not suppresses(package):
-            print(f"skipping {package}: NMS-free, nothing to overlap")
+            print(f"skipping {package}: no YOLO-form suppress (see its PROVENANCE)")
             continue
         parameters = inspect.signature(importlib.import_module(f"{package}.model").detect).parameters
         defaults[package] = tuple(parameters[name].default for name in ("conf", "iou", "max_det"))

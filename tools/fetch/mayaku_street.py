@@ -12,8 +12,9 @@ serves; that was checked once by hand on 2026-11-24 and is recorded in the vendo
 
 Beside each checkpoint it writes:
 
-- ``LICENSE``: Mayaku's Apache-2.0 text at the ``v3.1.1`` tag. The weights are Apache-2.0 by the
-  publisher's statement on every model card ("The weights are Apache 2.0, like the library").
+- ``LICENSE`` is placed by hand, as for every family (``common.require_licence`` says how):
+  Mayaku's Apache-2.0 text at the ``v3.1.1`` tag. The weights are Apache-2.0 by the publisher's
+  statement on every model card ("The weights are Apache 2.0, like the library").
 - ``NOTICE``: attribution, provenance, and what is known about the training labels.
 - ``labels.json``: the 22 class names, read out of the checkpoint's own record, for the graph
   runtimes, which carry no vocabulary.
@@ -26,14 +27,13 @@ from __future__ import annotations
 
 import json
 import sys
-import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from common import download_verified, hub_lfs_sha256s, variant_parser  # noqa: E402
+from common import download_verified, hub_lfs_sha256s, require_licence, variant_parser  # noqa: E402
 
 FAMILY = "mayaku_street"
 REVISION = "2026-11-24"
@@ -80,7 +80,7 @@ def notice(variant: str, repo: str, commit: str, filename: str) -> str:
     )
 
 
-def fetch(variant: str, revision: str, weights_dir: Path, licence: bytes) -> None:
+def fetch(variant: str, revision: str, weights_dir: Path) -> None:
     """Download one variant, verify it against the Hub, and place its terms and labels."""
     repo, commit, filename = CHECKPOINTS[variant]
     expected = hub_lfs_sha256s(repo, commit)[filename]
@@ -88,7 +88,7 @@ def fetch(variant: str, revision: str, weights_dir: Path, licence: bytes) -> Non
     download_verified(f"https://huggingface.co/{repo}/resolve/{commit}/{filename}", target,
                       expected, label=variant, width=10, timeout=120)
 
-    (target.parent / "LICENSE").write_bytes(licence)
+    require_licence(target.parent, "Apache-2.0", LICENCE_URL)
     (target.parent / "NOTICE").write_text(notice(variant, repo, commit, filename))
 
     # Read through the vendor, which refuses a checkpoint that is not the variant it claims to be,
@@ -108,13 +108,8 @@ def main() -> int:
     if unknown:
         raise SystemExit(f"unknown variants: {unknown}. Known: {list(CHECKPOINTS)}")
 
-    with urllib.request.urlopen(LICENCE_URL, timeout=60) as response:
-        licence = response.read()
-    if b"Apache License" not in licence[:200] or b"Version 2.0" not in licence[:200]:
-        raise SystemExit(f"{LICENCE_URL} is not the Apache-2.0 text; stop and look")
-
     for variant in wanted:
-        fetch(variant, args.revision, args.weights_dir, licence)
+        fetch(variant, args.revision, args.weights_dir)
     print(f"\n{len(wanted)} checkpoints in {args.weights_dir / FAMILY}")
     return 0
 

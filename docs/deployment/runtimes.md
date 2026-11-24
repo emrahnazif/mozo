@@ -20,7 +20,7 @@ itself; this page says what exists, how the choice is made, and when to override
 | ViTPose | every variant | every variant except `huge` | none |
 | SAM 3 | yes | none | yes (the image encoder) |
 | Granite Embedding R2 | yes | none | yes |
-| OWLv2 | yes, and fp16 on CUDA | every variant (the image tower, to build TensorRT engines from) | none |
+| OWLv2 | yes, and fp16 on CUDA | every variant (the image tower in fp16, to build TensorRT engines from) | none |
 | Grounding DINO | yes, and fp16 on CUDA | none (exported on your machine, to build TensorRT engines from) | none |
 | BEN2, CLIP, Depth Anything V2, EasyOCR, EdgeTAM, Moebius, SAM 2, SigLIP 2 | yes | none | none |
 
@@ -89,14 +89,14 @@ of its own to download: both are built on your machine from the weights a varian
 [OWLv2](/docs/models/owlv2.md#on-cuda-half-precision-and-tensorrt) and
 [Grounding DINO](/docs/models/grounding-dino.md#on-cuda-half-precision-and-tensorrt) offer both;
 their pages have the measurements. In short, on an RTX 3090, against fp32 on 500 COCO images:
-`torch-fp16` is 4.4 to 5.5 times faster on OWLv2 and 1.3 to 1.6 times on Grounding DINO, with the
-same AP, and changes 0.1–1.4% of detections across a threshold, a little more than fp32 itself
-does when only its input is rounded.
+`torch-fp16` is 4.3 to 4.8 times faster on OWLv2 and 1.45 to 1.55 times on Grounding DINO (torch
+2.13), with the same AP, and changes 0.1–1.1% of detections across a threshold, a little more than
+fp32 itself does when only its input is rounded.
 `tensorrt-fp16` is faster again, but `auto` never picks it, for a reason that differs by family.
-On OWLv2 it is about 7.7 times faster with the same AP, but its fp16 arithmetic is less exact than
-torch's, so about 2.4% of confident detections come out differently than in fp32. On Grounding
-DINO it is 2.6 to 3.1 times faster and changes as few detections as `torch-fp16`, but it runs every
-image at one square size, 800 unless you pick another with `input_size`, which costs 1.5 to 1.9 AP
+On OWLv2 it is 7.2 to 8.2 times faster with the same AP, but its fp16 arithmetic is less exact
+than torch's, so 2.5–4.8% of confident detections come out differently than in fp32. On Grounding
+DINO it is 2.6 to 3.0 times faster and changes as few detections as `torch-fp16`, but it runs every
+image at one square size, 800 unless you pick another with `input_size`, which costs 1.6 to 1.8 AP
 at 800.
 Half precision changes numbers a little on every model, and on detection models such as RF-DETR
 and YOLO it was measured to lose detections, so it is offered model by model, not everywhere.
@@ -110,14 +110,16 @@ match your torch's. Install the one for your torch's CUDA major (`python -c "imp
 print(torch.version.cuda)"`):
 
 ```bash
-pip install tensorrt-cu12     # or tensorrt-cu11, tensorrt-cu13
+pip install tensorrt-cu12     # or tensorrt-cu13
 ```
 
-The version matters per family. Grounding DINO needs TensorRT 11 or later, because TensorRT 10
-miscompiles its position encoding. It also needs `pip install onnx onnxscript` to export its graph.
-TensorRT 11 has wheels for CUDA 12 and 13 only. OWLv2's `tensorrt-fp16` still needs TensorRT 10,
-whose fp16 switch TensorRT 11 removed; on TensorRT 11 it refuses rather than build an fp32 engine
-quietly.
+Mozo needs **TensorRT 11 or later** and refuses older ones. TensorRT 10 miscompiles Grounding
+DINO's position encoding, and its fp16 was the builder's choice rather than the graph's. TensorRT
+11 has wheels for CUDA 12 and 13 only, so a torch built for CUDA 11 cannot use it. Grounding DINO
+also needs `pip install onnx onnxscript`, to export its graph on your machine.
+
+Engines are built strongly typed: an fp16 engine runs exactly the types its graph carries, which
+are `torch-fp16`'s. fp32 stays IEEE fp32, without TensorRT's default TF32 shortcut.
 
 Then ask for it by name:
 
@@ -125,10 +127,9 @@ Then ask for it by name:
 model = ModelManager().get_model("owlv2", "base-ensemble", runtime="tensorrt-fp16")
 ```
 
-The first load on a machine builds the engine and keeps it in mozo's cache. That takes about a
-minute for OWLv2 (40 s for `base-ensemble` on an RTX 3090) and about 3.5 minutes for Grounding
-DINO, which exports its graph first. Every later load
-reuses it and takes about a second. An engine only fits the GPU model and the TensorRT version it
+The first load on a machine builds the engine and keeps it in mozo's cache. That takes 17 s for
+OWLv2 `base` and 26 s for `large` on an RTX 3090, and about 3.5 minutes for Grounding DINO, which
+exports its graph first. Every later load reuses it and takes about a second. An engine only fits the GPU model and the TensorRT version it
 was built with, so a different GPU or a TensorRT upgrade builds a new one. To build it ahead of
 time, load the model once when you build the machine or the image, as
 [Production](/docs/deployment/production.md#load-models-before-the-first-request) suggests for

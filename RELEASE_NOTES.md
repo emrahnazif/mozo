@@ -1,22 +1,22 @@
 ## Unreleased
 
-- **OWLv2 runs about 4.4 times faster on CUDA by default (5.5 times for `large`).** `auto` now
+- **OWLv2 runs about 4.3 times faster on CUDA by default (4.8 times for `large`)**, measured with
+  torch 2.13; 4.4 and 5.5 times with torch 2.6. `auto` now
   picks `torch-fp16` on CUDA: the same checkpoint, with the image tower's blocks in half precision
   and its norms, heads and text tower in fp32. COCO AP is unchanged on every variant. A few
-  borderline detections come out differently than in fp32: 0.4–0.5% of those above 0.3 on `base`,
-  0.8–1.4% on `large`. `runtime="torch-fp32"` gives exactly the old results. Nothing new to download.
+  borderline detections come out differently than in fp32: 0.5–1.1% of those above 0.3. `runtime="torch-fp32"` gives exactly the old results. Nothing new to download.
 - **Grounding DINO runs 1.45 times faster on CUDA by default (1.55 times for `base`)**, measured
   with torch 2.13; 1.3 and 1.4 times with torch 2.6. `auto` now
   picks `torch-fp16` on CUDA: the same checkpoint under fp16 autocast. COCO AP is unchanged, and
   about 0.1% of detections above 0.35 come out differently than in fp32, about as often as fp32
   itself changes when only its input is rounded. `runtime="torch-fp32"` gives exactly the old
   results.
-- **Grounding DINO can run through TensorRT on CUDA, 2.6 times faster than fp32 (3.1 times for
+- **Grounding DINO can run through TensorRT on CUDA, 2.6 times faster than fp32 (3.0 times for
   `base`)** for a whole `predict` with 80 phrases. Ask for `runtime="tensorrt-fp16"`. It needs
   TensorRT 11 or later (TensorRT 10 miscompiles the model's position encoding, and mozo refuses it)
   and `pip install onnx onnxscript`. Every image is fitted into one square, 800 pixels by default,
-  and padded, with the padding masked so the model ignores it. At 800 that costs 1.5 AP on `tiny`
-  and 1.9 on `base` against upstream's resize. Detections change no more than on `torch-fp16`.
+  and padded, with the padding masked so the model ignores it. At 800 that costs 1.6 AP on `tiny`
+  and 1.8 on `base` against upstream's resize. Detections change no more than on `torch-fp16`.
   The first load for each GPU and size exports the graph and builds the engine, in about
   3.5 minutes; later loads take half a second. `auto` never picks it.
 - **Grounding DINO takes `input_size`**, a square to fit every image into instead of upstream's
@@ -27,17 +27,19 @@
   few. Deformable attention now carries the feature-map sizes as plain integers instead of reading
   them back from the GPU, which `torch.export` needs; the results are bit-identical. The torch path
   is otherwise unchanged.
-- **OWLv2 can run through TensorRT on CUDA, 7.7 times faster than fp32.** Ask for
-  `runtime="tensorrt-fp16"` after installing the TensorRT wheel that matches your torch's CUDA
-  (`pip install tensorrt-cu12`, or `-cu11`, `-cu13`). The first load on a machine builds an engine
-  for that GPU, in about a minute, and keeps it in the cache; later loads take about a second.
-  COCO AP is unchanged, but TensorRT's fp16 arithmetic is less exact than torch's, so about 2.4% of
-  confident detections differ from fp32. `auto` never picks it. Each OWLv2 variant now publishes
-  its image tower as an ONNX graph (354 MB for `base`, 1,233 MB for `large`) to build engines from;
-  only TensorRT loads download it.
+- **OWLv2 can run through TensorRT on CUDA, 7.2 to 8.2 times faster than fp32.** Ask for
+  `runtime="tensorrt-fp16"` after installing TensorRT 11 or later for your torch's CUDA
+  (`pip install tensorrt-cu12` or `-cu13`). The first load on a machine builds an engine for that
+  GPU, in 17 s for `base` and 26 s for `large`, and keeps it in the cache; later loads take about a
+  second. COCO AP is unchanged, but TensorRT's fp16 arithmetic is less exact than torch's, so
+  2.5–4.8% of confident detections differ from fp32. `auto` never picks it. Each OWLv2 variant now
+  publishes its image tower as an fp16 ONNX graph (178 MB for `base`, 618 MB for `large`) to build
+  engines from; only TensorRT loads download it.
 - **`mozo.runtimes.TensorRTRunner`** builds an engine from an ONNX graph, caches it beside the
   graph for the GPU and TensorRT version, and runs it on torch CUDA tensors, safely from several
-  threads. It supports TensorRT 11: engines are strongly typed, so precision comes from the graph.
+  threads. It needs TensorRT 11 or later and refuses older versions: engines are strongly typed,
+  so precision comes from the graph, and fp32 stays IEEE fp32 rather than TensorRT's default
+  TF32.
   It can export the graph itself the first time and delete it after the build, take dynamic input
   shapes, and check a fresh engine on inputs you supply. `weights.cached()` lists built engines with the state `"built"`, and `weights.remove`
   deletes them with the model.

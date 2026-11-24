@@ -133,11 +133,11 @@ side up to 1333); *800 square* fits the image into an 800×800 square and pads t
 | `tiny` | fp32 | resize | 121.9 ms | 136.5 ms | 1.0× | 50.77 | |
 | | input rounded | resize | | | | 50.74 | 0 of 4,118 |
 | | `torch-fp16` (`auto`) | resize | 79.8 ms | 94.5 ms | 1.45× | 50.76 | 4 (0.1%) |
-| | `tensorrt-fp16` | 800 square | 43.2 ms | 53.1 ms | 2.57× | 49.24 | 5 of 3,882 (0.1%) |
+| | `tensorrt-fp16` | 800 square | 43.2 ms | 53.0 ms | 2.57× | 49.21 | 3 of 3,882 (0.1%) |
 | `base` | fp32 | resize | 167.0 ms | 182.4 ms | 1.0× | 60.16 | |
 | | input rounded | resize | | | | 60.06 | 3 of 3,616 |
 | | `torch-fp16` (`auto`) | resize | 103.2 ms | 118.0 ms | 1.55× | 60.08 | 3 (0.1%) |
-| | `tensorrt-fp16` | 800 square | 49.5 ms | 59.9 ms | 3.05× | 58.25 | 2 of 3,593 (0.1%) |
+| | `tensorrt-fp16` | 800 square | 49.3 ms | 60.3 ms | 3.01× | 58.33 | 0 of 3,593 (0%) |
 
 Half precision barely moves anything: detections change about as rarely as they do on their own,
 on torch and on TensorRT alike. What `tensorrt-fp16` costs in AP comes from the square, not from
@@ -163,7 +163,7 @@ A bigger square finds more small objects and costs time. Same machine and images
 
 | Square | `tiny` predict | `tiny` AP | `base` predict | `base` AP |
 |---|---|---|---|---|
-| 800 (default) | 53.1 ms | 49.24 (−1.5) | 59.9 ms | 58.25 (−1.9) |
+| 800 (default) | 53.0 ms | 49.21 (−1.6) | 60.3 ms | 58.33 (−1.8) |
 | 1024 | 76.4 ms | 50.34 (−0.4) | 86.1 ms | 59.47 (−0.7) |
 | 1333 | 139.0 ms | 51.10 (+0.3) | 150.1 ms | 59.61 (−0.6) |
 

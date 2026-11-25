@@ -1,8 +1,8 @@
 # sam2_deploy
 
-Deployment-only SAM 2 promptable segmentation for single images. Apache-2.0 code, extracted from
-`facebookresearch/sam2` and reduced to the image path, with no `hydra`, `omegaconf`, `iopath` or
-`torchvision` dependency.
+Deployment-only SAM 2 promptable segmentation, for single images and for tracking objects through
+a video. Apache-2.0 code, extracted from `facebookresearch/sam2`, with no `hydra`, `omegaconf`,
+`iopath` or `torchvision` dependency.
 
 ```python
 from mozo.vendors.sam2_deploy import Segmenter
@@ -18,6 +18,23 @@ found.masks     # (b, c, h, w) bool, in the source image's pixels
 found.scores    # (b, c) the model's predicted IoU for each mask
 found.logits    # (b, c, 256, 256) low-res logits
 ```
+
+## Tracking through a video
+
+```python
+tracker = segmenter.tracker()
+for index, frame in enumerate(frames):              # HxWx3 RGB uint8, in order
+    prompts = split_prompts(boxes=[40, 60, 300, 480]) if index == 0 else None
+    result = tracker.update(frame, prompts)
+    result.masks           # (objects, h, w) bool at the frame's size
+    result.object_scores   # (objects,) visibility logit; > 0 means present
+```
+
+`split_prompts` (from `.video`) turns `predict`-shaped prompts into one prompt per object; each
+starts one object on the frame it arrives with, on the first frame or any later one. The session
+keeps only what a later frame can read -- each object's prompted frame and the last 15 frames --
+so memory stays flat over any length of stream. It is upstream's `SAM2VideoPredictor`, frame by
+frame and bit for bit on CPU; see `PROVENANCE.md` for what that rests on and where it stops.
 
 ## Prompting
 
@@ -73,15 +90,18 @@ as two separate artifacts for the same reason they are two methods.
 
 ## Supported
 
-- The four SAM 2.1 image variants: `tiny`, `small`, `base_plus`, `large`. The variant is inferred
+- The four SAM 2.1 variants: `tiny`, `small`, `base_plus`, `large`. The variant is inferred
   from the checkpoint, so a fine-tune loads without being named.
-- Points, boxes, both together, and mask refinement.
+- Points, boxes, both together, and mask refinement; video tracking forward in time, with objects
+  started on any frame.
 - CPU and CUDA. **Not MPS** — see below.
 - Fixed 1024x1024 inference. SAM 2 squashes to a square rather than letterboxing, so aspect ratio
   is not preserved and there is no padding to undo.
 
-Not supported: video tracking, the automatic mask generator, and hole filling (which needs a CUDA
-extension upstream builds separately).
+Not supported: the automatic mask generator; in video, mask prompts, corrections on a frame
+already tracked, and tracking backwards in one call (feed the frames in reverse order instead, which
+is exact); and hole filling, which needs a CUDA extension upstream builds separately and skips
+without.
 
 ## Runtimes
 

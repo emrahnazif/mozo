@@ -83,11 +83,10 @@ class Segmenter:
             raise ValueError(f"Unsupported variant {variant!r}. Choose from: {list(SPECS)}")
 
         self.network = Sam2(SPECS[variant])
-        # The video tracker's weights are in the file and have nowhere to go in an image-only
-        # build. Dropping them by prefix -- rather than passing strict=False and hoping -- keeps
-        # the load strict about everything else, so a genuinely missing tensor is still an error.
-        wanted = self.network.state_dict()
-        self.network.load_state_dict({k: v for k, v in state.items() if k in wanted})
+        # Strict, with nothing filtered: the network builds the video tracker as well as the image
+        # path, so every tensor in the published file has a module, and a missing or unexpected
+        # one is an error rather than a parameter left at its initialisation.
+        self.network.load_state_dict(state)
         self.network.eval().to(device)
 
         self.variant = variant
@@ -99,6 +98,17 @@ class Segmenter:
         # One adapter instance is shared across requests -- mozo.server runs handlers in a
         # threadpool -- and check-then-act on an OrderedDict is not safe across threads.
         self._lock = Lock()
+
+    def tracker(self, num_frames: int | None = None):
+        """Start a video tracking session on this checkpoint. See :class:`.video.Tracker`.
+
+        Args:
+            num_frames: The video's length, if known. Leave it out for a stream; only the gate
+                passes it, to check clips shorter than 16 frames against upstream.
+        """
+        from .video import Tracker
+
+        return Tracker(self.network, self.device, num_frames=num_frames)
 
     def encode(self, image: np.ndarray) -> dict[str, torch.Tensor]:
         """Return the encoder features for one image, computing them only if not already held.

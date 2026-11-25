@@ -1,7 +1,8 @@
 # Provenance
 
 This package is a deployment-only extraction of [SAM 2](https://github.com/facebookresearch/sam2),
-reduced to single-image promptable segmentation.
+reduced to promptable segmentation of single images and to tracking objects through a video,
+frame by frame.
 
 | | |
 |---|---|
@@ -21,6 +22,8 @@ Verbatim, apart from rewriting imports to relative form:
 backbones/{hieradet,image_encoder,utils}.py
 sam/{mask_decoder,prompt_encoder,transformer}.py
 position_encoding.py
+memory_attention.py      (added 2026-11-25, for video)
+memory_encoder.py        (added 2026-11-25, for video)
 ```
 
 Modified:
@@ -43,20 +46,30 @@ Written for this package:
 - `image.py` — preprocessing, prompt scaling, and mask resizing, replacing
   `sam2/utils/transforms.py`. This is what removes `torchvision`.
 - `predictor.py` — checkpoint loading, prompt assembly, and the encoder-output cache.
+- `tracking.py` (2026-11-25) — `SAM2Base`'s per-frame methods (`_forward_sam_heads`,
+  `forward_image`, `_prepare_backbone_features`, `_prepare_memory_conditioned_features`,
+  `_encode_new_memory`, `track_step` with `_track_step`, `_use_multimask`), copied in upstream's
+  order of operations. Settings fixed at their SAM 2.1 values are folded, and the training,
+  reverse-tracking and mask-prompt branches are gone; nothing else changed.
+- `video.py` (2026-11-25) — `SAM2VideoPredictor` rewritten as a session that takes one frame at a
+  time and keeps only what a later frame can read, plus the video loader's frame preprocessing.
 
 ## What was deliberately left behind
 
-The whole video tracker: `memory_attention.py`, `memory_encoder.py`, `sam2_video_predictor.py`
-and its legacy twin, and on `SAM2Base` the memory bank, object pointers, temporal position
-encoding and frame bookkeeping. Also the training code, the evaluation harness,
-`automatic_mask_generator.py`, the CUDA `connected_components` extension used for hole filling,
-and the Hydra build path.
+From the video predictor: `sam2_video_predictor_legacy.py`; whole-video loading
+(`init_state` and the mp4 path through `decord`); prompts added to a frame already tracked
+(corrections), `add_new_mask`, clearing and removing objects, `reset_state`; reverse
+propagation (feeding frames backwards to a forward session is the same arithmetic, measured);
+`SAM2VideoPredictorVOS` and `torch.compile`; the non-overlap constraint (off in every published
+configuration). Also the training code, the evaluation harness, `automatic_mask_generator.py`, the
+CUDA `connected_components` extension used for hole filling, and the Hydra build path.
 
-Dropping these removes `hydra-core`, `omegaconf`, `iopath` and `torchvision` from the install,
-and leaves 90.7 percent of the checkpoint's parameters in use — the video weights are 7.5 M of
-80.9 M for base_plus, and they are filtered out at load rather than being carried dead.
+Dropping these removes `hydra-core`, `omegaconf`, `iopath` and `torchvision` from the install.
+Since 2026-11-25 every tensor in the checkpoint has a module and the load is strict with nothing
+filtered (it used to drop the 7.5 M tracker parameters by prefix). One module is built and never
+read: `mask_downsample`, used upstream only for mask prompts.
 
-One tensor that *looks* like tracker state is kept. `no_mem_embed` is trained to mean "there is
+One tensor that *looks* like tracker state is used on the image path too. `no_mem_embed` is trained to mean "there is
 no memory to attend to", which is exactly the situation a single image is in, and upstream's
 image predictor adds it to the lowest-resolution feature map. Leaving it out costs 4.5e-02 on the
 embedding and a few hundred pixels per mask — close enough to look correct, which is why the

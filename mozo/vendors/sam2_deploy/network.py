@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The image-mode SAM 2 network: an image encoder, a prompt encoder and a mask decoder.
+"""The SAM 2 network: an image encoder, a prompt encoder, a mask decoder, and the video tracker.
 
-Upstream's ``SAM2Base`` carries the video tracker as well -- a memory attention stack, a memory
-encoder, object pointers and the frame bookkeeping that drives them. None of it runs when you
-segment a single image, and it is 90 percent of the class. So this module builds the three
-sub-networks the image path actually uses and wires them together, and the video machinery is
-left behind entirely. See ``PROVENANCE.md`` for the full list of what that drops.
+Upstream's ``SAM2Base`` is one class for both jobs. Here the modules are built with the same names
+and the same arguments (so the published checkpoint loads strictly, every tensor accounted for), the
+image path is :meth:`Sam2.encode` / :meth:`Sam2.decode` below, and the tracking step -- memory
+attention over earlier frames, the memory encoder, object pointers -- is
+:class:`~.tracking.TrackingStep`, copied from ``SAM2Base``. The frame bookkeeping that drives it
+lives in :mod:`.video`.
 
 The split into :meth:`Sam2.encode` and :meth:`Sam2.decode` is the seam mozo builds on. The
 encoder is the expensive half and depends only on the image; the decoder is cheap and depends on
@@ -20,17 +21,21 @@ from torch import nn
 
 from .backbones.hieradet import Hiera
 from .backbones.image_encoder import FpnNeck, ImageEncoder
-from .config import SHARED, Spec
+from .config import DECODER, SHARED, TRACKER, Spec
+from .memory_attention import MemoryAttention, MemoryAttentionLayer
+from .memory_encoder import CXBlock, Fuser, MaskDownSampler, MemoryEncoder
 from .position_encoding import PositionEmbeddingSine
 from .sam.mask_decoder import MaskDecoder
 from .sam.prompt_encoder import PromptEncoder
-from .sam.transformer import TwoWayTransformer
+from .sam.transformer import RoPEAttention, TwoWayTransformer
+from .sam2_utils import MLP
+from .tracking import TrackingStep
 
 __all__ = ["Sam2"]
 
 
-class Sam2(nn.Module):
-    """SAM 2 restricted to single images.
+class Sam2(TrackingStep, nn.Module):
+    """SAM 2: single images through :meth:`encode`/:meth:`decode`, video through the tracking step.
 
     Args:
         spec: The variant's geometry, from :data:`.config.SPECS`.
@@ -88,6 +93,7 @@ class Sam2(nn.Module):
             pred_obj_scores=True,
             pred_obj_scores_mlp=True,
             use_multimask_token_for_obj_ptr=True,
+            **DECODER,
         )
 
         # Trained as "there is no memory to attend to", which is exactly the situation a single
@@ -96,6 +102,69 @@ class Sam2(nn.Module):
         # mask: close enough to look correct. Found by comparing against upstream rather than by
         # reading, and recorded in PROVENANCE.md, because nothing in the suite pins it yet.
         self.no_mem_embed = nn.Parameter(torch.zeros(1, 1, hidden))
+        self._build_tracker(hidden)
+
+    def _build_tracker(self, hidden: int) -> None:
+        """The video tracker's modules, as ``sam2.1_hiera_*.yaml`` and ``SAM2Base.__init__`` build them.
+
+        Built for every variant and every caller, image-only ones included, so that the published
+        checkpoint loads with nothing left over: 7.5 M parameters, the same in all four sizes.
+        """
+        mem_dim = TRACKER["mem_dim"]
+        self.hidden_dim = hidden
+        self.mem_dim = mem_dim
+        self.backbone_stride = SHARED["backbone_stride"]
+        self.sam_prompt_embed_dim = hidden
+        self.sam_image_embedding_size = self.image_size // self.backbone_stride
+        for name in ("num_maskmem", "sigmoid_scale_for_mem_enc", "sigmoid_bias_for_mem_enc",
+                     "binarize_mask_from_pts_for_mem_enc", "directly_add_no_mem_embed",
+                     "multimask_output_in_sam", "multimask_output_for_tracking",
+                     "multimask_min_pt_num", "multimask_max_pt_num", "max_obj_ptrs_in_encoder",
+                     "max_cond_frames_in_attn", "memory_temporal_stride_for_eval",
+                     "use_signed_tpos_enc_to_obj_ptrs", "only_obj_ptrs_in_the_past_for_eval"):
+            setattr(self, name, TRACKER[name])
+
+        def rope(**extra):
+            return RoPEAttention(rope_theta=10000.0, feat_sizes=[64, 64], embedding_dim=hidden,
+                                 num_heads=1, downsample_rate=1, dropout=0.1, **extra)
+
+        self.memory_attention = MemoryAttention(
+            d_model=hidden,
+            pos_enc_at_input=True,
+            layer=MemoryAttentionLayer(
+                activation="relu",
+                cross_attention=rope(rope_k_repeat=True, kv_in_dim=mem_dim),
+                d_model=hidden,
+                dim_feedforward=2048,
+                dropout=0.1,
+                pos_enc_at_attn=False,
+                pos_enc_at_cross_attn_keys=True,
+                pos_enc_at_cross_attn_queries=False,
+                self_attention=rope(),
+            ),
+            num_layers=TRACKER["memory_attention_layers"],
+        )
+        self.memory_encoder = MemoryEncoder(
+            out_dim=mem_dim,
+            mask_downsampler=MaskDownSampler(kernel_size=3, stride=2, padding=1),
+            fuser=Fuser(
+                layer=CXBlock(dim=hidden, kernel_size=7, padding=3, layer_scale_init_value=1e-6,
+                              use_dwconv=True),
+                num_layers=2,
+            ),
+            position_encoding=PositionEmbeddingSine(
+                num_pos_feats=mem_dim, normalize=True, scale=None, temperature=10000
+            ),
+        )
+        self.maskmem_tpos_enc = nn.Parameter(torch.zeros(self.num_maskmem, 1, 1, mem_dim))
+        self.no_mem_pos_enc = nn.Parameter(torch.zeros(1, 1, hidden))
+        self.no_obj_ptr = nn.Parameter(torch.zeros(1, hidden))
+        self.no_obj_embed_spatial = nn.Parameter(torch.zeros(1, mem_dim))
+        self.obj_ptr_proj = MLP(hidden, hidden, hidden, 3)
+        self.obj_ptr_tpos_proj = nn.Linear(hidden, mem_dim)
+        # Present in the checkpoint and read only when a mask is the prompt (upstream's
+        # ``_use_mask_as_output``), which this package does not take. Built so the load is strict.
+        self.mask_downsample = nn.Conv2d(1, 1, kernel_size=4, stride=4)
 
     @torch.no_grad()
     def encode(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:

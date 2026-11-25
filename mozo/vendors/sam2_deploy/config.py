@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["SPECS", "Spec", "SHARED"]
+__all__ = ["SPECS", "Spec", "SHARED", "DECODER", "TRACKER"]
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,41 @@ SHARED = {
     "fpn_top_down_levels": (2, 3),
     "fpn_interp_model": "nearest",
     "num_feature_levels": 3,
+}
+
+#: The mask decoder's post-processing, which carries no weights and is not in the YAML: upstream's
+#: ``build_sam2`` and ``build_sam2_video_predictor`` both add it as Hydra overrides when
+#: ``apply_postprocessing`` is left at its default. It decides what a single-mask call returns when
+#: that mask is unstable, so a strict load cannot check it -- only the gate can.
+DECODER = {
+    "dynamic_multimask_via_stability": True,
+    "dynamic_multimask_stability_delta": 0.05,
+    "dynamic_multimask_stability_thresh": 0.98,
+}
+
+#: The video tracker's settings. Identical in all four ``sam2.1_hiera_*.yaml`` files (the tracker
+#: is the same network in every size; only the trunk differs), plus the two the video predictor's
+#: builder adds: ``binarize_mask_from_pts_for_mem_enc`` and ``fill_hole_area``. The second is listed
+#: so that the decision is visible: upstream fills holes only with a CUDA extension it builds
+#: optionally, and without it skips the step, which is what this package reproduces (PROVENANCE).
+TRACKER = {
+    "num_maskmem": 7,
+    "mem_dim": 64,
+    "sigmoid_scale_for_mem_enc": 20.0,
+    "sigmoid_bias_for_mem_enc": -10.0,
+    "binarize_mask_from_pts_for_mem_enc": True,
+    "directly_add_no_mem_embed": True,
+    "multimask_output_in_sam": True,
+    "multimask_output_for_tracking": True,
+    "multimask_min_pt_num": 0,
+    "multimask_max_pt_num": 1,
+    "max_obj_ptrs_in_encoder": 16,
+    "max_cond_frames_in_attn": -1,
+    "memory_temporal_stride_for_eval": 1,
+    "use_signed_tpos_enc_to_obj_ptrs": True,
+    "only_obj_ptrs_in_the_past_for_eval": True,
+    "memory_attention_layers": 4,
+    "fill_hole_area": 0,
 }
 
 #: Variant name -> geometry. ``base_plus`` takes the trunk defaults; the other three override.

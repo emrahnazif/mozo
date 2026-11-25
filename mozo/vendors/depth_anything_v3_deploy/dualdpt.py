@@ -28,6 +28,9 @@ import torch.nn as nn
 from .dpt import _make_fusion_block, _make_scratch
 from .head_utils import create_uv_grid, custom_interpolate, position_grid_to_embed
 
+#: The scale of the UV embedding added to the head's features (upstream's ``ratio=0.1``).
+UV_RATIO = 0.1
+
 
 class DualDPT(nn.Module):
     """
@@ -120,7 +123,7 @@ class DualDPT(nn.Module):
     ) -> Dict[str, torch.Tensor]:
         """
         Returns ``{depth: [B, S, H, W], depth_conf: [B, S, H, W]}``. *uv* is
-        :meth:`uv_embeddings` for this ``H, W``, computed beforehand, or ``None`` to compute it.
+        :func:`uv_embeddings` for this ``H, W``, computed beforehand, or ``None`` to compute it.
         """
         B, S, N, C = feats[0][0].shape
         feats = [feat[0].reshape(B * S, N, C) for feat in feats]
@@ -208,7 +211,7 @@ class DualDPT(nn.Module):
         out = self.scratch.output_conv1(out)
         return out
 
-    def _add_pos_embed(self, x: torch.Tensor, W: int, H: int, ratio: float = 0.1,
+    def _add_pos_embed(self, x: torch.Tensor, W: int, H: int, ratio: float | None = None,
                        pe: torch.Tensor | None = None) -> torch.Tensor:
         """Simple UV positional embedding added to feature maps."""
         # depth_anything_v3_deploy: the embedding depends on the shapes alone, so it can be
@@ -218,12 +221,6 @@ class DualDPT(nn.Module):
             pe = uv_embedding(x.shape[-1], x.shape[-2], x.shape[1], W, H, x.dtype, x.device, ratio)
         pe = pe.expand(x.shape[0], -1, -1, -1)
         return x + pe
-
-    def uv_embeddings(self, H: int, W: int, dtype: torch.dtype = torch.float32,
-                      device: torch.device | str = "cpu") -> List[torch.Tensor]:
-        """The five embeddings :meth:`forward` adds, in order: one per stage, then the output's."""
-        return uv_embeddings(H, W, self.out_channels, self.features, self.patch_size,
-                             self.down_ratio, dtype, device)
 
     def _apply_activation_single(
         self, x: torch.Tensor, activation: str = "linear"
@@ -252,9 +249,10 @@ class DualDPT(nn.Module):
 
 
 def uv_embedding(pw: int, ph: int, channels: int, W: int, H: int, dtype: torch.dtype,
-                 device: torch.device | str, ratio: float = 0.1) -> torch.Tensor:
+                 device: torch.device | str, ratio: float | None = None) -> torch.Tensor:
     """Upstream's UV embedding (``_add_pos_embed``) for a ``channels x ph x pw`` map of an
-    ``H x W`` image, before it is broadcast over the batch."""
+    ``H x W`` image, before it is broadcast over the batch. *ratio* defaults to :data:`UV_RATIO`."""
+    ratio = UV_RATIO if ratio is None else ratio
     pe = create_uv_grid(pw, ph, aspect_ratio=W / H, dtype=dtype, device=device)
     pe = position_grid_to_embed(pe, channels) * ratio
     return pe.permute(2, 0, 1)[None]

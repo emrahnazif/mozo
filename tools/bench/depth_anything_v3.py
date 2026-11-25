@@ -77,7 +77,9 @@ def accuracy(inverse: np.ndarray, gt: np.ndarray) -> tuple[float, float]:
     return abs_rel, delta1
 
 
-def run(variant: str, runtime: str, device: str, data, reference: list | None):
+def run(variant: str, runtime: str, device: str, data, reference: list | None, keep: bool):
+    """One row; the predictions are kept only when *keep* (the reference rows), since each row's
+    would otherwise hold 654 maps (0.8 GB) for nothing."""
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
     if device == "cuda":
@@ -93,7 +95,8 @@ def run(variant: str, runtime: str, device: str, data, reference: list | None):
         inverse = model.predict(rgb)
         synchronise(device)
         timings.append((time.perf_counter() - start) * 1000)
-        preds.append(inverse)
+        if keep:
+            preds.append(inverse)
         scores.append(accuracy(inverse, gt))
         if reference is not None:
             rel = np.abs(inverse - reference[i]) / np.abs(reference[i])
@@ -117,18 +120,11 @@ def run(variant: str, runtime: str, device: str, data, reference: list | None):
 
 def time_upstream(variant: str, checkout: Path, checkpoints: Path, data) -> float:
     """Median ms of upstream's network forward, fp32 on CUDA, on the same preprocessed inputs."""
-    import types
+    # The gate's loader: same stubs, same refusal of a checkout at another commit.
+    from verify.depth_anything_v3 import UPSTREAM, load_upstream_package
 
-    sys.path.insert(0, str(checkout / "src"))
-    for name, attr in (("depth_anything_3.utils.export", "export"),
-                       ("depth_anything_3.utils.pose_align", "align_poses_umeyama")):
-        stub = types.ModuleType(name)
-        setattr(stub, attr, None)
-        sys.modules[name] = stub
-    from depth_anything_3.api import DepthAnything3
-
-    repo = {"small": "DA3-SMALL", "base": "DA3-BASE", "mono-large": "DA3MONO-LARGE"}[variant]
-    up = DepthAnything3.from_pretrained(str(checkpoints / repo)).eval().to("cuda")
+    DepthAnything3, _ = load_upstream_package(checkout, allow_other_commit=False)
+    up = DepthAnything3.from_pretrained(str(checkpoints / UPSTREAM[variant])).eval().to("cuda")
     timings = []
     with torch.inference_mode():
         for i, (rgb, _) in enumerate(data):
@@ -170,7 +166,8 @@ def main() -> int:
             subset = data[:args.cpu_images] if device == "cpu" else data
             reference = references.get(device)
             row, preds = run(variant, runtime, device, subset,
-                             None if reference is None else reference[:len(subset)])
+                             None if reference is None else reference[:len(subset)],
+                             keep=runtime == "torch-fp32")
             if runtime == "torch-fp32":
                 references[device] = preds
             fmt = (lambda v, f: "-" if v is None else format(v, f))

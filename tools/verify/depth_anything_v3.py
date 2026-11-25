@@ -44,7 +44,6 @@ from __future__ import annotations
 import argparse
 import ast
 import contextlib
-import hashlib
 import os
 import subprocess
 import sys
@@ -57,6 +56,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 os.environ.setdefault("MKL_CBWR", "AVX2,STRICT")
 sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != Path(__file__).resolve().parent]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tools"))
 sys.stdout.reconfigure(line_buffering=True)
 
 import cv2  # noqa: E402
@@ -65,14 +65,15 @@ import torch  # noqa: E402
 
 from mozo.vendors import depth_anything_v3_deploy as vendor  # noqa: E402
 from mozo.vendors.depth_anything_v3_deploy import predictor as vendor_predictor  # noqa: E402
+from common import digest, fixtures  # noqa: E402
+from mozo.image import load_image  # noqa: E402
 from mozo.weights import resolve  # noqa: E402
 
 VENDOR = ROOT / "mozo" / "vendors" / "depth_anything_v3_deploy"
 ALLOWED_THIRD_PARTY = {"torch", "torchvision", "numpy", "cv2"}
 
-#: mozo variant -> (upstream repository name, upstream model name).
-UPSTREAM = {"small": ("DA3-SMALL", "da3-small"), "base": ("DA3-BASE", "da3-base"),
-            "mono-large": ("DA3MONO-LARGE", "da3mono-large")}
+#: mozo variant -> upstream's Hugging Face repository name.
+UPSTREAM = {"small": "DA3-SMALL", "base": "DA3-BASE", "mono-large": "DA3MONO-LARGE"}
 
 
 def _pinned_commit() -> str:
@@ -200,7 +201,7 @@ def _delta(a: torch.Tensor, b: torch.Tensor) -> str:
     return f"max|d| {float((a - b).abs().max()):.3g}"
 
 
-def gate_image(variant: str, upstream, ours: vendor.Predictor, rgb: np.ndarray,
+def gate_image(upstream, ours: vendor.Predictor, rgb: np.ndarray,
                autocast: bool) -> list[Stage]:
     stages: list[Stage] = []
     # 1. preprocessing, exactly as inference() calls it
@@ -304,10 +305,7 @@ def _final_norm_eps(p):
 
 
 def _pos_embed_ratio(p):
-    real = vendor.dualdpt.uv_embedding
-    return _setattr(vendor.dualdpt, "uv_embedding",
-                    lambda *a, ratio=0.1: real(*a[:7], ratio=(a[7] if len(a) > 7 else ratio)
-                                               * 1.0000001))
+    return _setattr(vendor.dualdpt, "UV_RATIO", vendor.dualdpt.UV_RATIO * 1.0000001)
 
 
 def _area_to_linear(p):
@@ -335,9 +333,7 @@ def _sky_seed(p):
 
 
 def _sky_threshold(p):
-    real = vendor.net.compute_sky_mask
-    return _setattr(vendor.net, "compute_sky_mask",
-                    lambda sky, threshold=0.3: real(sky, threshold=0.31))
+    return _setattr(vendor.net, "SKY_THRESHOLD", 0.31)
 
 
 def _camera_token_unused(p):
@@ -381,7 +377,7 @@ def falsify(variant: str, upstream, ours: vendor.Predictor, images: list[np.ndar
             continue
         with f.patch(ours):
             results = [s for rgb in images
-                       for s in gate_image(variant, upstream, ours, rgb, autocast=False)]
+                       for s in gate_image(upstream, ours, rgb, autocast=False)]
         failed = {s.name for s in results if not s.ok and s.name in order}
         first = next((name for name in order if name in failed), None)
         ok = first == f.stage
@@ -394,13 +390,8 @@ def falsify(variant: str, upstream, ours: vendor.Predictor, images: list[np.ndar
 # --- main ---------------------------------------------------------------------------------------
 
 def read_images(paths: list[Path]) -> list[tuple[str, np.ndarray]]:
-    out = []
-    for path in paths:
-        bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if bgr is None:
-            raise SystemExit(f"cannot read {path}")
-        out.append((path.name, np.ascontiguousarray(bgr[..., ::-1])))
-    return out
+    """Decode through mozo's own entry point, the RGB array a user's call starts from."""
+    return [(path.name, load_image(str(path))) for path in paths]
 
 
 def synthetic() -> list[tuple[str, np.ndarray]]:
@@ -442,27 +433,26 @@ def main() -> int:
     print(f"upstream {commit}; torch {torch.__version__}, torchvision {torchvision.__version__}, "
           f"numpy {np.__version__}, cv2 {cv2.__version__}; MKL_CBWR={os.environ['MKL_CBWR']}")
 
-    paths = []
-    for item in args.images or [ROOT / "tests" / "fixtures" / "images"]:
+    paths = [] if args.images else fixtures()
+    for item in args.images:
         paths += sorted(p for p in item.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"}
                         ) if item.is_dir() else [item]
     images = read_images(paths) + synthetic()
 
     all_ok = not problems
     for variant in args.variants:
-        repo, _ = UPSTREAM[variant]
+        repo = UPSTREAM[variant]
         upstream = realloc(DepthAnything3.from_pretrained(str(args.checkpoints / repo)).eval())
         # The artifact mozo publishes, through mozo's resolver (MOZO_BASE_URL may point at a
         # staged weights/ tree).
         weights = resolve("depth_anything_v3", variant, "torch-fp32")
         ours = vendor.Predictor.from_pretrained(variant, weights=weights)
         realloc(ours.model)
-        digest = hashlib.sha256(weights.read_bytes()).hexdigest()[:12]
-        print(f"\n== {variant} ({repo}, mozo weights sha256 {digest}...)")
+        print(f"\n== {variant} ({repo}, mozo weights sha256 {digest(weights)[:12]}...)")
         counts: dict[str, list[int]] = {}
         for name, rgb in images:
             try:
-                stages = gate_image(variant, upstream, ours, rgb, autocast=not args.no_autocast)
+                stages = gate_image(upstream, ours, rgb, autocast=not args.no_autocast)
             except Exception as error:  # noqa: BLE001 - reported as a failing image
                 stages = [Stage("error", False, repr(error))]
             line = "  ".join(f"{s.name} {'ok' if s.ok else 'FAIL'}"

@@ -113,7 +113,8 @@ On the GPU mozo takes the same time as `transformers` to within 1% (6.71 s and 1
 sides). GPU memory peaks at 4.7 GB for `2b` and 9.5 GB for `4b` in bf16, 10.2 GB for `2b` in fp32.
 
 On 300 VQAv2 questions (COCO images, short answers), bf16 changed 5 of the 2B model's 300 answers
-against fp32, and VQA accuracy went from 77.3% to 76.9%; the 4B model scored 77.0% in bf16.
+against fp32, and VQA accuracy went from 77.3% to 76.9%; for the 4B model, 4 of 300 answers changed
+and accuracy went from 76.6% to 77.0%.
 
 ## Exactness
 

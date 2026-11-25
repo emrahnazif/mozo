@@ -1,0 +1,28 @@
+BiRefNet -- Bilateral Reference for High-Resolution Dichotomous Image Segmentation
+Copyright (c) 2024 ZhengPeng.
+
+Peng Zheng, Dehong Gao, Deng-Ping Fan, Li Liu, Jorma Laaksonen, Wanli Ouyang,
+Nicu Sebe. "Bilateral Reference for High-Resolution Dichotomous Image
+Segmentation", CAAI Artificial Intelligence Research 3, 9150038 (2024).
+arXiv:2401.03407.
+
+This product includes a deployment-only extraction of software developed at
+https://github.com/ZhengPeng7/BiRefNet and published as remote code beside each
+checkpoint at https://huggingface.co/ZhengPeng7, licensed under the MIT License.
+See LICENSE for the full text and PROVENANCE.md for what was taken and what was
+changed.
+
+The Swin Transformer backbone in swin.py originates with Microsoft
+(https://github.com/microsoft/Swin-Transformer, MIT), and reaches this package
+through BiRefNet's own copy of it.
+
+refine_foreground() in image.py is a blur-fusion foreground estimator from
+Photoroom (https://github.com/Photoroom/fast-foreground-estimation), credited in
+upstream's handler.py and reproduced here with the same two-pass radii.
+
+The model weights are licensed separately from this code, and identically: every
+checkpoint mozo publishes carries "license: mit" on its ungated model card. The
+training data behind some of them includes datasets published under their own,
+in some cases research-only, terms (for example P3M-10k and AM-2k). mozo takes
+the publisher's MIT grant on the weights as stated and does not track the terms
+of the data behind them; PROVENANCE.md records where the chain stops.

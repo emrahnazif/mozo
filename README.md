@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/mozo)](https://pypi.org/project/mozo/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-### 82 models, and the workflows that run them.
+### 88 models, and the workflows that run them.
 
 One `pip install`. No dependency hell. Runs models, executes workflows, and builds them.
 
@@ -15,7 +15,7 @@ few in one environment and something breaks. The usual escape is a container per
 paying for that forever.
 
 Mozo ships none of them. Every model's inference path is vendored into mozo itself and verified
-**bit-identical** to the original implementation — so one environment runs all 82, and gives
+**bit-identical** to the original implementation — so one environment runs all 88, and gives
 you the original's exact numbers rather than something close.
 
 ```bash
@@ -45,6 +45,7 @@ A box, a class and a confidence for each object.
 | Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
 | [RF-DETR](docs/models/rfdetr.md) | nano → large | Apache-2.0 | torch, onnx, coreml; tensorrt on CUDA |
+| [DEIM](docs/models/deim.md) | nano → xlarge | Apache-2.0 | torch, onnx; tensorrt on CUDA |
 | [YOLOv8](docs/models/yolov8.md) | nano → xlarge | AGPL-3.0 | torch, onnx, coreml |
 | [YOLO11](docs/models/yolov11.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
 | [YOLO12](docs/models/yolov12.md) | nano → xlarge | AGPL-3.0 | torch, onnx, coreml |
@@ -195,7 +196,7 @@ Trimmed for reading. The real response carries every PixelFlow field on every de
 The catalogue is answerable without loading anything:
 
 ```bash
-curl http://localhost:8000/models          # all 82, no torch import, no weights
+curl http://localhost:8000/models          # all 88, no torch import, no weights
 curl http://localhost:8000/models/loaded   # what is resident right now
 ```
 
@@ -255,7 +256,7 @@ results = Workflow.load("blur_faces.json").run(source="street.jpg")
 mozo run blur_faces.json --file street.jpg
 ```
 
-50 nodes: every model family that answers about an image, SAM 2, EdgeTAM and SAM 3 segmenting the boxes another node found, RF-DETR
+51 nodes: every model family that answers about an image, SAM 2, EdgeTAM and SAM 3 segmenting the boxes another node found, RF-DETR
 from a checkpoint of your own, tracking objects across a video's frames, the image transforms and
 annotations PixelFlow provides, and the ends that read images and annotations and write results. A
 node is an ordinary Python function — its signature *is* its
@@ -279,7 +280,7 @@ tolerance.** Exact equality, because a tolerance hides precisely the drift a che
 
 The gates in `tools/verify/` compare every intermediate stage against the original implementation,
 not just the final answer: 1,275 comparisons for EasyOCR, 226 for OWLv2, 138 for Grounding DINO,
-every one identical. Fifteen of the eighteen families ship one; all eighteen have their parity measured
+every one identical. Sixteen of the nineteen families ship one; all nineteen have their parity measured
 and recorded in
 `mozo/vendors/<family>_deploy/PROVENANCE.md`, with the upstream commit it was built from.
 
@@ -312,7 +313,7 @@ python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_
 ## What mozo does not do
 
 - **No training and no fine-tuning.** Bring a checkpoint; mozo runs it.
-- **It is not a model hub.** The catalogue is a curated 82, chosen because each one could be
+- **It is not a model hub.** The catalogue is a curated 88, chosen because each one could be
   extracted and verified. Growth is deliberate and slow.
 
 ## Extending
@@ -348,7 +349,7 @@ cd ui && npm install && npm run build   # writes mozo/workflow/static/assets/
 
 Mozo's own code is **Apache-2.0**, and so is every vendored extraction under `mozo/vendors/`.
 
-The weights are separate works travelling with it. Of the 82 published variants, **44 are
+The weights are separate works travelling with it. Of the 88 published variants, **50 are
 Apache-2.0**, 30 are **AGPL-3.0** (every YOLO variant), 5 are **MIT** (CLIP and BEN2), 2 are
 **CC-BY-NC-4.0** (Depth Anything `base` and `large`), and 1 carries Meta's **SAM License**
 (SAM 3). The full licence and a NOTICE
@@ -365,14 +366,14 @@ Complying with either is the operator's responsibility. `MOZO_ENABLE` is how an 
 to take it on — a server that never offers a model never fetches or serves its weights:
 
 ```bash
-MOZO_ENABLE=ben2,clip,easyocr,edgetam,granite_embedding_r2,grounding_dino,moebius,owlv2,\
+MOZO_ENABLE=ben2,clip,deim,easyocr,edgetam,granite_embedding_r2,grounding_dino,moebius,owlv2,\
 rfdetr,sam2,siglip2,vitpose,depth_anything_v2/small,depth_anything_v2/indoor-small,\
 depth_anything_v2/indoor-base,\
 depth_anything_v2/indoor-large,depth_anything_v2/outdoor-small,\
 depth_anything_v2/outdoor-base,depth_anything_v2/outdoor-large
 ```
 
-That is the 49 Apache-2.0 and MIT variants, and it stays 49 through an upgrade that adds
+That is the 55 Apache-2.0 and MIT variants, and it stays 55 through an upgrade that adds
 families — which a list of what to *exclude* would not. Depth Anything is named variant by variant
 because it is the one family whose licence is not uniform: seven of its nine are Apache-2.0 and
 two are CC-BY-NC-4.0.

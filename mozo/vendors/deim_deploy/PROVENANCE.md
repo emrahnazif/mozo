@@ -106,4 +106,26 @@ the same pixels gave a different encoder attention output in about one process i
 on medium on an idle machine; logits up to about 5e-4 apart). That is a property of torch on this
 CPU, not of either implementation, and it affects mozo's CPU results the same way.
 
-RESULTS_PLACEHOLDER
+**Result (2026-11-25):** all six variants, 25 images each, every comparison equal: input, encoder
+outputs, logits, boxes, 300 detections, and 120,625 module outputs (456 to 1,145 module calls per
+image per variant), plus mozo at both thresholds. The gate is falsifiable, and was made to fail
+13 ways on `nano` and `xlarge-obj365`, each at its own stage: PIL bicubic instead of bilinear and
+`x * (1/255)` instead of `x / 255` (input), the encoder's GELU as tanh (first module: the encoder
+activation), decoder LayerNorm eps 1e-6 (first module: `decoder.enc_output.norm`; the encoder
+still equal), the training-form weighting function (first module: the second layer's query
+position head; boxes and logits fail, the encoder does not), box scale with x and y swapped
+(detections only), and, on `xlarge-obj365` only, `FrozenBatchNorm2d` computed as eval
+`F.batch_norm` (first module: `backbone.stem.stem1.bn`).
+
+## Export
+
+The graph is the deploy-form network alone (`tools/export/deim.py`): `1x3x640x640`, opset 17,
+outputs `pred_logits` and `pred_boxes`; preprocessing and decode stay in this package on every
+runtime. Measured on an RTX 3090, 500 COCO val2017 images per variant, against torch fp32 on the
+CPU: ONNX Runtime CPU and CUDA and the TensorRT fp32 engine changed no detection above 0.5 and left
+AP identical on all six. The TensorRT fp32 engine runs 1.9x (`xlarge`) to 5.4x (`nano`) faster than
+torch CUDA, and `auto` takes it. The fp16 graph (exported under torch autocast, opset 18) changes at
+most 4 detections in about 3,000 and AP by at most 0.12, and is 1.2-2.1x faster than the fp32
+engine for `small` and up; for `nano` it is slower than fp32 (2.4 against 1.9 ms), so `nano`
+publishes none. A whole-graph `convert_float_to_float16` cast does not parse in TensorRT. Torch
+autocast on CUDA was slower than fp32 for every variant, so there is no `torch-fp16`.

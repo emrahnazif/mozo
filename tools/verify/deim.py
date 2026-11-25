@@ -38,12 +38,13 @@ thing reaches and at no earlier one. See :data:`FALSIFY`.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Callable, NamedTuple
+from unittest import mock
 
 # Before torch loads MKL, and inherited by the reference process. Without it the comparison is not
 # defined: MKL's sgemm picks its kernel by the buffers' alignment, which differs from process to
@@ -51,7 +52,7 @@ from pathlib import Path
 # one process in ten on an idle machine (medium: 1 of 12, logits up to ~5e-4 apart). Strict
 # conditional-numerical-reproducibility mode makes the result independent of alignment. It sets
 # the same arithmetic on both sides; it does not make either side match the other.
-os.environ.setdefault("MKL_CBWR", "AVX2,STRICT")
+os.environ["MKL_CBWR"] = "AVX2,STRICT"  # forced: a weaker mode left in the environment would undefine the gate
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
@@ -188,14 +189,8 @@ def mozo_matches(model, rgb: np.ndarray, vendor: dict) -> bool:
 
 # -- falsification ---------------------------------------------------------------------------
 
-@contextlib.contextmanager
 def _patch(obj, name, value):
-    old = getattr(obj, name)
-    setattr(obj, name, value)
-    try:
-        yield
-    finally:
-        setattr(obj, name, old)
+    return mock.patch.object(obj, name, value)
 
 
 def _resize_bicubic():
@@ -219,17 +214,22 @@ def _scale_reciprocal():
 
 def _encoder_gelu_tanh():
     import torch.nn as nn
-    import mozo.vendors.deim_deploy.utils as utils
-    real = utils.get_activation
-    return _patch(utils, "get_activation",
+    import mozo.vendors.deim_deploy.hybrid_encoder as encoder
+    real = encoder.get_activation
+    return _patch(encoder, "get_activation",
                   lambda act, inplace=True: nn.GELU(approximate="tanh") if act == "gelu"
                   else real(act, inplace))
 
 
 def _decoder_layernorm_eps():
+    """LayerNorm eps 1e-5 -> 1e-6 in the decoder only, through a stand-in for its ``nn``."""
+    import types
+
     import torch.nn as nn
     import mozo.vendors.deim_deploy.decoder as decoder
-    return _patch(decoder.nn, "LayerNorm", lambda d, *a, **k: nn.modules.normalization.LayerNorm(d, eps=1e-6))
+    stand_in = types.SimpleNamespace(**{k: getattr(nn, k) for k in dir(nn) if not k.startswith("__")})
+    stand_in.LayerNorm = lambda d, *a, **k: nn.LayerNorm(d, eps=1e-6)
+    return _patch(decoder, "nn", stand_in)
 
 
 def _weighting_training_form():
@@ -249,22 +249,41 @@ def _weighting_training_form():
 
 
 def _box_scale_swapped():
-    import mozo.vendors.deim_deploy.postprocess as post
-    real = post.torchvision.ops.box_convert
-    return _patch(post.torchvision.ops, "box_convert",
+    import torchvision.ops
+
+    real = torchvision.ops.box_convert
+    return _patch(torchvision.ops, "box_convert",
                   lambda boxes, in_fmt, out_fmt: real(boxes, in_fmt, out_fmt)[..., [1, 0, 3, 2]])
 
 
-#: name -> (perturbation, the first stage it must fail at). ``modules`` comes before the tensors
-#: it contains, so a perturbation inside the network fails there first; the falsifier also checks
-#: that the stage *it* reaches fails, not merely that something did.
+def _frozen_bn_as_batchnorm():
+    """``FrozenBatchNorm2d`` computed as eval-mode ``F.batch_norm``: the same statistics, the
+    arithmetic the other checkpoints use. Reaches only ``xlarge-obj365``'s backbone."""
+    import torch.nn.functional as F
+    import mozo.vendors.deim_deploy.hgnetv2 as hgnetv2
+
+    def batch_norm(self, x):
+        return F.batch_norm(x, self.running_mean, self.running_var, self.weight, self.bias,
+                            False, 0.0, self.eps)
+    return _patch(hgnetv2.FrozenBatchNorm2d, "forward", batch_norm)
+
+
+class Falsification(NamedTuple):
+    perturb: Callable
+    first: str      # the first stage it must fail at (``modules`` precedes the tensors it holds)
+    reaches: str    # the stage its effect is aimed at, which must fail too
+    applies: Callable = lambda spec: True   # variants it can reach; skipped elsewhere
+
+
 FALSIFY = {
-    "resize": (_resize_bicubic, "input", "input"),
-    "scale": (_scale_reciprocal, "input", "input"),
-    "gelu": (_encoder_gelu_tanh, "modules", "encoder"),
-    "layernorm-eps": (_decoder_layernorm_eps, "modules", "logits"),
-    "weighting": (_weighting_training_form, "modules", "boxes"),
-    "box-scale": (_box_scale_swapped, "detections", "detections"),
+    "resize": Falsification(_resize_bicubic, "input", "input"),
+    "scale": Falsification(_scale_reciprocal, "input", "input"),
+    "gelu": Falsification(_encoder_gelu_tanh, "modules", "encoder"),
+    "layernorm-eps": Falsification(_decoder_layernorm_eps, "modules", "logits"),
+    "weighting": Falsification(_weighting_training_form, "modules", "boxes"),
+    "box-scale": Falsification(_box_scale_swapped, "detections", "detections"),
+    "frozen-bn": Falsification(_frozen_bn_as_batchnorm, "modules", "encoder",
+                               lambda spec: spec.freeze_norm),
 }
 
 
@@ -280,6 +299,8 @@ def main() -> int:
     args = parser.parse_args()
     if not args.no_reference and args.upstream is None:
         parser.error("--upstream is required unless --no-reference")
+    if args.falsify and args.no_reference:
+        parser.error("--falsify compares against upstream, so it needs --upstream")
 
     torch.set_grad_enabled(False)
     named = images(args.images or fixtures(), args.coco, args.coco_count)
@@ -303,7 +324,9 @@ def main() -> int:
             if args.falsify:
                 names = list(FALSIFY) if args.falsify == "all" else [args.falsify]
                 for name in names:
-                    perturb, first, reaches = FALSIFY[name]
+                    perturb, first, reaches, applies = FALSIFY[name]
+                    if not applies(SPECS[variant]):
+                        continue
                     with perturb():
                         model = load(variant, checkpoint)
                         got = {k: compare(vendor_stages(model, rgb), reference[k]) for k, rgb in named.items()}

@@ -28,7 +28,7 @@ from .. import registry
 from ..image import load_image
 from ..labels import resolve as labels_for
 from ..runtimes import TensorRTRunner, get_default_device, make_runner, select_runtime
-from ..vendors.deim_deploy import SPECS, get_spec, load, postprocess, preprocess
+from ..vendors.deim_deploy import OUTPUTS, SPECS, get_spec, load, postprocess, preprocess
 from ..weights import artifacts, framework_of, parts, resolve
 
 try:
@@ -39,9 +39,6 @@ except ImportError:  # pragma: no cover - depends on the install
 _log = logging.getLogger(__name__)
 
 FAMILY = "deim"
-
-#: The graph's outputs, which the exporter names after the keys the decode reads.
-OUTPUTS = ("pred_logits", "pred_boxes")
 
 
 class DEIMPredictor:

@@ -69,13 +69,10 @@ def build(spec: Spec) -> DEIM:
 def load_state(path: Union[str, Path]) -> Dict[str, torch.Tensor]:
     """The ``model`` state of a released checkpoint, read without unpickling code.
 
-    Upstream also accepts a training checkpoint's ``ema.module``; the released files carry only
-    ``model``, and that is the one upstream's scripts take when there is no ``ema``.
+    The released files carry only ``model``, which is what upstream's scripts take when a file has
+    no training ``ema`` entry.
     """
-    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-    if "ema" in checkpoint:
-        return checkpoint["ema"]["module"]
-    return checkpoint["model"]
+    return torch.load(path, map_location="cpu", weights_only=True)["model"]
 
 
 def load(variant: str, path: Union[str, Path]) -> DEIM:

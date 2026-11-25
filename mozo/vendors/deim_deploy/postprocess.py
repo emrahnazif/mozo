@@ -13,6 +13,11 @@ import torch.nn.functional as F
 import torchvision
 
 
+#: The network's outputs, by the keys this decode reads. Graph exports name their outputs after
+#: these, so every runtime's outputs can be matched by name.
+OUTPUTS = ("pred_logits", "pred_boxes")
+
+
 def mod(a, b):
     out = a - a // b * b
     return out

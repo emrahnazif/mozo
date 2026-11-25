@@ -11,7 +11,7 @@ the package is relative, so it imports nothing from mozo and no other vendor.
 
 from .config import SPECS, Spec, get_spec
 from .model import DEIM, build, load
-from .postprocess import postprocess
+from .postprocess import OUTPUTS, postprocess
 from .preprocess import preprocess
 
-__all__ = ["DEIM", "SPECS", "Spec", "build", "get_spec", "load", "postprocess", "preprocess"]
+__all__ = ["DEIM", "OUTPUTS", "SPECS", "Spec", "build", "get_spec", "load", "postprocess", "preprocess"]

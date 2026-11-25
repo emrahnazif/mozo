@@ -1,6 +1,6 @@
 # Mozo
 
-> Run 82 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers.
+> Run 88 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers.
 
 Mozo is a Python package (`pip install mozo`, Python 3.10+). A model is named `family/variant`, the same in Python and over HTTP:
 
@@ -24,7 +24,7 @@ python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_
 
 ## Start
 
-- [Mozo](https://emrah.fr/mozo/): Run 82 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers. File: `index.md`
+- [Mozo](https://emrah.fr/mozo/): Run 88 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers. File: `index.md`
 - [Install mozo on CPU, CUDA or Apple silicon](https://emrah.fr/mozo/installation/): Install mozo with pip, add the optional ONNX or CoreML runtimes, and run it on a CUDA GPU or Apple silicon. File: `installation.md`
 - [Run models from Python](https://emrah.fr/mozo/python/): Load any mozo model with get_model, run it, filter and draw its results with PixelFlow, manage memory, and load your own checkpoints. File: `python.md`
 - [Serve models over HTTP](https://emrah.fr/mozo/server/): Start mozo's HTTP server, send it images from any language, read what comes back, and check which models it serves. File: `server.md`
@@ -39,9 +39,10 @@ python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_
 
 ## Models
 
-- [All 82 models, by task](https://emrah.fr/mozo/models/all-models/): Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size. File: `models/all-models.md`
+- [All 88 models, by task](https://emrah.fr/mozo/models/all-models/): Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size. File: `models/all-models.md`
 - [BEN2: background removal with a soft matte](https://emrah.fr/mozo/models/ben2/): BEN2 in mozo: remove the background of a photograph with a per-pixel opacity matte that keeps hair, or a ready RGBA cut-out. MIT. File: `models/ben2.md`
 - [CLIP: classify from words, embed images and text](https://emrah.fr/mozo/models/clip/): OpenAI's CLIP in mozo: score an image against phrases you write, or get the vectors to search images by text. MIT. File: `models/clip.md`
+- [DEIM: real-time COCO detection without NMS](https://emrah.fr/mozo/models/deim/): DEIM in mozo: real-time DETR detection of COCO's 80 classes, nano to xlarge plus an Objects365-pretrained xlarge, Apache-2.0, on torch, ONNX and TensorRT. File: `models/deim.md`
 - [Depth Anything V2: depth from one photograph](https://emrah.fr/mozo/models/depth-anything-v2/): Depth Anything V2 in mozo: a depth map from a single image, in metres or relative, at the image's resolution. File: `models/depth-anything-v2.md`
 - [EasyOCR: read the text in an image](https://emrah.fr/mozo/models/easyocr/): EasyOCR in mozo: find every line of text in an image and read it, five scripts covering dozens of languages. Apache-2.0, torch. File: `models/easyocr.md`
 - [EdgeTAM: segment what you click, on less hardware](https://emrah.fr/mozo/models/edgetam/): Meta's EdgeTAM in mozo: SAM 2's click-and-box segmentation in a 56 MB model, Apache-2.0 code and weights. File: `models/edgetam.md`

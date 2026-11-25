@@ -16,7 +16,7 @@ annotated masks.
 | Upstream commit | `e696978d60352dc9a26b12631cd91781502c6546` (2025-09-11) |
 | Checkpoints | `https://huggingface.co/lkeab/hq-sam`, Hub commit `09b02a333b37772133eff3997bdba997867374b7` |
 | Extracted | 2026-11-25 |
-| Verified against | `torch` 2.13.0 and 2.6.0, `torchvision` 0.28.0 / 0.21.0, Pillow 12.1.1, on CPU |
+| Verified against | `torch` 2.13.0, `torchvision` 0.28.0, Pillow 12.3.0, numpy 2.3.5, on CPU (also torch 2.6.0 / Pillow 12.1.1 for `tiny`) |
 
 ## Why this reference
 
@@ -143,4 +143,47 @@ the cache. Five images: the fixture landscape, its transpose (padding on the rig
 a small upscale, and the 2048x1025 half-pixel case. Then mozo end to end through the adapter.
 `--falsify` runs the gate under each of eight perturbations and passes only if each is caught.
 
-RESULTS_PLACEHOLDER
+## Results (2026-11-25)
+
+**Parity.** 1,596 stages over the four variants (399 each: five images, seven prompts, refinement,
+a batch of boxes, the cache, and the end-to-end adapter path), every one `torch.equal`. The upstream
+reference itself was measured to move by up to 0.34 on the tiny image embedding when built without
+the second `eval()` (trap above).
+
+**Falsification.** All 27 applicable (perturbation, variant) pairs caught, each first at the stage it should be: resize filter and rounding at the resized image; ViT LayerNorm eps and TinyViT's zero attention biases at the image embedding; fusing the last global block at the HQ features; HQ token alone at the final logits; float32 coordinates at the sparse prompt embedding; skipping the crop at the final masks (66-320 of 395 stages fail per run). Run on CPU on the RTX 3060 test server (torch 2.13.0+cu126, Pillow 13.0.0), which also makes it a second machine on which the unperturbed stages agree.
+
+**Quality on fine structure** (box prompts, single mask, HQSeg-44K's four validation sets, mean of
+the four; CUDA fp32, TF32 off): tiny 82.0 mIoU / 73.4 boundary IoU, base 86.5 / 78.7, large
+88.0 / 80.9, huge 86.7 / 79.9; SAM 2.1 large through mozo 83.6 / 76.5. Per-set numbers and the
+script are in the family docs page and the plan.
+
+**Export.** Each variant splits into an encoder graph (image -> embedding and early feature) and a
+decoder graph (embedding, early feature, prompt embeddings -> all SAM tokens, HQ token, IoUs),
+both opset 17. Measured, not published: mozo's promptable adapter has no runner that keeps two
+graphs apart (SAM 2 and EdgeTAM are torch-only for the same reason).
+
+Encoder / decoder milliseconds per call (median of 10), parity against torch fp32 on CPU as the
+final mask's IoU on the fixture with a box prompt, and quality as the four-set mean mIoU / boundary
+IoU. GPU rows: RTX 3060 12 GB (vision-002), idle GPU; an earlier run beside another job agreed within 10%.
+CPU rows: the 20-core build machine under load from other jobs, indicative.
+
+| runtime | tiny enc / dec ms | tiny mask IoU | base enc / dec ms | base mask IoU | quality tiny; base |
+|---|---|---|---|---|---|
+| torch fp32, CPU | 548 / 87 | 1.0 (exact) | 5,270 / 97 | 1.0 (exact) | 82.0 / 73.4; 86.5 / 78.7 |
+| ONNX Runtime, CPU | 438 / 79 | 1.0 | 2,758 / 104 | 1.0 | not measured |
+| torch fp32, CUDA | 35 / 7.1 | 1.0 | 246 / 7.8 | 1.0 | 82.0 / 73.4; 86.5 / 78.7 |
+| ONNX Runtime, CUDA | 54 / 12 | 0.9999 | 239 / 14 | 0.9994 | not measured |
+| TensorRT 11.5 fp32 | 22 / 4.6 | 1.0 | 159 / 5.4 | 1.0 | 82.0 / 73.4; 86.5 / 78.7 |
+| TensorRT 11.5 fp16 | 9.9 / 2.6 | 0.9997 | 64 / 3.1 | 0.9969 | 82.0 / 73.4; 86.4 / 78.7 |
+
+TensorRT fp16 (graph exported under CUDA fp16 autocast, strongly typed) leaves fine-structure
+quality where fp32 has it -- 82.00 / 73.44 against 82.01 / 73.43 for tiny, 86.44 / 78.66 against
+86.45 / 78.68 for base -- at 3.5x (tiny) and 3.8x (base) torch's encode; TensorRT fp32 is 1.6x and 1.5x, and exact in quality. ONNX Runtime's CUDA
+provider drifts more than TensorRT fp32 (it uses TF32 by default). `large` and `huge` were not
+exported: they share `base`'s code path, ViT-H's encoder graph is over protobuf's 2 GB limit, and the
+12 GB card was shared with another job at the time. None of this is published (see Export above); the measurements are the
+case for a two-graph promptable runner, which would serve SAM 2 and EdgeTAM too.
+
+**Size.** 2,049 vendored lines against 2,766 upstream lines in the files taken from (TinyViT 724 ->
+390); published bytes per variant 42.5 MB / 379 MB / 1.25 GB / 2.57 GB.
+

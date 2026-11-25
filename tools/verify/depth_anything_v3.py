@@ -363,9 +363,11 @@ FALSIFICATIONS = (
 )
 
 
-#: The images falsification runs on: a photograph (shrunk with INTER_AREA), one with sky over
-#: more than 100,000 other pixels (the sky sample), and a tie in the multiple-of-14 rounding.
-FALSIFY_IMAGES = ("example.jpg", "pixabay_cc0_jinyun-mountain-2783957_1280.jpg",
+#: The images falsification runs on: a photograph (shrunk with INTER_AREA), one whose sky (25k
+#: pixels for mono-large) sits beside more than 100,000 other pixels, so the sky fill samples, and
+#: a tie in the multiple-of-14 rounding. A sky beside fewer non-sky pixels is never sampled, and
+#: the seed then changes nothing to catch.
+FALSIFY_IMAGES = ("example.jpg", "pixabay_cc0_seonyudo-633518_1280.jpg",
                   "tie-504x217 (rounds 217 up)")
 
 

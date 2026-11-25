@@ -116,7 +116,8 @@ a box, a click pair); an object started on frame 8; a 10-frame clip with its len
 frames fed backwards against `reverse=True`; single- and three-mask image calls against
 `SAM2ImagePredictor`; and mozo end to end (`get_model` -> `tracker()` -> PixelFlow). **`tiny`: 706
 of 706 comparisons bit-identical** (torch 2.11.0+cpu, 4 threads, `MKL_CBWR=AVX2,STRICT`).
-OTHER_VARIANTS
+**`small`, `base_plus`, `large`: 2,118 of 2,118 bit-identical** (706 each; a second machine, torch
+2.13.0, 6 threads, `MKL_CBWR=AVX2,STRICT`).
 
 Falsified with six perturbations, each caught at its own stage: frames resized like the image
 predictor (pixels, 0.312); mask memories kept in float32 (memory attention, frame 1); pointer

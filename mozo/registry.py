@@ -127,6 +127,13 @@ DERIVES: dict[str, dict[str, str]] = {
     # (``seg-nano``) torch fp32 -- RF-DETR is launch-bound at batch 1. fp16 only where an fp16
     # graph is published (the detection variants), and only on request.
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # BiRefNet, measured on an RTX 3090 against DIS-VD (470 images) and P3M-500-NP (matting):
+    # ``torch-fp16`` (autocast, the authors' own CUDA path) and ``tensorrt-fp16`` leave MAE and
+    # S-measure unchanged at 1.4-1.8x and 2.2-3.9x torch fp32; ``tensorrt-fp32`` moves the matte
+    # by at most 2 grey levels at 1.2-1.3x. ``hr`` publishes no fp32 graph: its engine needs
+    # 12 GB of scratch and runs slower than ``torch-fp16``, so ``auto`` keeps it on torch.
+    "birefnet": {"torch-fp16": "torch-fp32", "tensorrt-fp32": "onnx-fp32",
+                 "tensorrt-fp16": "onnx-fp16"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -170,6 +177,23 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'calibrated sigmoid. MIT on both the code and the weights.'
         ),
         'variants': ['base'],
+    },
+
+    'birefnet': {
+        'adapter_class': 'BiRefNetPredictor',
+        'module': 'mozo.adapters.birefnet',
+        'task_type': 'image_matting',
+        'description': (
+            'BiRefNet by Peng Zheng et al. (Nankai University) — background removal and matting. '
+            'Hand it a photograph and it returns an alpha matte, and the cut-out made from it. '
+            '4 variants: general (the authors\' general-purpose model), lite (a Swin-T backbone, '
+            'about three times faster), matting (trained for soft alpha along hair and fur) and hr '
+            '(general retrained at 2048x2048 for large photographs). A Swin backbone run at two '
+            'scales and a decoder that looks at the image again, patch by patch, at every scale. '
+            'It takes no prompt and no box. The alpha is the network\'s own probability, not '
+            'stretched per image. MIT on both the code and the weights.'
+        ),
+        'variants': ['general', 'lite', 'matting', 'hr'],
     },
 
     'clip': {

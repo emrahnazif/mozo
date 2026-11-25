@@ -26,6 +26,141 @@
         }
       }
     },
+    "birefnet/general": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "birefnet/general/2026-11-25/LICENSE",
+              "sha256": "92a7089e0915fc32bc40067560b398f1e6a7a5958abd7d04eda393629a5acefb",
+              "size": 1066
+            },
+            "NOTICE": {
+              "path": "birefnet/general/2026-11-25/NOTICE",
+              "sha256": "457f1ab55fbfce6a38d7043048740c636719fb1c258b84704fd2400daddc3d3f",
+              "size": 1492
+            },
+            "onnx-fp16": {
+              "path": "birefnet/general/2026-11-25/onnx-fp16.onnx",
+              "sha256": "86bdf888d1836847380dea5b060d255e275a5bdceead89eec794400ac98e6f89",
+              "size": 464019443
+            },
+            "onnx-fp32": {
+              "path": "birefnet/general/2026-11-25/onnx-fp32.onnx",
+              "sha256": "4b87edd9e5dd1a12db994d890f72cbfbfe6c365ef745378883c45b0f1ea35741",
+              "size": 474936244
+            },
+            "torch-fp32": {
+              "path": "birefnet/general/2026-11-25/torch-fp32.pth",
+              "sha256": "cf80cc2241b336ed8838a8421d81684de0d41e0da4ba7c35830b040936a8ae85",
+              "size": 444621367
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    "birefnet/hr": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "birefnet/hr/2026-11-25/LICENSE",
+              "sha256": "92a7089e0915fc32bc40067560b398f1e6a7a5958abd7d04eda393629a5acefb",
+              "size": 1066
+            },
+            "NOTICE": {
+              "path": "birefnet/hr/2026-11-25/NOTICE",
+              "sha256": "46a7573575eac9fd15be19c8e09ce99a90e17c78d82130e2bb66711e09d9f5d5",
+              "size": 1492
+            },
+            "onnx-fp16": {
+              "path": "birefnet/hr/2026-11-25/onnx-fp16.onnx",
+              "sha256": "6ae1c0eebf43d797dd4139330ff0aa5591f83f4836bb3ec1847552aa724d7036",
+              "size": 464682938
+            },
+            "torch-fp32": {
+              "path": "birefnet/hr/2026-11-25/torch-fp32.pth",
+              "sha256": "3c23c062e8b263a3c40640b49b14959d4f6ee774919805471099bc8adfb2254f",
+              "size": 444621367
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    "birefnet/lite": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "birefnet/lite/2026-11-25/LICENSE",
+              "sha256": "92a7089e0915fc32bc40067560b398f1e6a7a5958abd7d04eda393629a5acefb",
+              "size": 1066
+            },
+            "NOTICE": {
+              "path": "birefnet/lite/2026-11-25/NOTICE",
+              "sha256": "e7a37c223d2e938801512dc4c45b9251d24c464d2646c4f3850260efbd07e35b",
+              "size": 1499
+            },
+            "onnx-fp16": {
+              "path": "birefnet/lite/2026-11-25/onnx-fp16.onnx",
+              "sha256": "84c30ba6bf17f2af0f4ec13b9ea28d9da64f603433548d65742bcc31ba634551",
+              "size": 109419980
+            },
+            "onnx-fp32": {
+              "path": "birefnet/lite/2026-11-25/onnx-fp32.onnx",
+              "sha256": "296ad7bf8f89616501dd6f00e4d6c8d3bf8c066b7655cd275fcfaa54acef4006",
+              "size": 187859024
+            },
+            "torch-fp32": {
+              "path": "birefnet/lite/2026-11-25/torch-fp32.pth",
+              "sha256": "6cee1e984dce738d62c713575ae92c7c870934513ed711e98ed054fd92b39edd",
+              "size": 177747983
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    "birefnet/matting": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "birefnet/matting/2026-11-25/LICENSE",
+              "sha256": "92a7089e0915fc32bc40067560b398f1e6a7a5958abd7d04eda393629a5acefb",
+              "size": 1066
+            },
+            "NOTICE": {
+              "path": "birefnet/matting/2026-11-25/NOTICE",
+              "sha256": "58a08cc37f558f460c23ac9c045ec63a93b46948f1036e47bcde5c4c29033cc5",
+              "size": 1504
+            },
+            "onnx-fp16": {
+              "path": "birefnet/matting/2026-11-25/onnx-fp16.onnx",
+              "sha256": "4395a8f46b287a2171c94da56a5728f9f13fbbab4e91b6051128ecac237bdb1d",
+              "size": 464019263
+            },
+            "onnx-fp32": {
+              "path": "birefnet/matting/2026-11-25/onnx-fp32.onnx",
+              "sha256": "7d42bf853173514c5c85fab831aade3dd5a3ac18bcaaa2eaebd5f220f7264476",
+              "size": 893164101
+            },
+            "torch-fp32": {
+              "path": "birefnet/matting/2026-11-25/torch-fp32.pth",
+              "sha256": "7b3622f629d3d0cc22ad2eb46c7121c4354e396465b65151ceca6d99d7acfdb6",
+              "size": 885022071
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
     "clip/base": {
       "latest": "2026-08-23",
       "revisions": {

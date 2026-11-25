@@ -271,6 +271,19 @@ def ben2(image: Image, models: Models, variant: variants("ben2") = "base",
     return models("ben2", variant).cutout(image, stretch=stretch, refine=refine)
 
 
+@node(category="Edit", exclusive=True)
+def birefnet(image: Image, models: Models, variant: variants("birefnet") = "general",
+             refine: bool = False) -> Image:
+    """BiRefNet -- cut the background away. Takes no prompt and no boxes.
+
+    Answers with a cut-out, as ``ben2`` does: the frame with the model's alpha in its fourth
+    channel. ``matting`` keeps soft edges along hair and fur; ``general``, ``lite`` and ``hr``
+    are trained to segment and give a nearly binary edge. ``refine`` re-estimates foreground
+    colour along soft edges so a composite does not carry a fringe of the old background.
+    """
+    return models("birefnet", variant).cutout(image, refine=refine)
+
+
 # --- Pose ------------------------------------------------------------------------------------------
 
 @node(category="Pose", exclusive=True)

@@ -1,14 +1,14 @@
-# mayaku_street_deploy
+# mayaku_deploy
 
-Deployment-only Mayaku street detection and instance segmentation, extracted from
-[`mayaku`](https://github.com/emrahnazif/mayaku) 3.1.1. Apache-2.0. Depends on torch, torchvision
+Deployment-only Mayaku detection and instance segmentation (so far: the street models),
+extracted from [`mayaku`](https://github.com/emrahnazif/mayaku) 3.1.1. Apache-2.0. Depends on torch, torchvision
 (for NMS), numpy and OpenCV; it does not import `mayaku`.
 
 ```python
-from mozo.vendors.mayaku_street_deploy import Detector
+from mozo.vendors.mayaku_deploy import Detector
 from mozo.image import load_image
 
-detector = Detector("mayaku-n-seg-street.pth", "seg-nano")      # device="cpu"
+detector = Detector("mayaku-n-seg-street.pth", "street-seg-nano")      # device="cpu"
 found = detector.predict(load_image("crossing.jpg"))             # conf defaults to 0.4
 
 found.boxes        # (n, 4) float32 x1, y1, x2, y2 in the source image's pixels
@@ -18,7 +18,7 @@ found.names        # (n,) the class name of each detection
 found.masks        # (n, h, w) bool for a seg- variant, else None
 ```
 
-Most users reach this through `mozo.adapters.mayaku_street`, which resolves the weights, picks the
+Most users reach this through `mozo.adapters.mayaku`, which resolves the weights, picks the
 runtime and returns a PixelFlow result.
 
 ## How it works
@@ -37,7 +37,9 @@ per-instance mask network (169 dynamic weights per detection, run over a stride-
 inside the detection's box). The torch module, an ONNX session and a TensorRT engine all plug into
 `forward`, so they share one pre- and post-processing path.
 
-Variants: `nano` / `medium` (boxes), `seg-nano` / `seg-medium` (boxes and masks; the same boxes).
+Variants (`SPECS`): `street-nano` / `street-medium` (boxes), `street-seg-nano` /
+`street-seg-medium` (boxes and masks; the same boxes). Another Mayaku checkpoint joins as another
+`Spec` in `SPECS` (and a new architecture as a `Tier` in `network.TIERS`).
 
 See `PROVENANCE.md` for what was taken from upstream, what was left behind and how the two are
 held equal.

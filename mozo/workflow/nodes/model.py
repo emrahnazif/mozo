@@ -109,10 +109,10 @@ def rfdetr(image: Image, models: Models, variant: variants("rfdetr") = "nano",
 
 
 @node(category="Detect", exclusive=True)
-def mayaku_street(image: Image, models: Models, variant: variants("mayaku_street") = "nano",
-                  threshold: float = 0.4) -> Detections:
-    """Mayaku street models -- road scenes, faces and licence plates included, masks on the seg variants."""
-    return models("mayaku_street", variant).predict(image, threshold=threshold)
+def mayaku(image: Image, models: Models, variant: variants("mayaku") = "street-nano",
+           threshold: float = 0.4) -> Detections:
+    """Mayaku: real-time detection; its street models find faces and licence plates in road scenes."""
+    return models("mayaku", variant).predict(image, threshold=threshold)
 
 
 @node(category="Detect", exclusive=True)

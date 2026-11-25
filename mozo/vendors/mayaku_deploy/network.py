@@ -2,7 +2,7 @@
 # Copyright 2026 the mayaku authors. Extracted from mayaku 3.1.1 (mayaku/model/{tiers,backbone,
 # neck,head,aux,detector}.py), reduced to the street models' inference path: no keypoints, no
 # oriented boxes, no "tower" auxiliary arm, no stride-8 mask path, no quantisation-aware training.
-"""The street detector: backbone, Feature Pyramid Grid neck, decoupled head, and the mask branch.
+"""The Mayaku detector: backbone, Feature Pyramid Grid neck, decoupled head, and the mask branch.
 
 ``forward`` returns upstream's flat list of raw maps, in its order: ``cls0, box0, cls1, box1, cls2,
 box2`` and, for a segmentation checkpoint, ``mask, ker0, ker1, ker2``. Nothing after the graph --
@@ -219,7 +219,7 @@ def output_names(seg: bool) -> list[str]:
     return names + (["mask"] + [f"ker{i}" for i in range(len(STRIDES))] if seg else [])
 
 
-class StreetNetwork(nn.Module):
+class MayakuNetwork(nn.Module):
     """The whole graph. Built in its trained form so the checkpoint loads strictly, then fused in
     place by :meth:`fuse`, after which it is the deploy graph upstream's ``for_deploy`` runs."""
 
@@ -246,9 +246,9 @@ class StreetNetwork(nn.Module):
         return fuse_tree(self.eval())
 
 
-#: State-dict keys present in every street checkpoint and read by nothing here: the int8 range
-#: observers of quantisation-aware training (``act_fq.mn`` / ``act_fq.mx`` on every convolution
-#: and residual add). The fp32 deploy graph never reads them -- upstream's ``strip_fake_quant``
+#: State-dict keys present in every quantisation-aware Mayaku checkpoint (all the street models)
+#: and read by nothing here: the int8 range observers of quantisation-aware training
+#: (``act_fq.mn`` / ``act_fq.mx`` on every convolution and residual add). The fp32 deploy graph never reads them -- upstream's ``strip_fake_quant``
 #: turns every observer off -- so they are dropped by name and everything else loads strictly.
 QAT_RANGE_SUFFIXES = (".act_fq.mn", ".act_fq.mx")
 
@@ -261,9 +261,9 @@ def read_checkpoint(path: str | os.PathLike) -> tuple[dict[str, torch.Tensor], d
     return obj["model"], obj["mayaku"]
 
 
-def build_network(state: dict[str, torch.Tensor], cfg: Tier, nc: int, seg: bool) -> StreetNetwork:
+def build_network(state: dict[str, torch.Tensor], cfg: Tier, nc: int, seg: bool) -> MayakuNetwork:
     """Build, load strictly (the QAT range buffers dropped by name), and fuse."""
-    network = StreetNetwork(cfg, nc, seg)
+    network = MayakuNetwork(cfg, nc, seg)
     weights = {k: v for k, v in state.items() if not k.endswith(QAT_RANGE_SUFFIXES)}
     network.load_state_dict(weights, strict=True)
     return network.fuse()

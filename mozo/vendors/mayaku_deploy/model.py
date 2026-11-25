@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The public detector: load a street checkpoint, run an image, get boxes (and masks) back in the
+"""The public detector: load a Mayaku checkpoint, run an image, get boxes (and masks) back in the
 image's own pixels."""
 
 from __future__ import annotations
@@ -43,12 +43,15 @@ class Spec:
         return TIERS[self.tier]
 
 
-#: mozo's variant names -> what each publishes.
+#: mozo's variant names -> what each publishes. Every variant is one Mayaku checkpoint; the street
+#: models are the first. Another Mayaku checkpoint of a tier in :data:`~.network.TIERS` (a COCO
+#: base model, say) joins as another entry here with its own class count and canvas; a new tier
+#: joins ``TIERS`` first.
 SPECS: dict[str, Spec] = {
-    "nano": Spec("n", seg=False),
-    "medium": Spec("m", seg=False),
-    "seg-nano": Spec("n", seg=True),
-    "seg-medium": Spec("m", seg=True),
+    "street-nano": Spec("n", seg=False),
+    "street-medium": Spec("m", seg=False),
+    "street-seg-nano": Spec("n", seg=True),
+    "street-seg-medium": Spec("m", seg=True),
 }
 
 
@@ -56,7 +59,7 @@ def get_spec(variant: str) -> Spec:
     try:
         return SPECS[variant]
     except KeyError:
-        raise ValueError(f"unknown street variant {variant!r}; known: {list(SPECS)}") from None
+        raise ValueError(f"unknown Mayaku variant {variant!r}; known: {list(SPECS)}") from None
 
 
 def check_sidecar(sidecar: dict[str, Any], spec: Spec, source: str) -> None:
@@ -95,7 +98,7 @@ def check_sidecar(sidecar: dict[str, Any], spec: Spec, source: str) -> None:
                     (cfg.mask_stride, MASK_CH, COORD_SCALE, KERNEL_LAYOUT) if spec.seg else None)
     wrong = {k: v for k, (v, expected) in want.items() if v != expected}
     if wrong:
-        raise ValueError(f"{source} is not the street checkpoint this variant expects: {wrong}")
+        raise ValueError(f"{source} is not the Mayaku checkpoint this variant expects: {wrong}")
 
 
 def detect(
@@ -152,11 +155,11 @@ class Detections:
 
 
 class Detector:
-    """A street checkpoint loaded, fused and ready.
+    """A Mayaku checkpoint loaded, fused and ready.
 
     Args:
-        checkpoint: A Mayaku street ``.pth``.
-        variant: Which variant it is (``nano``, ``medium``, ``seg-nano``, ``seg-medium``); the
+        checkpoint: A Mayaku ``.pth``.
+        variant: Which variant it is, a key of :data:`SPECS` (``street-nano``, ...); the
             checkpoint must agree.
         device: Where the graph runs.
 
@@ -165,7 +168,7 @@ class Detector:
         spec: The variant's :class:`Spec`.
     """
 
-    def __init__(self, checkpoint: str | os.PathLike, variant: str = "nano",
+    def __init__(self, checkpoint: str | os.PathLike, variant: str = "street-nano",
                  device: str | torch.device = "cpu") -> None:
         self.spec = get_spec(variant)
         state, sidecar = read_checkpoint(checkpoint)

@@ -601,38 +601,38 @@
         }
       }
     },
-    "mayaku_street/medium": {
+    "mayaku/street-medium": {
       "latest": "2026-11-24",
       "revisions": {
         "2026-11-24": {
           "artifacts": {
             "LICENSE": {
-              "path": "mayaku_street/medium/2026-11-24/LICENSE",
+              "path": "mayaku/street-medium/2026-11-24/LICENSE",
               "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
               "size": 11358
             },
             "NOTICE": {
-              "path": "mayaku_street/medium/2026-11-24/NOTICE",
-              "sha256": "fc17f4cc68af63572a08ebd1e6d639d3b8799b1f86a2bca6e4a5bf0ab5a07503",
+              "path": "mayaku/street-medium/2026-11-24/NOTICE",
+              "sha256": "4dc258788f39fb9829e5904dcc2107b6a2a4e4bbfcf983c7c6d2e1da6e327102",
               "size": 1342
             },
             "labels": {
-              "path": "mayaku_street/medium/2026-11-24/labels.json",
+              "path": "mayaku/street-medium/2026-11-24/labels.json",
               "sha256": "5cb3284cc107cf8640d3cb16ea821f355ada3e8d87d31a4fbc64ed1d09c82b3b",
               "size": 715
             },
             "onnx-fp16": {
-              "path": "mayaku_street/medium/2026-11-24/onnx-fp16.onnx",
+              "path": "mayaku/street-medium/2026-11-24/onnx-fp16.onnx",
               "sha256": "7607b86c58326de759d4122daf605dbee9c3ffd8c0c109f561224a0319940043",
               "size": 64811142
             },
             "onnx-fp32": {
-              "path": "mayaku_street/medium/2026-11-24/onnx-fp32.onnx",
+              "path": "mayaku/street-medium/2026-11-24/onnx-fp32.onnx",
               "sha256": "9d5de02f9ef0e588c60b4f926a564980c598a201ef8c8713782aaea141e35fb9",
               "size": 129553126
             },
             "torch-fp32": {
-              "path": "mayaku_street/medium/2026-11-24/torch-fp32.pth",
+              "path": "mayaku/street-medium/2026-11-24/torch-fp32.pth",
               "sha256": "d8154930fee7dc3fa675a60430d6065f64ea757a6d66e2e8bec8d888dbf14cd6",
               "size": 137716005
             }
@@ -641,38 +641,38 @@
         }
       }
     },
-    "mayaku_street/nano": {
+    "mayaku/street-nano": {
       "latest": "2026-11-24",
       "revisions": {
         "2026-11-24": {
           "artifacts": {
             "LICENSE": {
-              "path": "mayaku_street/nano/2026-11-24/LICENSE",
+              "path": "mayaku/street-nano/2026-11-24/LICENSE",
               "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
               "size": 11358
             },
             "NOTICE": {
-              "path": "mayaku_street/nano/2026-11-24/NOTICE",
-              "sha256": "7c15ee2ed54ac137d2bf4df9cb13ff2f8ee330ea492a338f978f8901ada43d32",
+              "path": "mayaku/street-nano/2026-11-24/NOTICE",
+              "sha256": "8661611958a80c848b031a8d73bee06b996015b6145f2ed33ac4ae76d2694b5b",
               "size": 1340
             },
             "labels": {
-              "path": "mayaku_street/nano/2026-11-24/labels.json",
+              "path": "mayaku/street-nano/2026-11-24/labels.json",
               "sha256": "5cb3284cc107cf8640d3cb16ea821f355ada3e8d87d31a4fbc64ed1d09c82b3b",
               "size": 715
             },
             "onnx-fp16": {
-              "path": "mayaku_street/nano/2026-11-24/onnx-fp16.onnx",
+              "path": "mayaku/street-nano/2026-11-24/onnx-fp16.onnx",
               "sha256": "98cb94b22719b7956d6783e94f87bebe54fae778459fec3baddfed5458903be4",
               "size": 10405259
             },
             "onnx-fp32": {
-              "path": "mayaku_street/nano/2026-11-24/onnx-fp32.onnx",
+              "path": "mayaku/street-nano/2026-11-24/onnx-fp32.onnx",
               "sha256": "3bb06570151180f3e4a70b7ac94ec205db65d4d8c8ee14daa416c8d8a07c3fb9",
               "size": 20746547
             },
             "torch-fp32": {
-              "path": "mayaku_street/nano/2026-11-24/torch-fp32.pth",
+              "path": "mayaku/street-nano/2026-11-24/torch-fp32.pth",
               "sha256": "87349e38e049be8117c2e854e3a1352948b1f6a679d8fc88adc37eef16f6f289",
               "size": 22405191
             }
@@ -681,38 +681,38 @@
         }
       }
     },
-    "mayaku_street/seg-medium": {
+    "mayaku/street-seg-medium": {
       "latest": "2026-11-24",
       "revisions": {
         "2026-11-24": {
           "artifacts": {
             "LICENSE": {
-              "path": "mayaku_street/seg-medium/2026-11-24/LICENSE",
+              "path": "mayaku/street-seg-medium/2026-11-24/LICENSE",
               "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
               "size": 11358
             },
             "NOTICE": {
-              "path": "mayaku_street/seg-medium/2026-11-24/NOTICE",
-              "sha256": "00dd06a649b8c1e01ab141d15f59547329f4aaae8bb3c9ea309ebcf14c59b76f",
+              "path": "mayaku/street-seg-medium/2026-11-24/NOTICE",
+              "sha256": "82f3be0a38a9df4db84604a714fb5b0e574b28e939b78c1dd9997fef58c19544",
               "size": 1346
             },
             "labels": {
-              "path": "mayaku_street/seg-medium/2026-11-24/labels.json",
+              "path": "mayaku/street-seg-medium/2026-11-24/labels.json",
               "sha256": "5cb3284cc107cf8640d3cb16ea821f355ada3e8d87d31a4fbc64ed1d09c82b3b",
               "size": 715
             },
             "onnx-fp16": {
-              "path": "mayaku_street/seg-medium/2026-11-24/onnx-fp16.onnx",
+              "path": "mayaku/street-seg-medium/2026-11-24/onnx-fp16.onnx",
               "sha256": "7968d9c29f6e91627417e5d5af3dfeffffed3e9d89e83f1b138bea3050a8dffc",
               "size": 65354053
             },
             "onnx-fp32": {
-              "path": "mayaku_street/seg-medium/2026-11-24/onnx-fp32.onnx",
+              "path": "mayaku/street-seg-medium/2026-11-24/onnx-fp32.onnx",
               "sha256": "b6104436af8a348cb1373c0edb0d8d6bd870490b95353e043b4887f3c18fa2df",
               "size": 130634123
             },
             "torch-fp32": {
-              "path": "mayaku_street/seg-medium/2026-11-24/torch-fp32.pth",
+              "path": "mayaku/street-seg-medium/2026-11-24/torch-fp32.pth",
               "sha256": "700860e6a818a71de1636869f6ad411f3c60b88b4a671df3b0a089bd783ffac3",
               "size": 138813259
             }
@@ -721,38 +721,38 @@
         }
       }
     },
-    "mayaku_street/seg-nano": {
+    "mayaku/street-seg-nano": {
       "latest": "2026-11-24",
       "revisions": {
         "2026-11-24": {
           "artifacts": {
             "LICENSE": {
-              "path": "mayaku_street/seg-nano/2026-11-24/LICENSE",
+              "path": "mayaku/street-seg-nano/2026-11-24/LICENSE",
               "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
               "size": 11358
             },
             "NOTICE": {
-              "path": "mayaku_street/seg-nano/2026-11-24/NOTICE",
-              "sha256": "508cda1e0f96b0fbdc7b5ff30964cd46ac4161fbde6c14a941e4821527f783ce",
+              "path": "mayaku/street-seg-nano/2026-11-24/NOTICE",
+              "sha256": "71f50e8eec370675774afade456dd73ff685cb2796e40ad4a150d90d0899031b",
               "size": 1344
             },
             "labels": {
-              "path": "mayaku_street/seg-nano/2026-11-24/labels.json",
+              "path": "mayaku/street-seg-nano/2026-11-24/labels.json",
               "sha256": "5cb3284cc107cf8640d3cb16ea821f355ada3e8d87d31a4fbc64ed1d09c82b3b",
               "size": 715
             },
             "onnx-fp16": {
-              "path": "mayaku_street/seg-nano/2026-11-24/onnx-fp16.onnx",
+              "path": "mayaku/street-seg-nano/2026-11-24/onnx-fp16.onnx",
               "sha256": "5ccd6c7b91abfb5d0dc98cc127cde3ffcd72df43786429590c7c59433760af4a",
               "size": 10620570
             },
             "onnx-fp32": {
-              "path": "mayaku_street/seg-nano/2026-11-24/onnx-fp32.onnx",
+              "path": "mayaku/street-seg-nano/2026-11-24/onnx-fp32.onnx",
               "sha256": "4ccc0ae4a3fea1440be5838232ada2ba2672f4c82cbc17eb45bc66e42e0b5de2",
               "size": 21172372
             },
             "torch-fp32": {
-              "path": "mayaku_street/seg-nano/2026-11-24/torch-fp32.pth",
+              "path": "mayaku/street-seg-nano/2026-11-24/torch-fp32.pth",
               "sha256": "e79fedd195d1213a7ded66616afd3c370f0f3c3be8445733812e262cf3df447c",
               "size": 22847277
             }

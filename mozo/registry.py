@@ -130,8 +130,8 @@ DERIVES: dict[str, dict[str, str]] = {
     # The same shape as RF-DETR's, measured the same way (RTX 3090, 500 street-validation images
     # per variant): the fp32 engine changed no detection and left box and mask AP identical, at
     # 1.4-1.9x torch's forward pass; fp16 changed none either, moving AP by at most 0.1, and is
-    # offered on request only. See docs/models/mayaku-street.md.
-    "mayaku_street": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # offered on request only. See docs/models/mayaku.md.
+    "mayaku": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -150,7 +150,7 @@ NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
     **{family: {"onnx": ("labels",), "coreml": ("labels",)}
        for family in ("yolov8", "yolov11", "yolov12", "yolov26")},
     "rfdetr": {"*": ("labels",)},
-    "mayaku_street": {"onnx": ("labels",), "tensorrt": ("labels",)},
+    "mayaku": {"onnx": ("labels",), "tensorrt": ("labels",)},
     "vitpose": {"*": ("labels",)},
     "sam3": {"onnx": ("torch-fp32",), "coreml": ("torch-fp32",)},
     "owlv2": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
@@ -271,23 +271,23 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         'variants': ['tiny', 'base'],
     },
 
-    'mayaku_street': {
-        'adapter_class': 'MayakuStreetPredictor',
-        'module': 'mozo.adapters.mayaku_street',
+    'mayaku': {
+        'adapter_class': 'MayakuPredictor',
+        'module': 'mozo.adapters.mayaku',
         'task_type': 'object_detection',
         'description': (
-            'Mayaku street models — detection and instance segmentation of road '
-            'scenes, from dashcam to drone and straight-down aerial views, used as they are with '
+            'Mayaku — real-time detection and instance segmentation, a five-op convolutional '
+            'graph. Its published models are its variants; the first are the street models: road '
+            'scenes from dashcam to drone and straight-down aerial views, used as they are with '
             'no training. 22 classes: person, face, helmet, bicycle, e-scooter, motorcycle, '
             'wheelchair, stroller, car, truck, bus, emergency vehicle, train, three-wheeler, '
             'construction vehicle, trailer, license plate, traffic light, safety sign, stop sign, '
             'traffic cone, animal. Faces and license plates are there so footage can be blurred '
-            'before it is stored or shared. 4 variants: nano and medium for boxes, seg-nano and '
-            'seg-medium for boxes and masks (the same boxes). A pure convolutional graph, five op '
-            'types. Code and weights are both Apache-2.0; the training labels were made with '
-            'SAM 3.'
+            'before it is stored or shared. 4 variants: street-nano and street-medium for boxes, '
+            'street-seg-nano and street-seg-medium for boxes and masks (the same boxes). Code and '
+            'weights are both Apache-2.0; the street training labels were made with SAM 3.'
         ),
-        'variants': ['nano', 'medium', 'seg-nano', 'seg-medium'],
+        'variants': ['street-nano', 'street-medium', 'street-seg-nano', 'street-seg-medium'],
     },
 
     'moebius': {

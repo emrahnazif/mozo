@@ -1,6 +1,6 @@
-"""Mayaku street detection and instance segmentation, on whichever runtime the host can execute.
+"""Mayaku detection and instance segmentation, on whichever runtime the host can execute.
 
-The architecture lives in :mod:`mozo.vendors.mayaku_street_deploy`, extracted from ``mayaku`` 3.1.1.
+The architecture lives in :mod:`mozo.vendors.mayaku_deploy`, extracted from ``mayaku`` 3.1.1.
 The weights are the publisher's own checkpoints, from :func:`mozo.weights.resolve`. Which of them
 runs the forward pass depends on what mozo publishes for the variant and what the machine can
 execute -- the torch module, or the same graph as ONNX or a TensorRT engine built from it.
@@ -9,14 +9,15 @@ Only the forward pass changes between runtimes. The letterbox, the prediction de
 top-k, class-wise NMS) and the per-instance mask network are the vendor's on every path, run on the
 CPU, so the answer cannot depend on which runtime produced the raw maps.
 
-22 classes of road scenes -- people, faces, helmets, bicycles, e-scooters, cars, trucks, buses,
-licence plates, traffic lights and signs, animals -- from street level to drone views. **face** and
-**license plate** are there so footage can be blurred before it is stored or shared. The ``seg-``
-variants add a mask per detection; their boxes are the detection variants' boxes.
+Each published Mayaku checkpoint is a variant of this one family. The street models
+(``street-*``) find 22 classes of road scenes -- people, faces, helmets, bicycles, e-scooters,
+cars, trucks, buses, licence plates, traffic lights and signs, animals -- from street level to drone
+views; **face** and **license plate** are there so footage can be blurred before it is stored or
+shared. A ``-seg-`` variant adds a mask per detection to the boxes of its detection variant.
 
-    >>> model = MayakuStreetPredictor("nano")                     # doctest: +SKIP
-    >>> model = MayakuStreetPredictor("seg-medium")               # boxes and masks  # doctest: +SKIP
-    >>> detections = model.predict(image, threshold=0.4)          # doctest: +SKIP
+    >>> model = MayakuPredictor("street-nano")              # doctest: +SKIP
+    >>> model = MayakuPredictor("street-seg-medium")        # boxes and masks  # doctest: +SKIP
+    >>> detections = model.predict(image, threshold=0.4)       # doctest: +SKIP
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from .. import registry
 from ..image import load_image
 from ..labels import resolve as labels_for
 from ..runtimes import TensorRTRunner, get_default_device, make_runner, select_runtime
-from ..vendors.mayaku_street_deploy import SPECS, Detector, detect, get_spec, output_names
+from ..vendors.mayaku_deploy import SPECS, Detector, detect, get_spec, output_names
 from ..weights import artifacts, framework_of, parts, resolve
 
 try:
@@ -41,15 +42,15 @@ except ImportError:  # pragma: no cover - depends on the install
 
 _log = logging.getLogger(__name__)
 
-FAMILY = "mayaku_street"
+FAMILY = "mayaku"
 
 
-class MayakuStreetPredictor:
-    """One loaded Mayaku street variant, ready to run.
+class MayakuPredictor:
+    """One loaded Mayaku variant, ready to run.
 
     Args:
-        variant: ``nano`` or ``medium`` for boxes; ``seg-nano`` or ``seg-medium`` for boxes and
-            masks.
+        variant: One of ``VARIANTS`` (the vendor's ``SPECS``), e.g. ``street-nano`` for boxes or
+            ``street-seg-nano`` for boxes and masks.
         device: Where to run. Defaults to the best device this machine has.
         runtime: Which published artifact to execute, e.g. ``"torch-fp32"`` or ``"onnx-fp32"``.
             ``"auto"`` takes the best one published for the device.
@@ -65,7 +66,7 @@ class MayakuStreetPredictor:
 
     def __init__(
         self,
-        variant: str = "nano",
+        variant: str = "street-nano",
         device: str | None = None,
         *,
         runtime: str = "auto",
@@ -98,9 +99,10 @@ class MayakuStreetPredictor:
             self._runner = make_runner(resolve(FAMILY, variant, self.runtime, revision=revision),
                                        self.runtime, device=self.device)
         # A graph carries no vocabulary, so those runtimes read the published labels.
-        self._labels = labels_for(FAMILY, variant, caller=labels, checkpoint=self._detector.names if self._detector else None,
+        names = self._detector.names if self._detector else None
+        self._labels = labels_for(FAMILY, variant, caller=labels, checkpoint=names,
                                   revision=revision, published=True)
-        _log.info("Mayaku street %s ready on %s via %s.", variant, self.device, self.runtime)
+        _log.info("Mayaku %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def _forward(self, batch: torch.Tensor) -> list[torch.Tensor]:
         """Run the letterboxed batch through whichever runtime is loaded, returning the raw maps
@@ -121,7 +123,7 @@ class MayakuStreetPredictor:
         threshold: float = 0.4,
         labels: list[str] | None = None,
     ) -> Any:
-        """Detect road-scene objects in *image*.
+        """Detect objects in *image*.
 
         Args:
             image: A file path, encoded bytes, or an ``HWC`` RGB array.

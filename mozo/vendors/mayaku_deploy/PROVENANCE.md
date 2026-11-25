@@ -1,6 +1,7 @@
 # Provenance
 
-A deployment-only extraction of the street models' inference path from
+A deployment-only extraction of Mayaku's inference path, for its published checkpoints (so far the
+street models), from
 [Mayaku](https://github.com/emrahnazif/mayaku).
 
 | | |
@@ -8,7 +9,7 @@ A deployment-only extraction of the street models' inference path from
 | Reference | `mayaku==3.1.1` from PyPI (tag `v3.1.1`, commit `5c9ecf16da85`) |
 | Extracted | 2026-11-24 |
 | Verified against | `mayaku` 3.1.1, `torch` 2.13.0+cu130, `torchvision` 0.28.0, Python 3.12, CPU |
-| Gate | `tools/verify/mayaku_street.py` |
+| Gate | `tools/verify/mayaku.py` |
 
 **Why 3.1.1.** The checkpoints were written by Mayaku 3.0.0 and, by the 3.1.1 changelog, "download
 by name in every 3.x version". 3.1.0 is the first release with the prediction decode (a score
@@ -23,10 +24,10 @@ link to. The same bytes (same sha256) are served by Mayaku's own manifest,
 
 | mozo variant | upstream name | bytes | sha256 |
 |---|---|---|---|
-| `nano` | `mayaku-n-det-street` | 22,405,191 | `87349e38e049be8117c2e854e3a1352948b1f6a679d8fc88adc37eef16f6f289` |
-| `medium` | `mayaku-m-det-street` | 137,716,005 | `d8154930fee7dc3fa675a60430d6065f64ea757a6d66e2e8bec8d888dbf14cd6` |
-| `seg-nano` | `mayaku-n-seg-street` | 22,847,277 | `e79fedd195d1213a7ded66616afd3c370f0f3c3be8445733812e262cf3df447c` |
-| `seg-medium` | `mayaku-m-seg-street` | 138,813,259 | `700860e6a818a71de1636869f6ad411f3c60b88b4a671df3b0a089bd783ffac3` |
+| `street-nano` | `mayaku-n-det-street` | 22,405,191 | `87349e38e049be8117c2e854e3a1352948b1f6a679d8fc88adc37eef16f6f289` |
+| `street-medium` | `mayaku-m-det-street` | 137,716,005 | `d8154930fee7dc3fa675a60430d6065f64ea757a6d66e2e8bec8d888dbf14cd6` |
+| `street-seg-nano` | `mayaku-n-seg-street` | 22,847,277 | `e79fedd195d1213a7ded66616afd3c370f0f3c3be8445733812e262cf3df447c` |
+| `street-seg-medium` | `mayaku-m-seg-street` | 138,813,259 | `700860e6a818a71de1636869f6ad411f3c60b88b4a671df3b0a089bd783ffac3` |
 
 Each holds `{"model": state_dict, "mayaku": sidecar}`; the sidecar is JSON, so the file loads with
 `weights_only=True`. A det checkpoint is its seg checkpoint without the 64 `aux.*` keys: every
@@ -93,7 +94,7 @@ the `tower` aux arm, export, the CLI, the download client, and the dependencies 
 
 ## Parity
 
-`tools/verify/mayaku_street.py`, 2026-11-25, `mayaku` 3.1.1 on torch 2.13.0+cu130, CPU: all four
+`tools/verify/mayaku.py`, 2026-11-25, `mayaku` 3.1.1 on torch 2.13.0+cu130, CPU: all four
 variants, 23 images (the fixture photograph, 16 street-validation images across all six sources,
 and six constructed cases: an empty grey frame, a tiny image, extreme wide and tall crops, an
 image already 800x800, noise at an odd size), at thresholds 0.4 and 0.05. 184 runs, 8,002
@@ -103,7 +104,7 @@ decoded detections in canvas pixels, boxes, scores, class ids and masks. mozo's 
 themselves were also compared, all 250-286 tensors equal.
 
 **The gate fails when it should**, at the stage each change reaches and no earlier
-(`--falsify all`, seg-nano): padding 114 -> 115 fails at the canvas; multiplying by 1/255 instead
+(`--falsify all`, street-seg-nano): padding 114 -> 115 fails at the canvas; multiplying by 1/255 instead
 of dividing fails at the input tensor; a BatchNorm epsilon x1.001 in the RepVGG fusion fails at
 the raw maps; NMS IoU 0.5 -> 0.51 fails at the decoded detections; the mask coordinate scale
 8 -> 8.0001 fails at the masks only.
@@ -129,10 +130,10 @@ validation images per variant, against torch fp32 on the CPU (graph only, median
 
 | variant | torch CPU | ORT CPU | torch CUDA | ORT CUDA | TRT fp32 | TRT fp16 |
 |---|---|---|---|---|---|---|
-| nano | 66 ms | 29 ms | 7.9 ms | 5.3 ms | 4.2 ms | 2.8 ms |
-| medium | 199 ms | 104 ms | 14.2 ms | 12.9 ms | 10.0 ms | 4.2 ms |
-| seg-nano | 72 ms | 32 ms | 9.6 ms | 6.8 ms | 5.9 ms | 3.8 ms |
-| seg-medium | 206 ms | 103 ms | 16.0 ms | 14.7 ms | 11.7 ms | 5.2 ms |
+| street-nano | 66 ms | 29 ms | 7.9 ms | 5.3 ms | 4.2 ms | 2.8 ms |
+| street-medium | 199 ms | 104 ms | 14.2 ms | 12.9 ms | 10.0 ms | 4.2 ms |
+| street-seg-nano | 72 ms | 32 ms | 9.6 ms | 6.8 ms | 5.9 ms | 3.8 ms |
+| street-seg-medium | 206 ms | 103 ms | 16.0 ms | 14.7 ms | 11.7 ms | 5.2 ms |
 
 No runtime changed a confident detection (above 0.52 one side, no same-class IoU>0.5 partner above
 0.5 the other). Box / mask AP on those images at threshold 0.05: torch, ORT CPU and TRT fp32

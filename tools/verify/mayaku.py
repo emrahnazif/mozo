@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Check the vendored Mayaku street models against ``mayaku`` itself, stage by stage, and mozo
+"""Check the vendored Mayaku models against ``mayaku`` itself, stage by stage, and mozo
 against the vendor.
 
-    python tools/verify/mayaku_street.py                         # every variant, the fixtures
-    python tools/verify/mayaku_street.py --variant seg-nano photo.jpg other.jpg
-    python tools/verify/mayaku_street.py --falsify all           # prove the gate can fail
-    python tools/verify/mayaku_street.py --no-reference          # vendor vs mozo only
+    python tools/verify/mayaku.py                         # every variant, the fixtures
+    python tools/verify/mayaku.py --variant street-seg-nano photo.jpg other.jpg
+    python tools/verify/mayaku.py --falsify all           # prove the gate can fail
+    python tools/verify/mayaku.py --no-reference          # vendor vs mozo only
 
 Three paths over the same weights and the same decoded pixels:
 
 1. **upstream**, ``mayaku`` 3.1.1: ``Predictor.from_checkpoint`` (which builds the trained model,
    loads it strictly and fuses it with ``for_deploy``) called with the BGR image and ``conf=``;
-2. **the vendor**, ``mozo.vendors.mayaku_street_deploy``, called with the RGB image;
+2. **the vendor**, ``mozo.vendors.mayaku_deploy``, called with the RGB image;
 3. **mozo**, ``ModelManager().get_model(...)`` with ``runtime="torch-fp32"``: registry, weights,
    adapter, PixelFlow.
 
@@ -43,6 +43,8 @@ import numpy as np
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+# This file is called mayaku.py, so its own directory would shadow the reference package it checks.
+sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != Path(__file__).resolve().parent]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "tools"))
@@ -52,12 +54,12 @@ import mozo  # noqa: E402
 from common import fixtures  # noqa: E402
 from conftest import as_pixelflow_reports  # noqa: E402
 from mozo.image import load_image  # noqa: E402
-from mozo.vendors.mayaku_street_deploy import SPECS, Detector, detect, decode as vdecode  # noqa: E402
-from mozo.vendors.mayaku_street_deploy import image as vimage, mask as vmask  # noqa: E402
-from mozo.vendors.mayaku_street_deploy import blocks as vblocks  # noqa: E402
+from mozo.vendors.mayaku_deploy import SPECS, Detector, detect, decode as vdecode  # noqa: E402
+from mozo.vendors.mayaku_deploy import image as vimage, mask as vmask  # noqa: E402
+from mozo.vendors.mayaku_deploy import blocks as vblocks  # noqa: E402
 from mozo.weights import resolve  # noqa: E402
 
-FAMILY = "mayaku_street"
+FAMILY = "mayaku"
 VARIANTS = tuple(SPECS)
 #: The checkpoint's own threshold, and a low one where marginal detections are compared too.
 THRESHOLDS = (0.4, 0.05)
@@ -170,7 +172,7 @@ def main() -> int:
 
         failed = []
         for name in FALSIFY:
-            extra = [f"--variant={v}" for v in (args.variant or ["seg-nano"])]
+            extra = [f"--variant={v}" for v in (args.variant or ["street-seg-nano"])]
             done = subprocess.run([sys.executable, __file__, "--falsify", name, *extra,
                                    *map(str, args.images)], capture_output=True, text=True)
             verdict = done.stdout.strip().splitlines()[-1] if done.stdout.strip() else done.stderr
@@ -215,7 +217,7 @@ def main() -> int:
                 compared += len(vendor["scores"])
                 if failed:
                     first_failures.add(failed[0])
-                print(f"  {'FAIL' if failed else 'ok':<4} {variant:<10} conf {conf:<4} {name:<18} "
+                print(f"  {'FAIL' if failed else 'ok':<4} {variant:<{max(map(len, VARIANTS))}} conf {conf:<4} {name:<18} "
                       f"{len(vendor['scores']):>4} detections"
                       + (f"   differs at: {', '.join(failed)}" if failed else ""))
     if args.falsify:

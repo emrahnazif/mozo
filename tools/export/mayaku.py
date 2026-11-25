@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Export Mayaku street checkpoints to the ONNX graphs mozo publishes, checked before they are written.
+"""Export Mayaku checkpoints to the ONNX graphs mozo publishes, checked before they are written.
 
-    python tools/export/mayaku_street.py nano seg-nano medium seg-medium
-    python tools/export/mayaku_street.py nano medium --fp16      # the fp16 graph, on CUDA
+    python tools/export/mayaku.py street-nano street-seg-nano street-medium street-seg-medium
+    python tools/export/mayaku.py street-nano street-medium --fp16      # the fp16 graph, on CUDA
 
 Bootstrap tooling; never ships. ``onnx-fp32`` is the fused deploy graph at the street models' one
 canvas, ``1x3x800x800``, opset 17, outputs named as upstream names them (``cls0, box0, ... ker2``).
@@ -40,12 +40,12 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from common import fixtures, variant_parser  # noqa: E402
-from tools.fetch.mayaku_street import REVISION  # noqa: E402
+from tools.fetch.mayaku import REVISION  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import OnnxRunner  # noqa: E402
-from mozo.vendors.mayaku_street_deploy import Detector, detect, output_names  # noqa: E402
+from mozo.vendors.mayaku_deploy import Detector, detect, output_names  # noqa: E402
 
-FAMILY = "mayaku_street"
+FAMILY = "mayaku"
 OPSET, FP16_OPSET = 17, 18   # opset 17's TorchScript path cannot export autocast's casts
 DEPLOY_OPS = {"Conv", "Relu", "Add", "Resize", "MaxPool"}
 SCAFFOLDING = {"Constant", "Cast"}   # Resize's scales, and autocast's casts in the fp16 graph

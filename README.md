@@ -45,7 +45,7 @@ A box, a class and a confidence for each object.
 | Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
 | [RF-DETR](docs/models/rfdetr.md) | nano → large | Apache-2.0 | torch, onnx, coreml; tensorrt on CUDA |
-| [Mayaku street](docs/models/mayaku-street.md) | nano, medium | Apache-2.0 | torch, onnx; tensorrt on CUDA |
+| [Mayaku](docs/models/mayaku.md) | street-nano, street-medium | Apache-2.0 | torch, onnx; tensorrt on CUDA |
 | [YOLOv8](docs/models/yolov8.md) | nano → xlarge | AGPL-3.0 | torch, onnx, coreml |
 | [YOLO11](docs/models/yolov11.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
 | [YOLO12](docs/models/yolov12.md) | nano → xlarge | AGPL-3.0 | torch, onnx, coreml |
@@ -59,7 +59,7 @@ masks.
 | Model | Sizes | Licence | Runtimes |
 |---|---|---|---|
 | [RF-DETR](docs/models/rfdetr.md) | nano → large | Apache-2.0 | torch, onnx, coreml; tensorrt on CUDA |
-| [Mayaku street](docs/models/mayaku-street.md) | nano, medium | Apache-2.0 | torch, onnx; tensorrt on CUDA |
+| [Mayaku](docs/models/mayaku.md) | street-seg-nano, street-seg-medium | Apache-2.0 | torch, onnx; tensorrt on CUDA |
 | [YOLO11](docs/models/yolov11.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
 | [YOLO26](docs/models/yolov26.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
 
@@ -367,7 +367,7 @@ Complying with either is the operator's responsibility. `MOZO_ENABLE` is how an 
 to take it on — a server that never offers a model never fetches or serves its weights:
 
 ```bash
-MOZO_ENABLE=ben2,clip,easyocr,edgetam,granite_embedding_r2,grounding_dino,mayaku_street,moebius,\
+MOZO_ENABLE=ben2,clip,easyocr,edgetam,granite_embedding_r2,grounding_dino,mayaku,moebius,\
 owlv2,rfdetr,sam2,siglip2,vitpose,depth_anything_v2/small,depth_anything_v2/indoor-small,\
 depth_anything_v2/indoor-base,\
 depth_anything_v2/indoor-large,depth_anything_v2/outdoor-small,\

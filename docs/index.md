@@ -86,8 +86,8 @@ size and runtimes. Each family has its own page with examples, parameters and ho
 
 | Task | Families |
 |---|---|
-| Object detection | [RF-DETR](/docs/models/rfdetr.md), [Mayaku street](/docs/models/mayaku-street.md), [YOLOv8](/docs/models/yolov8.md), [YOLO11](/docs/models/yolov11.md), [YOLO12](/docs/models/yolov12.md), [YOLO26](/docs/models/yolov26.md) |
-| Instance segmentation | [RF-DETR](/docs/models/rfdetr.md), [Mayaku street](/docs/models/mayaku-street.md), [YOLO11](/docs/models/yolov11.md), [YOLO26](/docs/models/yolov26.md) |
+| Object detection | [RF-DETR](/docs/models/rfdetr.md), [Mayaku](/docs/models/mayaku.md), [YOLOv8](/docs/models/yolov8.md), [YOLO11](/docs/models/yolov11.md), [YOLO12](/docs/models/yolov12.md), [YOLO26](/docs/models/yolov26.md) |
+| Instance segmentation | [RF-DETR](/docs/models/rfdetr.md), [Mayaku](/docs/models/mayaku.md), [YOLO11](/docs/models/yolov11.md), [YOLO26](/docs/models/yolov26.md) |
 | Keypoints | [RF-DETR](/docs/models/rfdetr.md), [ViTPose](/docs/models/vitpose.md) |
 | Detection from words | [OWLv2](/docs/models/owlv2.md), [Grounding DINO](/docs/models/grounding-dino.md), [SAM 3](/docs/models/sam3.md) |
 | Segmentation from a click or box | [SAM 2](/docs/models/sam2.md), [EdgeTAM](/docs/models/edgetam.md), [SAM 3](/docs/models/sam3.md) |

@@ -15,7 +15,7 @@ on mozo.
 
 | Licence | Variants | Families |
 |---|---|---|
-| Apache-2.0 | 48 | RF-DETR, Mayaku street, ViTPose, OWLv2, Grounding DINO, SAM 2, EdgeTAM, SigLIP 2, EasyOCR, Granite Embedding R2, Moebius, Depth Anything V2 (7 of its 9) |
+| Apache-2.0 | 48 | RF-DETR, Mayaku, ViTPose, OWLv2, Grounding DINO, SAM 2, EdgeTAM, SigLIP 2, EasyOCR, Granite Embedding R2, Moebius, Depth Anything V2 (7 of its 9) |
 | MIT | 5 | CLIP, BEN2 |
 | AGPL-3.0 | 30 | YOLOv8, YOLO11, YOLO12, YOLO26 |
 | CC-BY-NC-4.0 | 2 | Depth Anything V2 `base` and `large` |
@@ -53,7 +53,7 @@ runs it.
 `MOZO_ENABLE` decides what a server offers. Set it to this list in the server's environment:
 
 ```bash
-MOZO_ENABLE=ben2,clip,easyocr,edgetam,granite_embedding_r2,grounding_dino,mayaku_street,moebius,\
+MOZO_ENABLE=ben2,clip,easyocr,edgetam,granite_embedding_r2,grounding_dino,mayaku,moebius,\
 owlv2,rfdetr,sam2,siglip2,vitpose,depth_anything_v2/small,depth_anything_v2/indoor-small,\
 depth_anything_v2/indoor-base,depth_anything_v2/indoor-large,depth_anything_v2/outdoor-small,\
 depth_anything_v2/outdoor-base,depth_anything_v2/outdoor-large

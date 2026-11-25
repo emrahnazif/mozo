@@ -204,14 +204,14 @@ arguments. These are shared:
 
 | Member | Description |
 |---|---|
-| `predict(image, ...)` | Run the model on one image. Every family except Granite Embedding R2. |
-| `encode_image(image)` | Vectors for one image or a list of them, `(N, D)`. CLIP and SigLIP 2. |
+| `predict(image, ...)` | Run the model on one image. Every family except DINOv2 and Granite Embedding R2. |
+| `encode_image(image)` | Vectors for one image or a list of them, `(N, D)`. CLIP, SigLIP 2 and DINOv2. |
 | `encode_text(text)` | Text vectors, `(N, D)`. CLIP, SigLIP 2 and Granite Embedding R2. |
 | `prepare(image)` | Run the image encode before the first prompt. SAM 2, EdgeTAM, SAM 3 and OWLv2. |
 | `cutout(image, ...)` | The photograph with its background made transparent. BEN2. |
 | `device` | The device it runs on. |
 | `runtime` | The artifact it runs from, such as `"torch-fp32"` or `"coreml-fp32"`. |
-| `revision` | The revision of the weights, on CLIP, SigLIP 2 and Granite Embedding R2. Store it with the vectors. |
+| `revision` | The revision of the weights, on CLIP, SigLIP 2, DINOv2 and Granite Embedding R2. Store it with the vectors. |
 | `unit` | `"metres"` or `None`. Depth Anything V2. |
 
 `predict` may be called from several threads at once. That is safe on CPU, CUDA and ONNX Runtime;

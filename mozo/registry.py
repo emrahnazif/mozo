@@ -64,18 +64,20 @@ CLICKABLE = frozenset({"edgetam", "sam2", "sam3"})
 #: The task type cannot carry this -- two families can classify while only one of them embeds.
 ENCODES: dict[str, frozenset[str]] = {
     "clip": frozenset({"image", "text"}),
+    "dinov2": frozenset({"image"}),
     "granite_embedding_r2": frozenset({"text"}),
     "siglip2": frozenset({"image", "text"}),
 }
 
-#: Task types whose model answers nothing about an image: it returns vectors, and ``/encode`` is
-#: the whole of what it does. ``/predict`` takes an image and returns an answer, so it refuses these
-#: before decoding or loading anything and points at ``/encode`` instead -- rather than demanding a
-#: picture the model would ignore, downloading the weights, and only then giving up.
+#: Task types whose model gives no answer, only vectors: ``/encode`` is the whole of what it does.
+#: ``/predict`` returns an answer, so it refuses these before decoding or loading anything and
+#: points at ``/encode`` instead -- rather than demanding a picture a text model would ignore, or
+#: downloading an image model's weights, and only then giving up. Text (Granite Embedding R2) and
+#: images (DINOv2) alike.
 #:
 #: Named here for the reason PROMPTED is: the endpoint has to refuse before the load, and a test
 #: holds every registered task to having somewhere to go.
-ENCODE_ONLY = frozenset({"text_embedding"})
+ENCODE_ONLY = frozenset({"image_embedding", "text_embedding"})
 
 #: Families whose model can be prepared: given an image ahead of its prompts, so it runs the
 #: expensive, image-only half now and each prompt afterwards runs only the cheap half. Their
@@ -94,6 +96,9 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 EXECUTES: dict[str, tuple[str, ...]] = {
     **{family: ("torch",)
        for family in ("ben2", "clip", "easyocr", "edgetam", "moebius", "sam2", "siglip2")},
+    # The backbone as a fixed 1x3x224x224 graph, for every variant but giant (past protobuf's
+    # 2 GB as one file); preprocessing and normalisation stay in Python on every runtime.
+    "dinov2": ("torch", "onnx", "tensorrt"),
     # A TensorRT engine exported from the checkpoint at the input size the user picks.
     "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
@@ -127,6 +132,7 @@ DERIVES: dict[str, dict[str, str]] = {
     # (``seg-nano``) torch fp32 -- RF-DETR is launch-bound at batch 1. fp16 only where an fp16
     # graph is published (the detection variants), and only on request.
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    "dinov2": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -203,6 +209,24 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'indoor-small', 'indoor-base', 'indoor-large',
             'outdoor-small', 'outdoor-base', 'outdoor-large',
         ],
+    },
+
+    'dinov2': {
+        'adapter_class': 'Dinov2Predictor',
+        'module': 'mozo.adapters.dinov2',
+        'task_type': 'image_embedding',
+        'description': (
+            'DINOv2 by Meta — image embeddings. An image in, one vector out, and images that '
+            'look alike land close together: find near-duplicates, similar products or scenes, '
+            'cluster a collection, or classify from a few examples by nearest neighbour. '
+            'Learned from 142M images with no labels and no captions, so it captures what the '
+            'picture shows rather than what a caption would say — and, unlike CLIP and SigLIP 2, '
+            'it cannot be searched by words. 6 variants: small/base/large/giant (21M to 1.1B '
+            'parameters, 384- to 1536-d vectors) and small-reg/base-reg, trained with register '
+            'tokens. Sees the central 224x224 of the image. Served through /encode only. Code '
+            'and weights are both Apache-2.0.'
+        ),
+        'variants': ['small', 'base', 'large', 'giant', 'small-reg', 'base-reg'],
     },
 
     'easyocr': {

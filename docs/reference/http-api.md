@@ -17,7 +17,7 @@ Errors are JSON, `{"detail": "..."}`, with a message that says what to do:
 | `400` | The request is wrong: not an image, a required prompt missing, a parameter out of range or of the wrong kind for this model. |
 | `404` | No such model on this server, or no image held for a `?sha256=`. The detail lists what is served. |
 | `500` | The model failed to load or to run. |
-| `501` | The model has no such route, such as `/predict` on a text-embedding model or `/encode` on a detector. |
+| `501` | The model has no such route, such as `/predict` on an embedding-only model (DINOv2, Granite Embedding R2) or `/encode` on a detector. |
 
 ## POST /predict/{family}/{variant}
 
@@ -54,12 +54,12 @@ requests after.
 
 ## POST /encode/{family}/{variant}
 
-Return vectors instead of an answer. For CLIP, SigLIP 2 and Granite Embedding R2.
+Return vectors instead of an answer. For CLIP, SigLIP 2, DINOv2 and Granite Embedding R2.
 
 | Parameter | Description |
 |---|---|
-| `file` | An image to embed. Repeat for several. CLIP and SigLIP 2. |
-| `text` | A phrase or text to embed, as a query parameter. Repeat for several. |
+| `file` | An image to embed. Repeat for several. CLIP, SigLIP 2 and DINOv2. |
+| `text` | A phrase or text to embed, as a query parameter. Repeat for several. CLIP, SigLIP 2 and Granite Embedding R2. |
 
 Images or text in one call, not both. Returns:
 
@@ -95,7 +95,7 @@ Every model this server offers, as `{family: entry}`, without loading anything. 
 | `boxed` | Whether it takes boxes as input rather than finding them (ViTPose, Moebius). |
 | `clicks` | Whether it takes `point` and `label`. |
 | `prepares` | Whether `/prepare` and `sha256` work for it. |
-| `encodes` | What `/encode` takes for it: `["image", "text"]`, `["text"]`, or `[]`. |
+| `encodes` | What `/encode` takes for it: `["image", "text"]`, `["image"]`, `["text"]`, or `[]`. |
 
 ## GET /models/loaded
 

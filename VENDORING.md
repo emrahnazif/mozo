@@ -278,6 +278,10 @@ found traps it had not predicted, and the predicted ones were mostly real.
   moves every box.
 - **Padding may replicate rather than zero-fill.** EasyOCR copies the last column.
 - **Normalisation constants are usually not ImageNet's.** CLIP has its own; SigLIP 2 is 0.5/0.5.
+- **Two centre crops can sit a pixel apart.** torchvision places the crop at
+  `int(round((w - 224) / 2))`, `transformers`' image processors at `(w - 224) // 2`. Only an odd
+  margin shows it -- 1920x1281 resizes to 383x256 -- and then the pixels differ by 2.8. Use the
+  reference's own crop call, never a slice (DINOv2).
 
 ### Tokenisation
 
@@ -315,6 +319,15 @@ found traps it had not predicted, and the predicted ones were mostly real.
 - **Batched and unbatched forwards are not bit-identical.** 2.5e-07 for OWLv2; **1.4e-05** for
   EasyOCR's recogniser, enough to flip a character. Batch exactly as upstream does — which may mean
   *not* batching.
+- **...and `MKL_CBWR=AVX2,STRICT` can hide it.** DINOv2's batched CPU forward differs from single
+  forwards by 1.5e-05 in a default environment and is bit-identical under the setting the gate
+  needs. A falsifier that batches is then *not caught*, and that is the gate working; the
+  decision not to batch rests on the measurement without the setting, which is how users run.
+- **A port can interpolate position embeddings differently from the checkpoint's training.**
+  DINOv2's plain models resize with `scale_factor=(w0 + 0.1) / M`; `transformers`' `Dinov2Model`
+  resizes to `size=(w0, h0)`. Identical at the trained resolution (no resize happens), 0.25 apart
+  on the class token at 224, the resolution the evaluation transform produces. Test off the
+  trained resolution, or the early return hides it.
 
 ### Checkpoint and geometry
 
@@ -364,6 +377,18 @@ Reproduce them, and record them:
 - **Two entry points that disagree.** EasyOCR's array path documents BGR and its path entry decodes
   greyscale with libjpeg directly — 27 and 7 grey levels apart. Hand both sides the same array.
 - **Mutable module globals** (`imgH`) become spec fields when vendored.
+- **Arithmetic that depends on what else is installed.** DINOv2's `MemEffAttention` takes xFormers'
+  kernel whenever `xformers` imports (unless `XFORMERS_DISABLED` is set before import) -- a
+  different sum, and a kernel with no CPU path. Remove the branch from the vendor rather than
+  keeping it "unused": a user with xFormers would otherwise get vectors the gate never checked.
+
+### Export
+
+- **A `forward(*args, **kwargs)` traces into extra graph inputs.** DINOv2's exported with a second
+  input, `masks`, that the session then demanded. Export a one-argument wrapper.
+- **Antialiased bicubic has no ONNX operator** (`aten::_upsample_bicubic2d_aa`). Where the input
+  shape is fixed, the resize is a constant: compute it once with the model's own code and let the
+  graph add the result (DINOv2's register models).
 
 ---
 

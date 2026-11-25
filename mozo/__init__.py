@@ -1,6 +1,6 @@
 """mozo -- models that run from a pip install.
 
-Eighty-two published variants across eighteen families, served over HTTP or called from Python. No
+Eighty-eight published variants across nineteen families, served over HTTP or called from Python. No
 Docker, no cluster, no configuration: weights are fetched and verified on first use and cached
 under ``~/.cache/mozo``.
 

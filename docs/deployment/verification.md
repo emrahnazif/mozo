@@ -25,7 +25,7 @@ then found where it goes wrong, not inferred from a final number that happens to
 | CLIP | `openai/CLIP` | 104 across four variants, from preprocessing to `logits_per_image` |
 | Granite Embedding R2 | `transformers` | 1,153,207: every stage of the model on 20 texts, and the tokenizer on 1.15 million texts, on Python 3.10 to 3.14 |
 
-Fifteen of the eighteen families ship a gate in `tools/verify/` in mozo's repository. RF-DETR,
+Sixteen of the nineteen families ship a gate in `tools/verify/` in mozo's repository. RF-DETR,
 SAM 2 and ViTPose have their parity measured and recorded the same way, in the files below.
 
 ## The stated exceptions

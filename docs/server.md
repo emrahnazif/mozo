@@ -81,6 +81,7 @@ every route and parameter in one place. The server also documents itself at
 
 The embedding families answer at a second route, `POST /encode/{family}/{variant}`, which returns
 vectors instead of an answer: an image as `file`, or phrases as `text`, but not both in one call.
+DINOv2 takes images only, Granite Embedding R2 text only, and `/predict` sends both to `/encode`.
 
 ```bash
 curl -X POST "http://localhost:8000/encode/granite_embedding_r2/small?text=how%20do%20I%20count%20people%3F"

@@ -1,5 +1,25 @@
 ## Unreleased
 
+- **New: DINOv2, image embeddings (`dinov2`).** An image in, one vector out, and images that look
+  alike land close together: find near-duplicates, search a catalogue by example, cluster a
+  collection, or classify from a few examples by nearest neighbour. Six variants: `small`, `base`,
+  `large`, `giant` (384- to 1536-d vectors) and `small-reg`, `base-reg`. Call
+  `model.encode_image(images)`, or `POST /encode/dinov2/<variant>` with one or more `file` parts.
+  There is no `predict`: `/predict` answers `501` and points at `/encode`, and `GET /models` lists
+  the new task type, `image_embedding`, with `encodes: ["image"]`. The vectors are bit-identical to
+  Meta's own torch-hub code. They are not the same as the `transformers` port's, whose
+  preprocessing and position embedding differ (cosine about 0.99 for the same photograph), so do
+  not mix the two in one index. Each image runs on its own, so a vector does not depend on what
+  it was encoded beside. Code and weights are Apache-2.0.
+- **DINOv2 runs through a TensorRT fp32 engine on CUDA by default** when TensorRT 11 or later is
+  installed, built from the published ONNX graph (every variant but `giant`). The network
+  itself runs 1.2 to 1.5 times faster than torch on an RTX 3060, and the vectors stay within 2e-05
+  of torch's: on 500 COCO photographs every image kept all ten nearest neighbours. On a large
+  photograph most of a call is resizing it on the CPU, so a whole call gains 8 to 11%. Ask for
+  `runtime="tensorrt-fp16"` for 3.8 to 4.8 times torch's speed on the network, at about 0.5% of
+  nearest neighbours changed; `auto` never picks it. Each of those five variants publishes an fp32
+  and an fp16 ONNX graph to build the engines from; only those loads download them.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

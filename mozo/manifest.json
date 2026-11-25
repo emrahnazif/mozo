@@ -351,6 +351,206 @@
         }
       }
     },
+    "dinov2/base": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "dinov2/base/2026-11-25/LICENSE",
+              "sha256": "600cc67cc4cb2f5ea317dcfc687ad1c74dc4bec8782bbe9db0afd83513b935b7",
+              "size": 11359
+            },
+            "NOTICE": {
+              "path": "dinov2/base/2026-11-25/NOTICE",
+              "sha256": "2ff23d44220d5ecbc149b98b3002929a66f07b11aef2991bd5fa85158c1322e0",
+              "size": 1323
+            },
+            "onnx-fp16": {
+              "path": "dinov2/base/2026-11-25/onnx-fp16.onnx",
+              "sha256": "9557c8943506cdd6cfd665a62c113a1bc97caf295101bd6ad397c359a745ce8a",
+              "size": 172075118
+            },
+            "onnx-fp32": {
+              "path": "dinov2/base/2026-11-25/onnx-fp32.onnx",
+              "sha256": "e19dfa5b545fdbed68dd11e3dfc6e78892155dd372bdf582cbfcb9b2ef3f7b9a",
+              "size": 343008745
+            },
+            "torch-fp32": {
+              "path": "dinov2/base/2026-11-25/torch-fp32.pth",
+              "sha256": "c85d33aa83bd43aa93fbf99fd598f00fa14d135a622f5c789f89c2891e6b83a7",
+              "size": 346374912
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "dinov2/base-reg": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "dinov2/base-reg/2026-11-25/LICENSE",
+              "sha256": "600cc67cc4cb2f5ea317dcfc687ad1c74dc4bec8782bbe9db0afd83513b935b7",
+              "size": 11359
+            },
+            "NOTICE": {
+              "path": "dinov2/base-reg/2026-11-25/NOTICE",
+              "sha256": "49f636e7324baad1f6a4001bdbc76a6ea4a592c45099179d6b362413712fb7ab",
+              "size": 1351
+            },
+            "onnx-fp16": {
+              "path": "dinov2/base-reg/2026-11-25/onnx-fp16.onnx",
+              "sha256": "02167e5a4755a2077cd7398dd58eb2d8b86cd52ec5e472f133ebe10cddc18dd1",
+              "size": 172089654
+            },
+            "onnx-fp32": {
+              "path": "dinov2/base-reg/2026-11-25/onnx-fp32.onnx",
+              "sha256": "d0675db5752cbdc9231d431edc4e96f9544a3f1ed95aff8c837ae1c4975ed885",
+              "size": 343023281
+            },
+            "torch-fp32": {
+              "path": "dinov2/base-reg/2026-11-25/torch-fp32.pth",
+              "sha256": "e8876aad28b4121055798ef4d8b76262d36a40dcdc296e5236b4ae30824b086c",
+              "size": 346387521
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "dinov2/giant": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "dinov2/giant/2026-11-25/LICENSE",
+              "sha256": "600cc67cc4cb2f5ea317dcfc687ad1c74dc4bec8782bbe9db0afd83513b935b7",
+              "size": 11359
+            },
+            "NOTICE": {
+              "path": "dinov2/giant/2026-11-25/NOTICE",
+              "sha256": "571e0fba514bcd187876e667ace3ff388793644a7618c3753fd6c17abc2b95ff",
+              "size": 1326
+            },
+            "torch-fp32": {
+              "path": "dinov2/giant/2026-11-25/torch-fp32.pth",
+              "sha256": "77874934fa29a1b3ac47eb65eb15fd0d0bb9c1730e7adb8e33dcd82bd8d8ae0c",
+              "size": 4546094620
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "dinov2/large": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "dinov2/large/2026-11-25/LICENSE",
+              "sha256": "600cc67cc4cb2f5ea317dcfc687ad1c74dc4bec8782bbe9db0afd83513b935b7",
+              "size": 11359
+            },
+            "NOTICE": {
+              "path": "dinov2/large/2026-11-25/NOTICE",
+              "sha256": "5a982d74aad19dca4fe5bac1a602d419fbb0a0829abc38663177daf556dcaef5",
+              "size": 1326
+            },
+            "onnx-fp16": {
+              "path": "dinov2/large/2026-11-25/onnx-fp16.onnx",
+              "sha256": "5bc5b3f0914fe6ac4858fe91483a038b7f4ed9bbfb3a79570aff213dd04c4c74",
+              "size": 607512379
+            },
+            "onnx-fp32": {
+              "path": "dinov2/large/2026-11-25/onnx-fp32.onnx",
+              "sha256": "cdbc186fdfe11be947e56396e091cf9f3cf7a01f4dc232aa3f7f298026d0d015",
+              "size": 1213128315
+            },
+            "torch-fp32": {
+              "path": "dinov2/large/2026-11-25/torch-fp32.pth",
+              "sha256": "64733b1057b81c5fcf40c442c6fec1d530ba6d38b2e4244b4f68366552d9160c",
+              "size": 1217578216
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "dinov2/small": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "dinov2/small/2026-11-25/LICENSE",
+              "sha256": "600cc67cc4cb2f5ea317dcfc687ad1c74dc4bec8782bbe9db0afd83513b935b7",
+              "size": 11359
+            },
+            "NOTICE": {
+              "path": "dinov2/small/2026-11-25/NOTICE",
+              "sha256": "e4169ee63bee94f98f3bc03ac58fb7277f22b428d5d474f5b54aaa1b038c259b",
+              "size": 1325
+            },
+            "onnx-fp16": {
+              "path": "dinov2/small/2026-11-25/onnx-fp16.onnx",
+              "sha256": "5baf17578c3b3a49ac0612be40ac33b73c67501b9d481f47de1188afcf4b8051",
+              "size": 43627814
+            },
+            "onnx-fp32": {
+              "path": "dinov2/small/2026-11-25/onnx-fp32.onnx",
+              "sha256": "951e8220b5fd3bd10a04a1019555f94f87b4ab9f589b35818000b3d3411ba5ca",
+              "size": 86624184
+            },
+            "torch-fp32": {
+              "path": "dinov2/small/2026-11-25/torch-fp32.pth",
+              "sha256": "b15f0e0d6aded8eb4b7e636c3f1947ad9c3bae4fa5b0666a4ab2ab408fe66ce4",
+              "size": 88279296
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "dinov2/small-reg": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "dinov2/small-reg/2026-11-25/LICENSE",
+              "sha256": "600cc67cc4cb2f5ea317dcfc687ad1c74dc4bec8782bbe9db0afd83513b935b7",
+              "size": 11359
+            },
+            "NOTICE": {
+              "path": "dinov2/small-reg/2026-11-25/NOTICE",
+              "sha256": "d3ec65814be290fb367f8b1e624e5fbfab83479230fac919bd29dfcc44186064",
+              "size": 1353
+            },
+            "onnx-fp16": {
+              "path": "dinov2/small-reg/2026-11-25/onnx-fp16.onnx",
+              "sha256": "5eb8dcf900a43b3477c045e5e45d400107f04588e6fbe3ce65e3159ca3b3bddf",
+              "size": 43636206
+            },
+            "onnx-fp32": {
+              "path": "dinov2/small-reg/2026-11-25/onnx-fp32.onnx",
+              "sha256": "69672f7f15c87e77d6385355e7a853f7786dfb9705dded83de10be18b564cab9",
+              "size": 86632576
+            },
+            "torch-fp32": {
+              "path": "dinov2/small-reg/2026-11-25/torch-fp32.pth",
+              "sha256": "25bc54131ba93a7535c4e63f3064218eadab07df1a03fcb6d0c97c3486ca8ed1",
+              "size": 88285761
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
     "easyocr/chinese-simplified": {
       "latest": "2026-08-21",
       "revisions": {

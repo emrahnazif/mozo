@@ -1,4 +1,4 @@
-# All 82 models, by task
+# All 88 models, by task
 
 <!--
 summary: Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size.
@@ -6,7 +6,7 @@ label: All models
 keywords: mozo, model catalogue, computer vision models, licences, runtimes
 -->
 
-Mozo serves 82 variants across 18 families. A model is named `family/variant`, the same in Python
+Mozo serves 88 variants across 19 families. A model is named `family/variant`, the same in Python
 (`mozo.get_model("rfdetr/medium")`) and over HTTP (`/predict/rfdetr/medium`). Each family's page
 has examples, every parameter, and how the model behaves.
 
@@ -75,6 +75,15 @@ images by text in a database of your own.
 |---|---|---|---|---|
 | [CLIP](/docs/models/clip.md) | `base` `base-16` `large` `large-336` | MIT | torch | 599 MB–1.7 GB |
 | [SigLIP 2](/docs/models/siglip2.md) | `base-224` `base-256` `so400m-384` `so400m16-256` `giant-384` | Apache-2.0 | torch | 1.5–7.5 GB |
+
+## Image embeddings
+
+An image in, one vector out, and images that look alike land close together: near-duplicates,
+visual search, clustering. Image only: these vectors cannot be searched by words.
+
+| Family | Variants | Licence | Runtimes | Size |
+|---|---|---|---|---|
+| [DINOv2](/docs/models/dinov2.md) | `small` `base` `large` `giant` `small-reg` `base-reg` | Apache-2.0 | torch, onnx; tensorrt on CUDA (not `giant`) | 88 MB–4.5 GB |
 
 ## Text embeddings
 

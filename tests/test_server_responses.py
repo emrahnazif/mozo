@@ -233,3 +233,14 @@ class TestAFamilyThatOnlyEmbeds:
                                files={"file": ("x.jpg", FIXTURE.read_bytes(), "image/jpeg")})
         assert response.status_code == 400
         assert "text" in response.json()["detail"]
+
+    def test_an_image_embedder_is_sent_to_encode_with_an_image(self, client):
+        response = client.post("/predict/dinov2/base",
+                               files={"file": ("x.jpg", FIXTURE.read_bytes(), "image/jpeg")})
+        assert response.status_code == 501
+        assert "/encode/dinov2/base with an uploaded image" in response.json()["detail"]
+
+    def test_encode_refuses_text_for_an_image_embedder(self, client):
+        response = client.post("/encode/dinov2/base", params={"text": "a cat"})
+        assert response.status_code == 400
+        assert "does not embed text" in response.json()["detail"]

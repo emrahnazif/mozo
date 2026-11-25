@@ -69,8 +69,8 @@ What `predict` returns depends on what the model does:
 | BEN2 | an `HxW` uint8 alpha matte |
 | Moebius | an `HxWx3` uint8 image |
 
-The embedding families have `encode_image` and `encode_text` for vectors, and Granite Embedding R2
-has only `encode_text`. Prompts (phrases, clicks, boxes) are arguments to `predict`, described on
+The embedding families have `encode_image` and `encode_text` for vectors; DINOv2 has only
+`encode_image`, and Granite Embedding R2 only `encode_text`. Prompts (phrases, clicks, boxes) are arguments to `predict`, described on
 each family's page.
 
 A loaded model can be called from several threads at once, and in parallel it runs faster than

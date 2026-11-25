@@ -56,7 +56,13 @@ class Predictor:
         The published files keep the publisher's dtype -- ``general`` and ``hr`` are stored in
         float16 -- and the load copies each tensor into a float32 parameter, which is exact.
         """
-        model = BiRefNet(MODEL_SPECS[variant])
+        # Built on the meta device and allocated empty on the target: every parameter and buffer
+        # is overwritten by the strict load, so initialising 220M random values first (1.2 s for
+        # Swin-L) and copying them to the device would be wasted. Not ``assign=True``, which
+        # would keep the published float16 dtype instead of copying into float32.
+        with torch.device("meta"):
+            model = BiRefNet(MODEL_SPECS[variant])
+        model = model.to_empty(device=device)
         model.load_state_dict(torch.load(Path(weights), map_location="cpu", weights_only=True),
                               strict=True)
         return cls(model, device=device, dtype=dtype, autocast=autocast)

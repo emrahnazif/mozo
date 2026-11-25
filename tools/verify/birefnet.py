@@ -41,7 +41,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import io
 import os
 import sys
 from pathlib import Path
@@ -58,20 +57,13 @@ import torch  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from common import fixtures  # noqa: E402
+from fetch.birefnet import CHECKPOINTS, TRAINING_ONLY  # noqa: E402
+from mozo.image import load_image  # noqa: E402
 from mozo.vendors.birefnet_deploy import MODEL_SPECS, Predictor  # noqa: E402
 from mozo.vendors.birefnet_deploy import blocks, image as vendor_image, network, swin  # noqa: E402
 
 VENDOR = ROOT / "mozo" / "vendors" / "birefnet_deploy"
 ALLOWED_THIRD_PARTY = {"torch", "torchvision", "numpy", "cv2", "PIL"}
-
-#: mozo variant -> (repository, commit). The same pins as ``tools/fetch/birefnet.py``.
-UPSTREAM = {
-    "general": ("ZhengPeng7/BiRefNet", "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4"),
-    "lite": ("ZhengPeng7/BiRefNet_lite", "aa62cd87eafb9cc43056d08ef3615a14628b831d"),
-    "matting": ("ZhengPeng7/BiRefNet-matting", "eccde0a8cbdce7ac5fecfeb06340fe7b949e85d9"),
-    "hr": ("ZhengPeng7/BiRefNet_HR", "a7a562f6fd16021180f2f4348f4de003a2d3d1e1"),
-}
-TRAINING_ONLY = ("decoder.conv_ms_spvn_", "decoder.gdt_convs_pred_")
 
 #: Modules whose every output is compared, by type. Leaf convolutions inside these are covered
 #: by the block that contains them; the deformable conv is named because it is the one operator
@@ -121,7 +113,7 @@ def load_upstream(variant: str):
     from huggingface_hub import hf_hub_download
     from transformers import AutoModelForImageSegmentation
 
-    repo, commit = UPSTREAM[variant]
+    repo, commit = CHECKPOINTS[variant].repo, CHECKPOINTS[variant].commit
     model = AutoModelForImageSegmentation.from_pretrained(
         repo, revision=commit, trust_remote_code=True, dtype=torch.float32).eval()
     with torch.no_grad():
@@ -359,7 +351,7 @@ def ordered_names(ours, rgb) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("variant", choices=list(UPSTREAM))
+    parser.add_argument("variant", choices=list(CHECKPOINTS))
     parser.add_argument("--weights", type=Path, required=True,
                         help="revision directory holding torch-fp32.pth, or the file itself")
     parser.add_argument("--images", type=Path, default=None,
@@ -371,7 +363,8 @@ def main() -> int:
     import transformers
 
     torch.manual_seed(0)
-    print(f"variant {args.variant}: {UPSTREAM[args.variant][0]} @ {UPSTREAM[args.variant][1]}")
+    print(f"variant {args.variant}: {CHECKPOINTS[args.variant].repo} @ "
+          f"{CHECKPOINTS[args.variant].commit}")
     print(f"torch {torch.__version__}  torchvision {torchvision.__version__}  "
           f"transformers {transformers.__version__}  device cpu, float32  "
           f"MKL_CBWR={os.environ.get('MKL_CBWR', '(unset)')}")
@@ -403,7 +396,7 @@ def main() -> int:
 
     paths = fixtures() if args.images is None else sorted(
         p for p in args.images.glob("*") if p.suffix.lower() in {".jpg", ".jpeg", ".png"})
-    inputs = [(p.name, np.asarray(Image.open(p).convert("RGB"))) for p in paths] + synthetic()
+    inputs = [(p.name, load_image(str(p))) for p in paths] + synthetic()
     names = ordered_names(ours, inputs[0][1])
 
     print(f"[4] every stage ({len(names)} stage modules):")
@@ -423,8 +416,8 @@ def main() -> int:
         print(f"    skip  mozo adapter: {type(error).__name__}: {str(error)[:100]}")
     else:
         label, rgb = inputs[0]
-        ok = np.array_equal(adapter.cutout(rgb), ours.cutout(rgb)) and np.array_equal(
-            adapter.predict(rgb), ours.matte(rgb))
+        # One forward a side: the cut-out's fourth channel is the matte.
+        ok = np.array_equal(adapter.cutout(rgb), ours.cutout(rgb))
         good &= ok
         print(f"    {'PASS' if ok else 'FAIL'}  mozo adapter (registry -> weights), {label}")
 

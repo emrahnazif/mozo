@@ -55,7 +55,7 @@ def deform_conv2d(x: torch.Tensor, offset: torch.Tensor, weight: torch.Tensor,
     Returns:
         ``(N, O, H, W)``: the same shape torchvision's operator returns at stride 1.
     """
-    n, _, height, width = x.shape
+    height, width = x.shape[-2:]
     kh, kw = (int(s) for s in weight.shape[-2:])  # Python ints under tracing too
     rows = torch.arange(height, dtype=x.dtype, device=x.device).view(1, height, 1)
     cols = torch.arange(width, dtype=x.dtype, device=x.device).view(1, 1, width)
@@ -78,6 +78,7 @@ def deform_conv2d(x: torch.Tensor, offset: torch.Tensor, weight: torch.Tensor,
 
 def _deform(self: DeformableConv2d, x: torch.Tensor, offset: torch.Tensor,
             modulator: torch.Tensor) -> torch.Tensor:
+    assert self.stride == (1, 1), "the decomposition is written for stride 1"
     return deform_conv2d(x, offset, self.regular_conv.weight, self.regular_conv.bias, self.padding,
                          modulator)
 

@@ -42,11 +42,11 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT))
 
 from common import fixtures, require_one_file  # noqa: E402
+from fetch.birefnet import REVISION  # noqa: E402
 from mozo.image import load_image  # noqa: E402
-from mozo.vendors.birefnet_deploy import MODEL_SPECS, Predictor, preprocess  # noqa: E402
+from mozo.vendors.birefnet_deploy import MODEL_SPECS, BiRefNet, Predictor, preprocess  # noqa: E402
 from mozo.vendors.birefnet_deploy.graph import decomposed  # noqa: E402
 
-REVISION = "2026-11-25"
 OPSET = 18
 
 #: Largest per-pixel difference in the matte (0..1) between the fp32 graph and torch fp32. The
@@ -99,6 +99,7 @@ def fold_fp16_weights(path: Path) -> int:
     for node in graph.node:
         for name in node.input:
             readers.setdefault(name, []).append(node)
+    outputs = {out.name for out in graph.output}
     to_half = onnx.TensorProto.FLOAT16
     folded = 0
     for name, init in list(weights.items()):
@@ -112,13 +113,10 @@ def fold_fp16_weights(path: Path) -> int:
         graph.initializer.append(half)
         for cast in nodes:
             # Everything that read the cast's output reads the half-precision weight instead.
-            for node in graph.node:
-                for i, inp in enumerate(node.input):
-                    if inp == cast.output[0]:
-                        node.input[i] = name
-            for out in graph.output:
-                if out.name == cast.output[0]:
-                    raise SystemExit("a graph output is a cast weight; refusing to fold")
+            if cast.output[0] in outputs:
+                raise SystemExit("a graph output is a cast weight; refusing to fold")
+            for node in readers.get(cast.output[0], []):
+                node.input[:] = [name if inp == cast.output[0] else inp for inp in node.input]
             graph.node.remove(cast)
         folded += 1
     onnx.save(model, str(path))
@@ -182,9 +180,11 @@ def export(variant: str, weights_dir: Path, revision: str, fp16: bool) -> None:
     if fp16 and not torch.cuda.is_available():
         raise SystemExit("the fp16 graph is exported on CUDA, under fp16 autocast")
     folder = weights_dir / "birefnet" / variant / revision
-    predictor = Predictor.from_pretrained(variant, folder / "torch-fp32.pth")
-    predictor.published_fp16 = any(t.dtype == torch.float16 for t in torch.load(
-        folder / "torch-fp32.pth", map_location="cpu", weights_only=True).values())
+    state = torch.load(folder / "torch-fp32.pth", map_location="cpu", weights_only=True)
+    published_fp16 = any(t.dtype == torch.float16 for t in state.values())
+    model = BiRefNet(MODEL_SPECS[variant])
+    model.load_state_dict(state, strict=True)
+    predictor = Predictor(model)
     key = "onnx-fp16" if fp16 else "onnx-fp32"
     print(f"{variant}: {key}, {MODEL_SPECS[variant].resolution}x{MODEL_SPECS[variant].resolution}")
     with tempfile.TemporaryDirectory(dir=folder) as scratch:
@@ -193,7 +193,7 @@ def export(variant: str, weights_dir: Path, revision: str, fp16: bool) -> None:
         require_one_file(staged)
         if fp16:
             print(f"  folded    {fold_fp16_weights(staged)} weights to float16")
-        elif predictor.published_fp16:
+        elif published_fp16:
             print(f"  stored    {store_exact_weights_in_fp16(staged)} weights in float16, as published")
         print(f"  exported  opset {OPSET}, {staged.stat().st_size / 1e6:.0f} MB")
         _check(predictor, staged, fp16)

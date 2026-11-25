@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import io
-import statistics
 import sys
 import time
 from pathlib import Path
@@ -45,10 +44,11 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from common import FIXTURES, synchronise  # noqa: E402
+from common import fixtures, median_ms  # noqa: E402
+from fetch.birefnet import REVISION  # noqa: E402
+from mozo.image import load_image  # noqa: E402
 from mozo.vendors.birefnet_deploy import Predictor, postprocess, preprocess  # noqa: E402
 
-REVISION = "2026-11-25"
 
 
 # --------------------------------------------------------------------------------------------
@@ -150,19 +150,6 @@ def build(name: str, variant: str, folder: Path, engines: Path):
     raise SystemExit(f"unknown runtime {name}")
 
 
-def median_ms(work, device: str, runs: int, warmup: int = 3) -> float:
-    for _ in range(warmup):
-        work()
-    synchronise(device)
-    times = []
-    for _ in range(runs):
-        start = time.perf_counter()
-        work()
-        synchronise(device)
-        times.append((time.perf_counter() - start) * 1000)
-    return statistics.median(times)
-
-
 def samples(path: Path, limit: int | None):
     import pyarrow.parquet as pq
 
@@ -206,7 +193,7 @@ def main() -> int:
     for name in args.runtimes:
         runtimes[name] = build(name, args.variant, folder, args.engines)
 
-    photo = np.asarray(Image.open(sorted(FIXTURES.glob("*.jpg"))[0]).convert("RGB"))
+    photo = load_image(str(fixtures()[0]))
     pixels = preprocess(photo, size)
     # GPU memory: for torch, the peak torch allocates above what is resident before the call (the
     # reference model's weights stay resident throughout); for TensorRT, the engine's scratch.

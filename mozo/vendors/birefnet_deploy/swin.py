@@ -199,7 +199,7 @@ class BasicLayer(nn.Module):
         self.shift_size = window_size // 2
         self.blocks = nn.ModuleList([
             SwinTransformerBlock(dim, num_heads, window_size,
-                                 0 if (i % 2 == 0) else window_size // 2)
+                                 0 if (i % 2 == 0) else self.shift_size)
             for i in range(depth)])
         self.downsample = PatchMerging(dim) if downsample else None
 

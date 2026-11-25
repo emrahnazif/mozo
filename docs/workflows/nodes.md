@@ -1,7 +1,7 @@
 # Every built-in workflow node
 
 <!--
-summary: All 50 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
+summary: All 51 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
 label: Nodes
 keywords: mozo, workflow nodes, node catalogue, workflow editor, pipeline
 -->
@@ -48,6 +48,7 @@ what runs.
 | `rfdetr_checkpoint` | image → detections | `checkpoint`, `architecture`=nano, `labels`, `threshold`=0.5 | RF-DETR from a checkpoint of your own: a model you trained, run like a published one. |
 | `owlv2` | image → detections | `text` (a list of phrases), `variant`=base-ensemble, `threshold`=0.1 | OWLv2 by Google: find anything you can name, with no training. |
 | `grounding_dino` | image → detections | `text` (a list of phrases), `variant`=tiny, `threshold`=0.3 | Grounding DINO by IDEA: open-vocabulary detection from a phrase. |
+| `omdet_turbo` | image → detections | `text` (a list of phrases), `variant`=tiny, `threshold`=0.3 | OmDet-Turbo by Om AI Lab: real-time open-vocabulary detection. |
 
 ## Segment
 
@@ -138,7 +139,7 @@ what runs.
 
 ## Prompts read back the same from every model
 
-The prompted nodes are `sam3`, `owlv2`, `grounding_dino`, `clip` and `siglip2`. Each result's
+The prompted nodes are `sam3`, `owlv2`, `grounding_dino`, `omdet_turbo`, `clip` and `siglip2`. Each result's
 `class_id` is the index of the phrase that found it (for CLIP and SigLIP 2, of the phrase it
 scored), and its `class_name` is that phrase. So results read the same whichever model produced
 them. A list with an empty entry is refused rather than shortened, because shortening it would

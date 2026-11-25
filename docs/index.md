@@ -1,7 +1,7 @@
 # Mozo
 
 <!--
-summary: Run 86 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers.
+summary: Run 87 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers.
 label: Mozo
 keywords: mozo, computer vision, model serving, object detection, segmentation, embeddings
 template: docs
@@ -9,13 +9,13 @@ template: docs
 
 Mozo runs computer vision models from one `pip install`: detection, segmentation, keypoints,
 open-vocabulary detection, OCR, depth, embeddings, background removal and object removal. That is
-86 models across 19 families, served over HTTP or called from Python, plus workflows that chain
+87 models across 20 families, served over HTTP or called from Python, plus workflows that chain
 them.
 
 Each of these models normally comes with its own package, and each package pins its own torch,
 numpy and OpenCV. Put a few in one environment and something breaks. Mozo ships none of those
 packages. Every model's inference code is copied into mozo and checked to return **exactly** the
-original's numbers, compared with no tolerance. So one environment runs all 86.
+original's numbers, compared with no tolerance. So one environment runs all 87.
 
 ## Install
 
@@ -89,7 +89,7 @@ size and runtimes. Each family has its own page with examples, parameters and ho
 | Object detection | [RF-DETR](/docs/models/rfdetr.md), [Mayaku](/docs/models/mayaku.md), [YOLOv8](/docs/models/yolov8.md), [YOLO11](/docs/models/yolov11.md), [YOLO12](/docs/models/yolov12.md), [YOLO26](/docs/models/yolov26.md) |
 | Instance segmentation | [RF-DETR](/docs/models/rfdetr.md), [Mayaku](/docs/models/mayaku.md), [YOLO11](/docs/models/yolov11.md), [YOLO26](/docs/models/yolov26.md) |
 | Keypoints | [RF-DETR](/docs/models/rfdetr.md), [ViTPose](/docs/models/vitpose.md) |
-| Detection from words | [OWLv2](/docs/models/owlv2.md), [Grounding DINO](/docs/models/grounding-dino.md), [SAM 3](/docs/models/sam3.md) |
+| Detection from words | [OWLv2](/docs/models/owlv2.md), [Grounding DINO](/docs/models/grounding-dino.md), [OmDet-Turbo](/docs/models/omdet-turbo.md), [SAM 3](/docs/models/sam3.md) |
 | Segmentation from a click or box | [SAM 2](/docs/models/sam2.md), [EdgeTAM](/docs/models/edgetam.md), [SAM 3](/docs/models/sam3.md) |
 | Classification from words, image embeddings | [CLIP](/docs/models/clip.md), [SigLIP 2](/docs/models/siglip2.md) |
 | Text embeddings | [Granite Embedding R2](/docs/models/granite-embedding-r2.md) |

@@ -1,0 +1,38 @@
+qwen3_vl_deploy
+Copyright 2025 The Qwen Team and The HuggingFace Inc. team
+
+This product includes software derived from transformers/models/qwen3_vl and
+transformers/models/qwen2_vl/image_processing_qwen2_vl.py
+(https://github.com/huggingface/transformers, v5.24.1), with the parts of
+transformers' vision_utils.py, integrations/sdpa_attention.py, cache_utils.py and
+generation/ (the logits warpers and the sampling step) that change a number on
+this model's path, licensed under the Apache License 2.0; see the LICENSE file in
+this directory.
+
+It runs Alibaba Cloud's Qwen3-VL Instruct models (Qwen/Qwen3-VL-2B-Instruct,
+Qwen/Qwen3-VL-4B-Instruct). The Qwen team publishes its weights for
+transformers and no inference code of its own; the transformers implementation
+is the one whose numbers they reproduce. See PROVENANCE.md.
+
+ON THE WEIGHTS
+--------------
+Both checkpoints are Apache-2.0, stated in each model card's metadata
+(license: apache-2.0), and served ungated. The repositories carry no LICENSE
+file of their own; the authors' code repository, github.com/QwenLM/Qwen3-VL,
+is Apache-2.0.
+
+THE VOCABULARY
+--------------
+assets/qwen_bpe.json.gz is derived from tokenizer.json as published in
+Qwen/Qwen3-VL-2B-Instruct at commit 89644892e4d85e24eaac8bacfd4f463576704203
+(identical in Qwen/Qwen3-VL-4B-Instruct at ebb281ec70b05090aa6165b016eac8ec08e71b17)
+-- 151,643 pieces, 151,387 merge rules and 26 added tokens, re-encoded so that
+merges are pairs of ids. The asset also carries character classes, case
+foldings and NFC boundaries read out of the reference tokenizer by probing it;
+see PROVENANCE.md.
+
+NOT INCLUDED
+------------
+Video, several images per prompt, multi-turn chat and system prompts, tool
+calls, beam search and every logits processor beyond temperature, top-k and
+top-p, FlashAttention and its packed sequences, training. See PROVENANCE.md.

@@ -319,3 +319,10 @@ def depth_anything_v2(image: Image, models: Models,
                       variant: variants("depth_anything_v2") = "small") -> Depth:
     """Depth Anything V2 -- how far away everything is, from one photograph."""
     return models("depth_anything_v2", variant).predict(image)
+
+
+@node(category="Depth", exclusive=True)
+def depth_anything_v3(image: Image, models: Models,
+                      variant: variants("depth_anything_v3") = "small") -> Depth:
+    """Depth Anything 3 -- relative depth from one photograph; larger is nearer."""
+    return models("depth_anything_v3", variant).predict(image)

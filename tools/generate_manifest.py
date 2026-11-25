@@ -59,6 +59,7 @@ _HASH_CHUNK_BYTES = 1 << 20
 LICENCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Apache-2.0", ("apache license", "version 2.0")),
     ("MIT", ("mit license", "permission is hereby granted, free of charge")),
+    ("BSD-3-Clause", ("bsd 3-clause license", "redistribution and use in source and binary forms")),
     ("AGPL-3.0", ("gnu affero general public license", "version 3")),
     ("CC-BY-NC-4.0", ("attribution-noncommercial 4.0 international",)),
     ("SAM License", ("sam license",)),

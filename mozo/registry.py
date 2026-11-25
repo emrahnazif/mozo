@@ -146,6 +146,8 @@ NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
        for family in ("yolov8", "yolov11", "yolov12", "yolov26")},
     "rfdetr": {"*": ("labels",)},
     "vitpose": {"*": ("labels",)},
+    # The checkpoint carries no names; its landmarks' names are only in the published labels.
+    "yunet": {"*": ("labels",)},
     "sam3": {"onnx": ("torch-fp32",), "coreml": ("torch-fp32",)},
     "owlv2": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
 }
@@ -439,6 +441,21 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         ),
         'variants': ['nano', 'small', 'medium', 'large', 'xlarge',
                      'seg-nano', 'seg-small', 'seg-medium', 'seg-large', 'seg-xlarge'],
+    },
+
+    'yunet': {
+        'adapter_class': 'YuNetPredictor',
+        'module': 'mozo.adapters.yunet',
+        'task_type': 'object_detection',
+        'description': (
+            'YuNet by Shiqi Yu, Wei Wu and Hanyang Peng -- face detection with five landmarks '
+            '(eyes, nose tip, mouth corners), from a network of under 80k parameters: the model '
+            "behind OpenCV's FaceDetectorYN. For selfies, video calls and blurring faces "
+            'anywhere. 2 variants (small/base). It runs at the image\'s own size, so it finds '
+            'faces a dozen pixels wide but misses ones much larger than about 300 px: shrink a '
+            'close-up first. Code and weights are both BSD-3-Clause.'
+        ),
+        'variants': ['small', 'base'],
     },
 }
 

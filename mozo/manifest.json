@@ -2725,6 +2725,66 @@
           "license": "AGPL-3.0"
         }
       }
+    },
+    "yunet/base": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "yunet/base/2026-11-25/LICENSE",
+              "sha256": "e8afd9575f1cebfd20752e1f0c0981042a5526a99a5df3b926c5e05035ec4136",
+              "size": 1542
+            },
+            "NOTICE": {
+              "path": "yunet/base/2026-11-25/NOTICE",
+              "sha256": "784e72f7081b0ed4fea6c63d7abd1678fc538f0dfe8b3106e298b952aa1eb1f9",
+              "size": 1647
+            },
+            "labels": {
+              "path": "yunet/base/2026-11-25/labels.json",
+              "sha256": "92b2e2a964186d537911bef8b2dc4819c92a3355a42820c6ca869563fe612924",
+              "size": 309
+            },
+            "torch-fp32": {
+              "path": "yunet/base/2026-11-25/torch-fp32.pth",
+              "sha256": "83ed40f398c3dbf21be573bcaa169663e0e31767c21c0734f05fa24622138ff8",
+              "size": 376673
+            }
+          },
+          "license": "BSD-3-Clause"
+        }
+      }
+    },
+    "yunet/small": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "yunet/small/2026-11-25/LICENSE",
+              "sha256": "e8afd9575f1cebfd20752e1f0c0981042a5526a99a5df3b926c5e05035ec4136",
+              "size": 1542
+            },
+            "NOTICE": {
+              "path": "yunet/small/2026-11-25/NOTICE",
+              "sha256": "3ca8d0fd14b5ca3a96f6f9fef850e459a4ffd5ecaa46a60fe38e44191a9d85b1",
+              "size": 1695
+            },
+            "labels": {
+              "path": "yunet/small/2026-11-25/labels.json",
+              "sha256": "92b2e2a964186d537911bef8b2dc4819c92a3355a42820c6ca869563fe612924",
+              "size": 309
+            },
+            "torch-fp32": {
+              "path": "yunet/small/2026-11-25/torch-fp32.pth",
+              "sha256": "c95d6cc41083c58a553071e5ee45a1b9c36371b563495883d39a5fb109bd32fe",
+              "size": 280838
+            }
+          },
+          "license": "BSD-3-Clause"
+        }
+      }
     }
   },
   "schema": 2

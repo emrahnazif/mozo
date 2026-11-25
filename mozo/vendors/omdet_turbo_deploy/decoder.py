@@ -15,7 +15,8 @@ inference path only. In order:
 
 Upstream details kept as they are, each one checked bit for bit:
 
-- ``logit_scale`` is ``tensor(1/0.07).log()`` and then ``.exp()`` -- not ``1/0.07``.
+- ``logit_scale`` is ``tensor(1/0.07).log()`` and then ``.exp()``, as upstream writes it (in
+  float32 the round trip happens to be exact).
 - Norms divide by ``norm.clamp_min(1e-12)``.
 - Anchors are ``log(a / (1 - a))`` with ``inf`` where any coordinate is outside (0.01, 0.99), and
   the features at those positions are zeroed with ``torch.where`` before projection.

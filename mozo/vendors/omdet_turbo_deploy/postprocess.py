@@ -9,7 +9,7 @@ image, op for op -- including the parts that look like they could be simplified:
 - boxes are (cx, cy, w, h) in [0, 1], scaled by the *original* image's width and height;
 - ``> threshold``, then class-wise NMS at 0.5 with torchvision's ``batched_nms``, then clipping.
 
-The result is in NMS order (best first). ``nms`` defaults to upstream's 0.5.
+The result is in NMS order (best first).
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ __all__ = ["NMS", "postprocess"]
 NMS = 0.5
 
 
-def postprocess(boxes: Tensor, logits: Tensor, size: tuple[int, int], threshold: float,
-                nms: float = NMS) -> tuple[Tensor, Tensor, Tensor]:
+def postprocess(boxes: Tensor, logits: Tensor, size: tuple[int, int],
+                threshold: float) -> tuple[Tensor, Tensor, Tensor]:
     """One image's detections.
 
     Args:
@@ -50,7 +50,7 @@ def postprocess(boxes: Tensor, logits: Tensor, size: tuple[int, int], threshold:
 
     keep = (scores > threshold).nonzero(as_tuple=False).view(-1)
     boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
-    keep = batched_nms(boxes, scores, labels, nms)
+    keep = batched_nms(boxes, scores, labels, NMS)
     boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
 
     height, width = size

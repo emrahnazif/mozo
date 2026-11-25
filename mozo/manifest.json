@@ -681,6 +681,41 @@
         }
       }
     },
+    "omdet_turbo/tiny": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "omdet_turbo/tiny/2026-11-25/LICENSE",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "size": 11358
+            },
+            "NOTICE": {
+              "path": "omdet_turbo/tiny/2026-11-25/NOTICE",
+              "sha256": "cde674fb8c0eaa64f63ce0ee197827995644c5804e8670a7e60f5d2d235315c3",
+              "size": 1063
+            },
+            "onnx-fp16": {
+              "path": "omdet_turbo/tiny/2026-11-25/onnx-fp16.onnx",
+              "sha256": "f8f7d43dfde029f1233a176bd19ca5bd21bcc826328bf46d791c3c69887c1f70",
+              "size": 219653144
+            },
+            "onnx-fp32": {
+              "path": "omdet_turbo/tiny/2026-11-25/onnx-fp32.onnx",
+              "sha256": "4634f972d3aff44bff03b2d7ebdccc532bad30bf61cb016cf3d41a946c9250a0",
+              "size": 218421770
+            },
+            "torch-fp32": {
+              "path": "omdet_turbo/tiny/2026-11-25/torch-fp32.pth",
+              "sha256": "4e63dd2d61026db301983b87d6ded161259c6a0832324b96f60f1b84ae6ba3e1",
+              "size": 462006453
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
     "owlv2/base": {
       "latest": "2026-08-21",
       "revisions": {

@@ -88,14 +88,14 @@ SECOND_BOX = {"points": None, "labels": None, "box": [560, 180, 760, 470]}
 FALSIFIERS = {
     "image-path-resize": "frames resized like the image predictor (antialiased bilinear) instead "
                          "of the video loader's PIL bicubic (fails at: pixels)",
-    "no-bf16-memory": "keep mask memories in float32 (fails at: memory attention, frame 2)",
+    "no-bf16-memory": "keep mask memories in float32 (fails at: memory attention, frame 1)",
     "pointer-window": "object-pointer temporal encoding normalised by 16 instead of 15 "
-                      "(fails at: memory attention, frame 2)",
+                      "(fails at: memory attention, frame 1)",
     "short-reach": "forget frames older than 6 instead of 15 (fails at: memory attention, frame 8)",
     "memory-from-high-res": "store the prompted frame's logits round-tripped through the "
-                            "decoder's high-res masks (fails at: frame 0 logits)",
-    "no-stability-fallback": "decoder without the dynamic multimask fallback (fails at: an "
-                             "unstable single-mask image click, if no tracking frame reaches it)",
+                            "decoder's high-res masks (fails at: memory attention, frame 1)",
+    "no-stability-fallback": "decoder without the dynamic multimask fallback (fails at: memory "
+                             "attention, frame 1, the click-pair object)",
 }
 
 

@@ -109,7 +109,22 @@ with its defaults (dynamic multimask fallback, `binarize_mask_from_pts_for_mem_e
 the video's size equal (`torch.equal`) to what upstream yields from `add_new_points_or_box` and
 `propagate_in_video`. An object prompted on frame *t* equals upstream's predictor given that
 prompt at frame *t* part way through tracking. Measured by `tools/verify/sam2_video.py`:
-GATE_RESULTS
+every stage per frame and object -- the preprocessed frame, the image features, memory
+attention's output, the stored low-res logits, object pointer, object score and bfloat16
+memory, and the logits at the video's size -- over 20 bedroom frames with three objects (a click,
+a box, a click pair); an object started on frame 8; a 10-frame clip with its length given;
+frames fed backwards against `reverse=True`; single- and three-mask image calls against
+`SAM2ImagePredictor`; and mozo end to end (`get_model` -> `tracker()` -> PixelFlow). **`tiny`: 706
+of 706 comparisons bit-identical** (torch 2.11.0+cpu, 4 threads, `MKL_CBWR=AVX2,STRICT`).
+OTHER_VARIANTS
+
+Falsified with six perturbations, each caught at its own stage: frames resized like the image
+predictor (pixels, 0.312); mask memories kept in float32 (memory attention, frame 1); pointer
+encoding normalised by 16 not 15 (memory attention, frame 1); frames older than 6 forgotten
+(memory attention, frame 8); the prompted frame's logits round-tripped through the high-res masks
+(memory attention, frame 1); the decoder's stability fallback off (memory attention, frame 1, the
+click-pair object). A seventh candidate, dividing by 255 in float32 rather than float64, is not a
+perturbation at all: the two agree for every byte value.
 
 Why a session can be exact: tracking frame *t* reads, per object, its prompted frame, the outputs
 of frames *t-1*…*t-6* (memories) and *t-1*…*t-15* (object pointers), and nothing later. Driving

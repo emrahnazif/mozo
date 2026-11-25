@@ -1,4 +1,4 @@
-# All 82 models, by task
+# All 86 models, by task
 
 <!--
 summary: Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size.
@@ -6,7 +6,7 @@ label: All models
 keywords: mozo, model catalogue, computer vision models, licences, runtimes
 -->
 
-Mozo serves 82 variants across 18 families. A model is named `family/variant`, the same in Python
+Mozo serves 86 variants across 19 families. A model is named `family/variant`, the same in Python
 (`mozo.get_model("rfdetr/medium")`) and over HTTP (`/predict/rfdetr/medium`). Each family's page
 has examples, every parameter, and how the model behaves.
 
@@ -111,6 +111,7 @@ An opacity matte for the foreground, soft enough to keep hair.
 | Family | Variants | Licence | Runtimes | Size |
 |---|---|---|---|---|
 | [BEN2](/docs/models/ben2.md) | `base` | MIT | torch | 381 MB |
+| [BiRefNet](/docs/models/birefnet.md) | `general` `lite` `matting` `hr` | MIT | torch, onnx, tensorrt | 178–885 MB |
 
 ## Object removal
 

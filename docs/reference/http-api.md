@@ -45,7 +45,7 @@ Responses by task:
 | Detection, segmentation, keypoints, detection from words, click segmentation, OCR | `application/json`: a list of detections with every PixelFlow field. |
 | CLIP, SigLIP 2 | `application/json`: a list of `{class_id, class_name, confidence, metadata}`. |
 | Depth Anything V2 | `image/png`, 16-bit. Headers `x-depth-unit` (`metres` or `none`), `x-depth-min` and `x-depth-max`: `depth = min + png / 65535 * (max - min)`. |
-| BEN2 | `image/png`: the photograph as RGBA, background transparent. |
+| BEN2, BiRefNet | `image/png`: the photograph as RGBA, background transparent. |
 | Moebius | `image/png`: the photograph with every box painted out. |
 
 A prepared image not held by this server (another worker, a restart, or dropped to stay within

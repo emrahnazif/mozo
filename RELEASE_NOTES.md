@@ -1,5 +1,16 @@
 ## Unreleased
 
+- **New family: BiRefNet** (`birefnet`), background removal and matting from the authors of
+  "Bilateral Reference for High-Resolution Dichotomous Image Segmentation". Four variants, all
+  MIT: `general` (the authors' general-purpose model, by far the most used), `lite` (about three
+  times faster), `matting` (soft alpha along hair and fur) and `hr` (2048x2048, for large
+  photographs). It returns what BEN2 returns -- `predict` an `HxW` alpha, `cutout` an RGBA image,
+  `refine=True` to remove colour fringes -- and has a `birefnet` workflow node. The alpha is the
+  model's own probability, not stretched per image. Bit-identical to the authors' code on the CPU.
+  On CUDA, `auto` runs it in half precision (the authors' own way, the same accuracy on their
+  validation sets), or through an fp32 TensorRT engine when TensorRT 11 is installed;
+  `runtime="tensorrt-fp16"` is 2.2 to 3.9 times faster than fp32. See the family's page.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

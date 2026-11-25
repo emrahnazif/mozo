@@ -1,7 +1,7 @@
 # Every built-in workflow node
 
 <!--
-summary: All 50 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
+summary: All 51 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
 label: Nodes
 keywords: mozo, workflow nodes, node catalogue, workflow editor, pipeline
 -->
@@ -63,6 +63,7 @@ what runs.
 |---|---|---|---|
 | `moebius` | image, detections → image | `variant`=general, `seed`=0, `dilate`=0 | Moebius: remove what you point it at and repaint the gap. Wire a segmenter into `detections`. |
 | `ben2` | image → image | `variant`=base, `stretch`=True, `refine`=False | BEN2: cut the background away, keeping a soft edge. Takes no prompt and no boxes. |
+| `birefnet` | image → image | `variant`=general, `refine`=False | BiRefNet: cut the background away. Takes no prompt and no boxes. |
 
 ## Pose
 

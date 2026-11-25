@@ -66,7 +66,7 @@ What `predict` returns depends on what the model does:
 | Detection, segmentation, keypoints, detection from words, click segmentation, OCR | a PixelFlow `Detections` |
 | CLIP, SigLIP 2 | a PixelFlow `Classifications`, one score per phrase |
 | Depth Anything V2 | an `HxW` float32 depth map |
-| BEN2 | an `HxW` uint8 alpha matte |
+| BEN2, BiRefNet | an `HxW` uint8 alpha matte |
 | Moebius | an `HxWx3` uint8 image |
 
 The embedding families have `encode_image` and `encode_text` for vectors, and Granite Embedding R2

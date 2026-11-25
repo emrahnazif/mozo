@@ -93,7 +93,7 @@ curl -X POST "http://localhost:8000/encode/granite_embedding_r2/small?text=how%2
 | Detection, segmentation, keypoints, detection from words, click segmentation, OCR | JSON: a list of detections |
 | CLIP, SigLIP 2 on `/predict` | JSON: a list of `{class_id, class_name, confidence}`, one per phrase |
 | Depth Anything V2 | a 16-bit PNG, with the depth range in `x-depth-unit`, `x-depth-min` and `x-depth-max` headers |
-| BEN2 | an RGBA PNG: the photograph with its background made transparent |
+| BEN2, BiRefNet | an RGBA PNG: the photograph with its background made transparent |
 | Moebius | a PNG: the photograph with the boxed region painted out |
 | `/encode` | JSON: `{model, revision, dim, embeddings}` |
 

@@ -364,6 +364,30 @@ Reproduce them, and record them:
 - **Two entry points that disagree.** EasyOCR's array path documents BGR and its path entry decodes
   greyscale with libjpeg directly — 27 and 7 grey levels apart. Hand both sides the same array.
 - **Mutable module globals** (`imgH`) become spec fields when vendored.
+- **`from_pretrained` loads in the checkpoint's dtype under transformers 5.** Its default became
+  `dtype="auto"`: BiRefNet's float16-stored checkpoints load as a float16 model and the fp32
+  reference silently is not one. Pass `dtype=torch.float32` to the reference, and decide on purpose
+  what dtype mozo publishes (BiRefNet keeps the publisher's float16; the load into float32
+  parameters is exact).
+- **A third-party remote-code file can carry a newer upstream than the checkpoint.** BiRefNet's
+  GitHub `main` routes Swin attention through SDPA where the Hugging Face remote code beside the
+  weights runs it eagerly. Gate against the code the model card loads.
+
+### Export traps (custom operators)
+
+- **An operator with no ONNX path at all.** `torchvision.ops.deform_conv2d`: no exporter symbolic;
+  ONNX `DeformConv` is missing from ONNX Runtime and is a plugin (which segfaulted the parser) in
+  TensorRT 11. Decompose it for the export only (`grid_sample` per tap plus a 1x1 conv), behind a
+  context manager the exporter enters, so the torch runtime stays exact. Loop over the taps rather than
+  stacking them: the stacked im2col tensor is `C * k * k * H * W` (3.3 GB at one 2048 stage).
+- **An autocast export keeps float32 weights.** Every weight is cast at each use, so the fp16 graph
+  is as large as the fp32 one. Store in float16 the initializers only ever read through a cast to
+  float16; for a float16-published checkpoint, store the fp32 graph's exactly-representable
+  weights as float16 behind a `Cast` too. Both are exact.
+- **TensorRT scratch is not torch memory.** `torch.cuda.max_memory_allocated` never sees an
+  engine's activations; read `engine.device_memory_size_v2`. BiRefNet `hr`'s fp32 engine needs
+  12 GB, more than torch, and failed to create its execution context (`None`, then an
+  `AttributeError`) with torch's cache holding the rest of the GPU.
 
 ---
 

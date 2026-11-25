@@ -501,6 +501,31 @@
         }
       }
     },
+    "granite_embedding_r2/multilingual-small": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "granite_embedding_r2/multilingual-small/2026-11-25/LICENSE",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "size": 11358
+            },
+            "NOTICE": {
+              "path": "granite_embedding_r2/multilingual-small/2026-11-25/NOTICE",
+              "sha256": "c17645b91f0990ab2713a3065b8b408551db3c1c84e6d42ef3191aed6334914c",
+              "size": 1124
+            },
+            "torch-fp32": {
+              "path": "granite_embedding_r2/multilingual-small/2026-11-25/torch-fp32.pth",
+              "sha256": "96121f562aa152985faf9d5c4f440c04bcd836fd83269c99e489143dd117eae5",
+              "size": 194905397
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
     "granite_embedding_r2/small": {
       "latest": "2026-11-24",
       "revisions": {

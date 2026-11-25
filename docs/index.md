@@ -1,7 +1,7 @@
 # Mozo
 
 <!--
-summary: Run 82 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers.
+summary: Run 83 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers.
 label: Mozo
 keywords: mozo, computer vision, model serving, object detection, segmentation, embeddings
 template: docs
@@ -9,13 +9,13 @@ template: docs
 
 Mozo runs computer vision models from one `pip install`: detection, segmentation, keypoints,
 open-vocabulary detection, OCR, depth, embeddings, background removal and object removal. That is
-82 models across 18 families, served over HTTP or called from Python, plus workflows that chain
+83 models across 18 families, served over HTTP or called from Python, plus workflows that chain
 them.
 
 Each of these models normally comes with its own package, and each package pins its own torch,
 numpy and OpenCV. Put a few in one environment and something breaks. Mozo ships none of those
 packages. Every model's inference code is copied into mozo and checked to return **exactly** the
-original's numbers, compared with no tolerance. So one environment runs all 82.
+original's numbers, compared with no tolerance. So one environment runs all 83.
 
 ## Install
 

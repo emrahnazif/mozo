@@ -19,7 +19,7 @@ itself; this page says what exists, how the choice is made, and when to override
 | YOLO11, YOLO26 | every variant | every variant | none |
 | ViTPose | every variant | every variant except `huge` | none |
 | SAM 3 | yes | none | yes (the image encoder) |
-| Granite Embedding R2 | yes | none | yes |
+| Granite Embedding R2 | every variant | none | `small` |
 | OWLv2 | yes, and fp16 on CUDA | every variant (the image tower in fp16, to build TensorRT engines from) | none |
 | Grounding DINO | yes, and fp16 on CUDA | none (exported on your machine, to build TensorRT engines from) | none |
 | BEN2, CLIP, Depth Anything V2, EasyOCR, EdgeTAM, Moebius, SAM 2, SigLIP 2 | yes | none | none |

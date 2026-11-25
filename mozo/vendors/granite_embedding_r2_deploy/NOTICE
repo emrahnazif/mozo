@@ -10,13 +10,15 @@ for Fast, Memory Efficient, and Long Context Finetuning and Inference"
 see the LICENSE file in this directory.
 
 It runs IBM's Granite Embedding R2 models, described in "Granite Embedding R2
-Models" (2025, arXiv:2508.21085). IBM publishes no inference code of its own; the
+Models" (2025, arXiv:2508.21085) and "Granite Embedding Multilingual R2 Models"
+(2026, arXiv:2605.13521). IBM publishes no inference code of its own; the
 checkpoints are ModernBertModel state dicts, and the transformers implementation
 is the one whose numbers they reproduce. See PROVENANCE.md.
 
 ON THE WEIGHTS
 --------------
-ibm-granite/granite-embedding-small-english-r2 is Apache-2.0, stated in the
+ibm-granite/granite-embedding-small-english-r2 and
+ibm-granite/granite-embedding-97m-multilingual-r2 are Apache-2.0, stated in each
 model card's metadata, and served ungated. Nothing here is inferred.
 
 THE VOCABULARY
@@ -29,6 +31,12 @@ strings. Its vocabulary, merges and added tokens are identical to
 answerdotai/ModernBERT-base's (Apache-2.0). The asset also carries character
 classes and NFC boundaries read out of the reference tokenizer by probing it;
 see PROVENANCE.md.
+
+assets/granite_multilingual_bpe.json.gz is derived from tokenizer.json as
+published in ibm-granite/granite-embedding-97m-multilingual-r2 at commit
+835ad14087e140460703cf0fae09f97d469d65c2 -- 179,934 pieces, 413,540 merge rules
+and 66 added tokens, under that repository's Apache-2.0 -- with character
+classes read out of the reference tokenizer by probing it.
 
 NOT INCLUDED
 ------------

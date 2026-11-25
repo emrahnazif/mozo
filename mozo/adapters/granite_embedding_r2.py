@@ -12,15 +12,20 @@ and let the database find the nearest chunks. mozo is the model in that pipeline
 mean nothing against CLIP's or SigLIP 2's, and it cannot search pictures by words. It can search
 what was *read* off pictures: EasyOCR's text, embedded here, is searchable by meaning.
 
-**Chunking is yours, and too long is refused.** Up to 8,192 tokens a text, ``[CLS]`` and
-``[SEP]`` included. Anything longer raises rather than being cut short silently: a chunk
-shortened without saying so is a different chunk.
+**Two variants, two languages.** ``small`` embeds English; ``multilingual-small`` embeds 200+
+languages (52 with explicit retrieval training, and code), so a question in one language finds a
+passage in another. Same network, same 384-d size, different tokenizers -- and different spaces:
+a vector from one never compares with a vector from the other.
+
+**Chunking is yours, and too long is refused.** Up to 8,192 tokens a text in English and 32,768
+multilingual, the special tokens included. Anything longer raises rather than being cut short
+silently: a chunk shortened without saying so is a different chunk.
 
 **An index is tied to the weights that built it.** A vector from one variant or revision means
 nothing against a vector from another, so a stored index has to record :attr:`revision`. Not the
 runtime: torch and CoreML agree to 1.8e-07, the size of two attention kernels disagreeing.
 
-**On Apple silicon it runs as a CoreML graph**, when ``coremltools`` is installed. CoreML runs a
+**On Apple silicon ``small`` runs as a CoreML graph**, when ``coremltools`` is installed. CoreML runs a
 fixed shape on the GPU and a flexible one only on the CPU, so the package holds the network at a
 few fixed lengths, sharing one set of weights, and a text is padded to the smallest that fits and
 masked (:mod:`~mozo.vendors.granite_embedding_r2_deploy.graph`). 0.27-0.67x torch's time on MPS
@@ -39,7 +44,7 @@ import numpy as np
 
 from .. import registry
 from ..runtimes import CoreMLRunner, coreml_functions, get_default_device, select_runtime
-from ..vendors.granite_embedding_r2_deploy import CONTEXT, SPECS, VARIANTS, Encoder
+from ..vendors.granite_embedding_r2_deploy import SPECS, VARIANTS, Encoder, Spec
 from ..vendors.granite_embedding_r2_deploy.graph import padded
 from ..vendors.granite_embedding_r2_deploy.tokenizer import Tokenizer
 from ..weights import artifacts, resolve, revision_of
@@ -53,10 +58,10 @@ _log = logging.getLogger(__name__)
 
 
 class GraniteEmbeddingR2Predictor:
-    """English text embeddings.
+    """Text embeddings: English (``small``) or multilingual (``multilingual-small``).
 
     Args:
-        variant: Which published model. ``small`` is the one carried.
+        variant: Which published model: ``small`` (English) or ``multilingual-small``.
         device: Where to run. Defaults to the best available.
         runtime: Which artifact to execute. ``auto`` picks the fastest published one.
         checkpoint_path: Your own checkpoint, instead of the published weights.
@@ -74,7 +79,7 @@ class GraniteEmbeddingR2Predictor:
         (1, 384)
     """
 
-    #: The variants carried. The vendor's ``config.py`` says why only the small one.
+    #: The variants carried. The vendor's ``config.py`` says why these two.
     VARIANTS = list(VARIANTS)
 
     #: Which runtimes this adapter can execute: torch, and the CoreML graph on Apple silicon.
@@ -113,7 +118,7 @@ class GraniteEmbeddingR2Predictor:
         self.revision = None if checkpoint_path else revision_of(FAMILY, variant, revision=revision)
         # No network is built here: torch builds it on the first encode, CoreML each length on the
         # first text that needs it.
-        self._encoder = (_Graph(weights) if self.runtime.startswith("coreml")
+        self._encoder = (_Graph(weights, SPECS[variant]) if self.runtime.startswith("coreml")
                          else Encoder(weights, SPECS[variant], device=self.device))
         _log.info("Granite Embedding R2 %s ready on %s via %s.", variant, self.device, self.runtime)
 
@@ -125,8 +130,9 @@ class GraniteEmbeddingR2Predictor:
         calibrate on your own data, never against an intuition about percentages.
 
         Raises:
-            ValueError: If no text is given, if one is blank, if one is over 8,192 tokens, or if
-                one contains an unpaired surrogate.
+            ValueError: If no text is given, if one is blank, if one is over the variant's
+                context (8,192 tokens in English, 32,768 multilingual), or if one contains an
+                unpaired surrogate.
         """
         return np.asarray(self._encoder.encode_text(text))
 
@@ -139,10 +145,10 @@ class _Graph:
     the package's own input shapes, so nothing here has to agree with how the export named them.
     """
 
-    def __init__(self, package: Path) -> None:
+    def __init__(self, package: Path, spec: Spec) -> None:
         self._package = package
         # Built here rather than on first use: 70 ms of tables, against ~1 s for each graph.
-        self._tokenizer = Tokenizer(CONTEXT)
+        self._tokenizer = Tokenizer(spec.context, spec.vocabulary)
         self._lengths = {shape[1]: name for name, shape in coreml_functions(package).items()}
         self._runners: dict[int, CoreMLRunner] = {}
         self._lock = Lock()

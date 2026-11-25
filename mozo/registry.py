@@ -239,14 +239,15 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         'module': 'mozo.adapters.granite_embedding_r2',
         'task_type': 'text_embedding',
         'description': (
-            'Granite Embedding R2 by IBM — English text embeddings. Text in, one vector out, and '
+            'Granite Embedding R2 by IBM — text embeddings, English (small) or multilingual '
+            '(multilingual-small: 200+ languages, cross-lingual). Text in, one vector out, and '
             'texts that mean the same thing land close together: search documentation, notes or '
             'what OCR read off an image by meaning rather than by keyword. Text only — it has no '
-            'image tower, so its vectors do not share a space with CLIP\'s or SigLIP 2\'s. 47.7M '
-            'parameters, 384-d vectors, up to 8,192 tokens a text. Served through /encode only. '
-            'Code and weights are both Apache-2.0.'
+            'image tower, so its vectors do not share a space with CLIP\'s or SigLIP 2\'s. '
+            '47.7M / 97M parameters, 384-d vectors, up to 8,192 / 32,768 tokens a text. Served '
+            'through /encode only. Code and weights are both Apache-2.0.'
         ),
-        'variants': ['small'],
+        'variants': ['small', 'multilingual-small'],
     },
 
     'grounding_dino': {

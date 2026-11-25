@@ -296,6 +296,18 @@ found traps it had not predicted, and the predicted ones were mostly real.
   mask changes every vector.
 - **Pooling by `argmax` over token ids, not by position** (CLIP).
 - **Silent truncation.** Upstream usually truncates; mozo raises, naming the count and the cap.
+- **Case-insensitive regex is a Unicode table too.** o200k's `(?i:'s|'t|...)` also matches `'ſ`
+  (the long s folds to `s`). Probe the reference for which characters join each contraction rather
+  than writing `[sS]` (Granite multilingual).
+- **A piece the vocabulary has whole may be taken whole** (`ignore_merges: true`). Merging gets a
+  different split: `INCLUDING` is one token whole and four merged.
+- **A byte with no piece and no unknown token vanishes**, and its neighbours may then merge. The
+  Granite multilingual vocabulary lacks 40 control bytes and three UTF-8 lead bytes.
+- **`single_word` added tokens are text when they touch a word character**, which is the regex
+  engine's `\w` (144,667 codepoints), not Python's `isalnum`.
+- **The wrapper may preprocess the text.** `sentence-transformers` strips leading and trailing
+  whitespace before tokenizing; `transformers` does not. 0.044 on a vector with three spaces either
+  side. Decide which the reference is, and say so.
 - **Lowercasing and separator rules are part of the contract.** Grounding DINO lowercases, appends
   a trailing `.` if absent, and treats `?` as a separator — all of which move the phrase map.
 
@@ -312,6 +324,10 @@ found traps it had not predicted, and the predicted ones were mostly real.
   and never reaches `scaled_dot_product_attention`, so an `attn_implementation` pin does not govern
   it. eager vs sdpa cost 1.5e-06 on Grounding DINO's BERT.
 - **A transpose is not a second matmul.** Follow upstream's order.
+- **Even equal-length batches can differ from rows run alone, depending on the thread count.** On
+  an x86 CPU with MKL, Granite's equal-length batches were identical on one thread and up to
+  1.6e-03 apart at 2-10 threads (identical on an M1 Max). A gate pinned to one thread cannot see
+  it: test batching at the default thread count.
 - **Batched and unbatched forwards are not bit-identical.** 2.5e-07 for OWLv2; **1.4e-05** for
   EasyOCR's recogniser, enough to flip a character. Batch exactly as upstream does — which may mean
   *not* batching.

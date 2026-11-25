@@ -9,18 +9,27 @@ through `sentence-transformers` (which is that model plus taking the `[CLS]` pos
 retrieval, normalising it), and so the `transformers` implementation is the one whose numbers the
 published checkpoints reproduce.
 
-**The weights are Apache-2.0**, stated in the model card's metadata on the checkpoint itself and
-served ungated (`gated: false` on the Hub API, checked 2026-11-20).
+Two variants: `small` (`granite-embedding-small-english-r2`, English) and `multilingual-small`
+(`granite-embedding-97m-multilingual-r2`, 200+ languages). The same network with different
+geometry, and different tokenizers.
+
+**The weights are Apache-2.0**, stated in each model card's metadata on the checkpoint itself and
+served ungated (`gated: false` on the Hub API, checked 2026-11-20 and 2026-11-25). The
+multilingual card also says "License: Apache 2.0" in its body and makes no exception for the
+tokenizer — unlike the larger multilingual model's card (see *Left behind*).
 
 ## What mozo guarantees, exactly
 
 **mozo's vector equals `F.normalize(ModernBertModel(ids).last_hidden_state[:, 0])`, bit for bit,
 on the CPU in float32 with SDPA attention.** `tools/verify/granite_embedding_r2.py` proves it on
 every run, with `torch.equal` and no tolerance: token ids, the embeddings, each of the twelve
-layers, the final norm (whose first row is the raw `[CLS]` vector) and the normalised vector, on
-fixtures either side of the attention window, a documentation page and a text at the full 8,192
-tokens; and the token ids alone on every line of the documentation and 20,000 random mixtures of
-Unicode's awkward corners. `--fuzz` adds every codepoint.
+layers, the final norm (whose first row is the raw vector) and the normalised vector, on fixtures
+either side of the attention window, a long text and a text at the full context (8,192 tokens;
+the multilingual 32,768 with `--long`); and the token ids alone on every line of the
+documentation and 20,000 random mixtures of Unicode's awkward corners, plus, for the multilingual
+tokenizer, every passage, question and answer of Belebele in 122 languages. `--fuzz` adds every
+codepoint. `--falsify` perturbs the vendor nine ways per variant and requires each to be caught at
+the stage it reaches first.
 
 **What the weights owe IBM's training run is not something mozo can measure**, and it is not
 claimed. IBM's benchmark numbers are self-reported; mozo claims the link it can check.
@@ -31,7 +40,13 @@ differently there.
 
 ## The reference is pinned, and its version does not move the answer
 
-Parity was established against **torch 2.11.0, transformers 5.8.0**. The checkpoint was saved by
+`small`'s parity was established against **torch 2.11.0, transformers 5.8.0**, and holds
+unchanged on **torch 2.13.0, transformers 5.9.0, tokenizers 0.22.2**, against which
+`multilingual-small` was established. The multilingual checkpoint was saved by transformers
+4.56.2; both were run on the same 23 fixtures under torch 2.13.0: token ids identical, and **all
+414 stage comparisons `torch.equal`**.
+
+For `small`: The checkpoint was saved by
 transformers 4.51.3, and 5.x rewrote this model — its masks now come from `masking_utils`, its
 rotary embedding from `modeling_rope_utils` — so both were run on the same 19 fixtures when the
 family was built: token ids identical, and **all 323 stage comparisons `torch.equal`**. There is
@@ -47,10 +62,18 @@ one reference, not two.
 | `configuration_modernbert.py` and the variant's `config.json` | the geometry, written out as a frozen dataclass in `config.py` |
 | `tokenizer.json` at commit `2ab6fa8e…` | the vocabulary, merges, added tokens and template, re-encoded into `assets/granite_bpe.json.gz` |
 | the `tokenizers` library, probed | the character classes and NFC boundaries in the same asset (see *Divergences* 3) |
+| `granite-embedding-97m-multilingual-r2`'s `tokenizer.json` at commit `835ad140…` | the vocabulary, merges, added tokens and template, re-encoded into `assets/granite_multilingual_bpe.json.gz` |
+| the `tokenizers` library, probed | o200k's character classes, the case-folded contractions and the word characters that stop a `single_word` token, in the same asset |
 
 `assets/granite_bpe.json.gz` is 429,293 bytes, sha256
 `7fb1f214fdb8a9491fbced271c6b5d956ed521082576371442ba8ce911f5e479`, rebuilt by
-`tools/fetch/granite_embedding_r2.py --derive-vocab` under Python 3.10 with `tokenizers` 0.22.2.
+`tools/fetch/granite_embedding_r2.py --derive-vocab small` under Python 3.10 with `tokenizers`
+0.22.2.
+
+`assets/granite_multilingual_bpe.json.gz` is 2,950,820 bytes, sha256
+`0233c1a449f5ceede2a548e01abc8694fcd7e6b5251329f570138bc95ad2f77b`, rebuilt by
+`--derive-vocab multilingual-small` (any Python: this pipeline has no normaliser) with
+`tokenizers` 0.22.2. The multilingual checkpoint is repacked the same way, 195 MB in bfloat16.
 
 The checkpoint is consumed as IBM publishes it, modulo one repack: `tools/fetch` verifies
 `model.safetensors` against the Hub's sha256 and writes the same tensors as an ordinary state dict,
@@ -70,10 +93,16 @@ one `Spec` and a checkpoint with no new code, and it exercises no path `small` d
 because `small` took 99% of the downloads across the two (6.66M a month against 54K, November
 2026), not because anything here cannot run it.
 
-**The multilingual R2 models** (`granite-embedding-97m-multilingual-r2`, `-311m-…`). Not examined:
-their tokenizer, context and architecture may all differ.
+**`granite-embedding-311m-multilingual-r2`** (61K downloads a month against the 97M's 235K,
+November 2026). The same network (GeGLU, 22 layers, 768-d) and a 262K tokenizer that its card says
+"is derived from the Gemma 3 tokenizer ... Use of the Gemma tokenizer is subject to the Gemma Terms
+of Use". That is a custom licence on a part mozo would have to ship, so it is not carried. The
+97M's card states Apache-2.0 with no such exception, and its tokenizer is a different one: a
+byte-level BPE with o200k's split pattern and gpt-oss's special-token names.
 
-**The R1 models.** XLM-RoBERTa, a different architecture.
+**The R1 models** (`granite-embedding-278m-multilingual`, 270K a month, and `-107m-multilingual`,
+56K; the English `125m` and `30m`). XLM-RoBERTa with a SentencePiece tokenizer and a 512-token
+context: a different architecture, and IBM says the multilingual R2 models replace them.
 
 **The task heads** — masked language model, sequence and token classification, question answering,
 multiple choice. The published repository is the bare encoder.
@@ -99,13 +128,15 @@ produces unnormalized vectors"). mozo normalises, with `F.normalize` — what
 retrieval — so that a dot product between any two vectors is a cosine, the contract every family
 that embeds keeps. The gate compares the raw vector too, so this is an addition, not a change.
 
-### 2. Nothing pads, and only equal lengths batch, and only on the CPU
+### 2. Nothing pads, and nothing batches
 
 A padded batch is not bit-identical to its rows run alone (1.1e-07, measured), which would make a
 stored vector depend on what else happened to be in its request. So rows are never padded. Texts of
-exactly equal length share a forward pass on the CPU, where that was measured identical at every
-length and batch size tried (16 to 1,500 tokens, batches of 2 to 64); on MPS it was not (1.8e-07
-at some sizes) and CUDA is unmeasured, so there every text runs alone.
+exactly equal length used to share a forward pass on the CPU, measured identical on an Apple M1 Max
+at every length and batch size tried. On a 20-core x86 machine (torch 2.13, MKL) they are not:
+identical on one thread, but at 2, 8 and 10 threads 7e-06 to 1.6e-03 apart on the raw vector at 16
+to 64 tokens, for both variants (identical from 200 tokens up). So every text now runs alone, on
+every device.
 
 ### 3. The tokenizer carries its Unicode tables
 
@@ -139,11 +170,34 @@ million texts. Disabling the boundaries failed 4,556 of them; replacing the carr
 then `tools/verify/granite_embedding_r2_corpus.py PATH` under each Python — that one needs only
 the standard library.
 
+### 3b. The multilingual tokenizer, rebuilt
+
+Not normalised at all, so there is no NFC to carry. Its split pattern is o200k's, whose seven
+classes — `\p{L}`, `\p{N}`, `\s`, `[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]`, `[\p{Ll}\p{Lm}\p{Lo}\p{M}]`
+and their complements — are read off the reference by probing every codepoint, as are its
+case-insensitive contractions (`(?i:'s)` also matches `'ſ`, the long s folding to `s`) and the
+word characters that stop a `single_word` token. The reference's Unicode is newer than Python
+3.12's: it calls 4,924 codepoints letters that Python 3.12 has unassigned. Verified identical to
+the reference on every codepoint in contexts that cross each class, 20,000 random mixtures of the
+variant's own tokens and Unicode's corners, 20,000 strings of random codepoints, and Belebele's
+passages, questions and answers in 122 languages.
+
 ### 4. The sliding mask is always built
 
 Upstream passes no mask to a sliding layer below 64 tokens, which is the same as one that allows
 everything. mozo always builds it — measured bit-identical at every length from 2 to 8,192 — so
 there is no branch on length for an exported graph to freeze.
+
+### 5. No whitespace stripping
+
+`sentence-transformers`, which both model cards use, strips each text's leading and trailing
+whitespace before tokenizing (`str.strip()` in its `Transformer.tokenize`); `transformers` does
+not, and mozo follows `transformers`. For a text with leading or trailing whitespace the vectors
+differ — 0.044 on one fixture with three leading and three trailing spaces, 0.008 on code ending in
+`\r\n`. On every fixture without it, `sentence-transformers` 5.1.1 matched the reference to
+6e-08 (it passes an attention mask, which `transformers` turns into a different SDPA call).
+Measured with `multilingual-small`; the English model behaves the same way. Strip before encoding
+if an index was built with `sentence-transformers`.
 
 ## Traps
 
@@ -174,6 +228,25 @@ ones with a number were confirmed by perturbing them and watching the gate fail 
   every position, even in ASCII text. The astral ranges sit behind a lookahead: 16× faster on the
   boundary scan, identical on every codepoint.
 
+And the multilingual variant's, each caught by `--falsify` where it applies:
+
+- **SiLU, not GELU**, in the same gated MLP: `Wo(silu(value) * gate)`. IBM's card calls the larger
+  model's MLP "GeGLU" and this one's "SiLU"; both are gated. Exact GELU instead fails from layer 0.
+- **Rotary bases 150,000 (full) and 160,000 (sliding)**, read by transformers 5 from the config's
+  `global_rope_theta` and `local_rope_theta` into `rope_parameters`.
+- **bfloat16 by default**, 7.2e-03 on the unit vectors.
+- **A piece the vocabulary has whole is taken whole** (`ignore_merges`): `INCLUDING` is one token,
+  where merging gives four. Merging every piece changes the ids of 531 of the first 80,000 texts
+  of the gate's tokenizer corpus.
+- **40 control bytes and the UTF-8 lead bytes 0xF1, 0xF2 and 0xF4 have no piece**, and there is no
+  unknown token, so upstream drops them silently and the bytes either side may merge. Text in the
+  planes U+40000–U+BFFFF and U+100000+ loses its lead byte and keeps three continuation bytes.
+- **44 reserved tokens are `single_word`**: against a letter, digit or underscore (the regex
+  engine's `\w`, 144,667 codepoints) they are not that token but text.
+- **Case-insensitive contractions**: `'S`, `'LL`, `'Re` join their word, and so does `'ſ`. Mostly
+  the ids come out the same either way — matching only lower case changed 4 of those 80,000 texts
+  — but not always: `O'Shannessy` takes `'S` as one token.
+
 ## Speed
 
 The one record of what this costs; `tools/bench/granite_embedding_r2.py` produces it. Measured on
@@ -195,13 +268,15 @@ What it says:
 - **Per-token cost is not flat, and its shape differs by device.** On the CPU, 1,024 and 2,048
   tokens cost about what 512 does per token; on MPS, 2,048 costs 1.6× what 512 does. The full
   8,192 costs 2.5× (CPU) to 5.9× (MPS) the per-token price of 512.
-- **For many short texts the CPU wins.** Sixty-four short queries in one call: 86 ms on the CPU,
-  where equal-length texts share a forward pass, and 585 ms on MPS, where each runs alone.
+- **For many short texts the CPU won** while equal-length texts shared a forward pass there:
+  sixty-four short queries in one call, 86 ms on the CPU against 585 ms on MPS. Every text now runs
+  alone (*Divergences* 2), so that advantage is gone.
 - **The tokenizer is not the bottleneck**: 5.6 ms cold for 2,048 tokens of documentation — about
   2% of the CPU encode — and 1.6 ms once its word cache is warm (`transformers`' tokenizer, also
   warm: 2.2 ms).
 
-NVIDIA is unmeasured.
+On NVIDIA, for `multilingual-small` (RTX 3090, torch 2.13): 6.1 ms at 16 tokens, 12.1 ms at
+1,024, 331 ms at 8,192 — launch-bound below a few hundred tokens. See *Export*.
 
 ## Export
 
@@ -280,3 +355,44 @@ graph TensorRT would build an engine from — and that needs a measurement on an
 `tools/export/granite_embedding_r2.py --device cuda`. A TensorRT engine cannot be published at all:
 it is built for one GPU architecture and one TensorRT version, so it would be built on the machine
 that runs it, which is runtime work mozo does not have yet for any family.
+
+(That paragraph predates mozo's TensorRT runner; the multilingual measurement below used it.)
+
+### `multilingual-small`: ONNX and TensorRT, measured, not published
+
+Measured 2026-11-25 on an RTX 3090 (TensorRT 11.5, strongly typed, TF32 off; onnxruntime-gpu
+1.23.2; torch 2.13.0) and, for the CPU, a 20-core x86 machine under load from other jobs (load
+average 11–16, so CPU times are indicative). `tools/export/granite_embedding_r2.py --variant
+multilingual-small` gives the CPU rows, `tools/bench/granite_embedding_r2_runtimes.py` the CUDA
+ones. Quality is Belebele retrieval in 20 languages of 20 scripts (27,760 texts, median 33 tokens):
+nDCG@10 per language, 900 questions against 488 passages, averaged.
+
+| runtime | 16 tok | 256 tok | 1,024 tok | 8,192 tok | nDCG@10 | max\|Δ\| vs torch fp32 |
+|---|---|---|---|---|---|---|
+| torch fp32, CUDA | 6.1 ms | 5.4 ms | 12.1 ms | 331 ms | 77.137 | — |
+| torch fp16 autocast, CUDA | 6.7 ms | 10.2 ms | 10.3 ms | 73.5 ms | 77.156 | 5.7e-03 |
+| ONNX Runtime fp32, CUDA | 2.1 ms | 3.2 ms | 14.7 ms | 533 ms | 77.137 | 2.8e-06 |
+| TensorRT fp32 | 1.3 ms | 2.0 ms | 11.5 ms | 455 ms | 77.137 | 5.1e-06 |
+| TensorRT fp16 (autocast graph) | 0.95 ms | 1.2 ms | 6.9 ms | 285 ms | 77.155 | 5.2e-03 (min cos 0.99958) |
+
+ONNX Runtime on the CPU (8 threads, against torch on the same threads): parity 1.3e-07 to 3.0e-07
+at ten lengths from 2 to 8,192 tokens; 0.73× torch's time at 32 tokens, 0.80× at 64, then slower —
+1.18× at 128, 1.98× at 512, 5.07× at 8,192 — and 27 GB of memory at 8,192, because opset 17
+materialises every attention score. The optimizer fuses LayerNorm and no attention.
+
+**Why none is published:**
+
+- **No graph runtime holds the context.** The variant takes 32,768 tokens. An engine built for
+  that range ran out of memory on the 24 GB card at 16,384 tokens in fp32 and at 32,768 in fp16
+  (TensorRT asks for 24 GB: the attention scores, materialised), and at 32,768 in fp32 it failed
+  with an illegal memory access that took the process down. torch's SDPA runs 32,768 tokens
+  without trouble. A runtime that refused texts torch accepts would change what the variant is.
+- **fp16 drifts with length.** On random ids, the TensorRT fp16 vector's cosine to fp32 was
+  0.99986 at 256 tokens, 0.994 at 8,192 and 0.969 at 16,384. Retrieval on Belebele, whose texts are
+  at most 1,627 tokens, did not move (77.155 against 77.137; a mixed index, fp16 passages and fp32
+  questions, 77.154); long documents are where it would.
+- **fp32 engines win only on short texts**: 4.6× torch at 16 tokens, about even at 1,024, and
+  slower from 4,096 (0.73× at 8,192). mozo picks one runtime per load, not per text.
+
+The case that remains is a query-only engine, capped at a few hundred tokens: 1 ms against 6 ms.
+That is a different contract — a cap below the context — and is left for a request.

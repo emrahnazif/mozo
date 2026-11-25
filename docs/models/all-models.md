@@ -78,12 +78,12 @@ images by text in a database of your own.
 
 ## Text embeddings
 
-English text in, one vector out, for searching documents by meaning. Text only: these vectors do
+English or multilingual text in, one vector out, for searching documents by meaning. Text only: these vectors do
 not share a space with CLIP's or SigLIP 2's.
 
 | Family | Variants | Licence | Runtimes | Size |
 |---|---|---|---|---|
-| [Granite Embedding R2](/docs/models/granite-embedding-r2.md) | `small` | Apache-2.0 | torch, coreml | 95 MB |
+| [Granite Embedding R2](/docs/models/granite-embedding-r2.md) | `small` `multilingual-small` | Apache-2.0 | torch, coreml | 95–195 MB |
 
 ## Text recognition
 

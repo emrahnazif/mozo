@@ -1,5 +1,21 @@
 ## Unreleased
 
+- **Granite Embedding R2 embeds 200+ languages: `granite_embedding_r2/multilingual-small`.** IBM's
+  `granite-embedding-97m-multilingual-r2`: 384-d vectors, up to 32,768 tokens a text, 52 languages
+  with explicit retrieval training plus code, and a question in one language finds its answer in
+  another. Bit-identical to `transformers` on the CPU at every stage; its tokenizer is pure Python
+  like the English one, checked against the reference on every Unicode codepoint and on Belebele
+  in 122 languages. Apache-2.0, 195 MB. Its vectors do not mix with `small`'s. It runs on torch:
+  TensorRT was measured (up to 4.6 times faster on short texts, retrieval unchanged) but cannot
+  hold the 32,768-token context on a 24 GB GPU, so no graph is published.
+- **Granite Embedding R2 no longer batches texts on the CPU, so a vector never depends on what it
+  was encoded beside.** Texts of equal length shared a forward pass on the CPU, which was measured
+  identical on an Apple M1 Max; on a many-core x86 CPU with more than one thread it is not (up to
+  1.6e-03 on the raw vector). Each text now runs alone everywhere. Vectors are unchanged for any
+  text encoded on its own; many short queries in one call are slower on the CPU.
+- mozo does not strip leading and trailing whitespace from a text before embedding it, while
+  `sentence-transformers` does: documented on the Granite page, not changed.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

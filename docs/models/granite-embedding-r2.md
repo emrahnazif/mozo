@@ -1,16 +1,18 @@
 # Granite Embedding R2: search text by meaning
 
 <!--
-summary: IBM's Granite Embedding R2 in mozo: English text in, one 384-d vector out, for searching documents by meaning. Apache-2.0.
+summary: IBM's Granite Embedding R2 in mozo: English or multilingual text in, one 384-d vector out, for searching documents by meaning. Apache-2.0.
 label: Granite Embedding R2
-keywords: mozo, granite embedding, text embeddings, semantic search, retrieval, rag
+keywords: mozo, granite embedding, text embeddings, multilingual embeddings, semantic search, retrieval, rag
 -->
 
-Granite Embedding R2 turns English text into one 384-dimensional vector, and texts that mean the
-same thing land close together. Use it to search documentation, notes, or what
+Granite Embedding R2 turns text into one 384-dimensional vector, and texts that mean the same thing
+land close together. Use it to search documentation, notes, or what
 [EasyOCR](/docs/models/easyocr.md) read off an image, by meaning rather than by keyword: "invoice
-total" finds "amount due". It is mozo's only text-only family: it takes no image. The model is
-IBM's `granite-embedding-small-english-r2`, 47.7M parameters.
+total" finds "amount due". It is mozo's only text-only family: it takes no image. Two variants:
+`small` is IBM's `granite-embedding-small-english-r2` (47.7M parameters) for English, and
+`multilingual-small` is `granite-embedding-97m-multilingual-r2` (97M) for 200+ languages, where a
+question in one language finds its answer in another.
 
 ## Quick start
 
@@ -37,6 +39,20 @@ curl -X POST "http://localhost:8000/encode/granite_embedding_r2/small?text=how%2
 {"model": "granite_embedding_r2/small", "revision": "2026-11-24", "dim": 384, "embeddings": [[0.05614, -0.00832, ...]]}
 ```
 
+Across languages, with the multilingual variant (IBM's own example: an English, a German and a
+Japanese question against passages in Japanese, English and German):
+
+```python
+model = mozo.get_model("granite_embedding_r2/multilingual-small")
+questions = model.encode_text(["What is the tallest mountain in Japan?",
+                               "Wer hat das Lied Achy Breaky Heart geschrieben?",
+                               "ドイツの首都はどこですか？"])
+passages = model.encode_text(["富士山は、静岡県と山梨県にまたがる活火山で、標高3776.12 mで日本最高峰の独立峰である。",
+                              "Achy Breaky Heart is a country song written by Don Von Tress.",
+                              "Berlin ist die Hauptstadt und ein Land der Bundesrepublik Deutschland."])
+(questions @ passages.T).argmax(axis=1)  # array([0, 1, 2]): each question finds its passage
+```
+
 `/predict` answers `501` and says where to go instead, because the model answers nothing about an
 image:
 
@@ -46,9 +62,16 @@ image:
 
 ## Variants
 
-| ID | Vector | Context | Weights (torch) | Runtimes | Licence |
-|---|---|---|---|---|---|
-| `granite_embedding_r2/small` | 384-d | 8,192 tokens | 95 MB | torch, coreml | Apache-2.0 |
+| ID | Languages | Vector | Context | Weights (torch) | Runtimes | Licence |
+|---|---|---|---|---|---|---|
+| `granite_embedding_r2/small` | English | 384-d | 8,192 tokens | 95 MB | torch, coreml | Apache-2.0 |
+| `granite_embedding_r2/multilingual-small` | 200+ (52 with retrieval training), and code | 384-d | 32,768 tokens | 195 MB | torch | Apache-2.0 |
+
+The two variants are different spaces, despite the same size: a vector from one means nothing
+against a vector from the other. IBM's larger multilingual model, `granite-embedding-311m-multilingual-r2`,
+is not carried: its tokenizer is subject to the Gemma Terms of Use, not Apache-2.0. Nor are the R1
+models (`granite-embedding-278m-multilingual` and `-107m-multilingual`), which IBM says the R2
+multilingual models replace.
 
 ## Inputs and outputs
 
@@ -58,13 +81,13 @@ model.encode_text(text)
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `text` | `str` or `list[str]` | | One text or several, up to 8,192 tokens each. |
+| `text` | `str` or `list[str]` | | One text or several, up to the variant's context each: 8,192 tokens (`small`) or 32,768 (`multilingual-small`). |
 
 Returns a float32 array of shape `(N, 384)`, in the order given, always two-dimensional. The
 vectors are L2-normalised, so a dot product is a cosine similarity. The model's `.revision` names
 the weights that produced them.
 
-`ValueError` if no text is given, if one is blank, if one is over 8,192 tokens, or if one contains
+`ValueError` if no text is given, if one is blank, if one is over the context, or if one contains
 an unpaired surrogate.
 
 Over HTTP, `/encode` takes `text`, repeated once per text (`?text=…&text=…`), and returns `model`,
@@ -84,7 +107,8 @@ The usual pipeline: split your documents into chunks, embed each chunk once and 
 a vector database, then embed a question and let the database find the nearest chunks. Mozo is the
 model in that pipeline and nothing else.
 
-A text can be up to 8,192 tokens, `[CLS]` and `[SEP]` included. A longer one raises a `ValueError`
+A text can be up to 8,192 tokens with `small` and 32,768 with `multilingual-small`, the special
+tokens at either end included. A longer one raises a `ValueError`
 naming its length instead of being cut short, because a chunk shortened without telling you is a
 different chunk:
 
@@ -105,18 +129,16 @@ What has been measured, and on which machines, is in the vendor's `PROVENANCE.md
 
 ### A vector does not depend on what was encoded beside it
 
-On torch, texts are never padded, because a padded batch is not bit-identical to its rows run alone.
-On the CPU, texts of exactly the same length share one forward pass, which was measured identical to
-running each alone. On other devices each text runs alone. So the same text always gets the same
-vector, whatever arrived with it.
+Every text runs alone: texts are never padded and never batched. A padded batch is not
+bit-identical to its rows run alone, and on a multi-threaded x86 CPU not even a batch of texts of
+exactly equal length is (up to 1.6e-03 on the raw vector, measured with both variants). So the
+same text always gets the same vector, whatever arrived with it. Earlier versions batched
+equal-length texts on the CPU, which was measured identical on an Apple M1 Max and on one thread,
+and not on a many-core x86 machine.
 
-One consequence: for many short texts, such as search queries, the CPU can be the faster device,
-because only there do they share a forward pass. On an Apple M1 Max it was several times faster than
-the GPU for a batch of short queries.
+### On Apple silicon `small` runs as a CoreML graph
 
-### On Apple silicon it runs as a CoreML graph
-
-With `pip install 'mozo[coreml]'`, `auto` runs Granite through CoreML on a Mac (macOS 15 or later).
+With `pip install 'mozo[coreml]'`, `auto` runs `small` through CoreML on a Mac (macOS 15 or later).
 CoreML only reaches the GPU with a fixed input size, so the graph holds the model at eight fixed
 lengths, from 64 to 8,192 tokens, and each text is padded to the shortest one that fits. The padding
 is masked: no real token attends to it, so the vector is the one torch gives, within 1.8e-07. An
@@ -136,6 +158,16 @@ A text that only just spills into the next length, such as 2,049 tokens, runs at
 second, so a server that only sees short queries never loads the long ones. Pass
 `runtime="torch-fp32"` to run on torch instead.
 
+### `multilingual-small` runs on torch only
+
+ONNX Runtime and TensorRT were measured for it on an RTX 3090 and are not published. TensorRT is
+4.6 times faster than torch on a 16-token query (1.3 ms against 6.1 ms in fp32, 0.95 ms in fp16)
+and Belebele retrieval in 20 languages does not move (nDCG@10 77.14 in fp32, 77.16 in fp16). But
+no engine could hold the 32,768-token context on a 24 GB card, fp32 engines are slower than torch
+from about 4,000 tokens, and fp16's distance from fp32 grows with the text's length. On the CPU,
+ONNX Runtime is faster only below about 100 tokens. The numbers are in the vendor's
+`PROVENANCE.md`, under *Export*.
+
 ### The scores are cosine similarities
 
 A dot product between two vectors is their cosine. It is not a probability and has no calibrated
@@ -153,18 +185,26 @@ either revision works with the other; only the download halved.
 
 ### The same text gets the same tokens on every Python
 
-The tokenizer needs Unicode's answers (is this a letter, how does this character compose), and those
-change between Python versions: Python 3.10 ships Unicode 13, Python 3.14 ships Unicode 16, and the
-reference tokenizer uses neither. Left alone, a document's vector would depend on which Python
-embedded it. So mozo's tokenizer carries the reference's own tables, and was checked identical to
-the reference on every codepoint, runs of combining marks, random mixtures and every line of these
-docs, under Python 3.10, 3.11, 3.12, 3.13 and 3.14.
+The tokenizers need Unicode's answers (is this a letter, upper or lower case, how does this
+character compose), and those change between Python versions: Python 3.10 ships Unicode 13, Python
+3.14 ships Unicode 16, and the reference tokenizer uses neither. Left alone, a document's vector
+would depend on which Python embedded it. So mozo's tokenizers carry the reference's own tables.
+The English one was checked identical to the reference on every codepoint, runs of combining marks,
+random mixtures and every line of these docs, under Python 3.10, 3.11, 3.12, 3.13 and 3.14; the
+multilingual one on every codepoint, random mixtures, and every passage, question and answer of
+Belebele in its 122 languages.
+
+The multilingual tokenizer does not normalise: `e` followed by a combining accent and the
+precomposed `é` are different tokens, as they are upstream. Nor does mozo strip leading and
+trailing whitespace, which `sentence-transformers` does before tokenizing: a text with a trailing
+newline gets a slightly different vector from mozo than from `SentenceTransformer.encode`. Strip it
+yourself if your index was built with `sentence-transformers`.
 
 ### Parity
 
-Bit-identical to `transformers`' `ModernBertModel` on the CPU at every stage: token ids, the
-embeddings, all twelve layers, the final norm and the unit vector, compared with `torch.equal` and
-no tolerance. It runs at the reference's speed.
+Both variants are bit-identical to `transformers`' `ModernBertModel` on the CPU at every stage:
+token ids, the embeddings, all twelve layers, the final norm and the unit vector, compared with
+`torch.equal` and no tolerance, up to the full context. It runs at the reference's speed.
 
 Two traps that would pass a code review:
 
@@ -175,7 +215,7 @@ Two traps that would pass a code review:
 
 ## Weights and licence
 
-Code and weights are Apache-2.0, stated in the model card's metadata and downloadable without a
+Code and weights are Apache-2.0, stated in each model card's metadata and downloadable without a
 gated login. IBM trained the weights and publishes no inference code of its own; the extraction
 derives from `transformers/models/modernbert` (© 2024 Answer.AI, LightOn, and contributors, and the
 HuggingFace Inc. team). The pinned reference versions and what was taken are in

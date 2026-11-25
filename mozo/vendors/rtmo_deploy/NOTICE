@@ -1,0 +1,31 @@
+rtmo_deploy
+Copyright (c) OpenMMLab. All rights reserved.
+
+This product includes software developed by OpenMMLab, published as MMPose
+(https://github.com/open-mmlab/mmpose, release v1.3.2) and described in "RTMO:
+Towards High-Performance One-Stage Real-Time Multi-Person Pose Estimation"
+(Lu, Jiang, Li, Li, Chen, Yang; CVPR 2024, arXiv:2312.07526).
+
+The modules here are extracted from MMPose's RTMO implementation and from the
+mmcv and mmengine building blocks it is assembled from (ConvModule, Swish,
+MultiheadAttention, FFN, Scale). All three projects are licensed under the
+Apache License, Version 2.0; see the LICENSE file in this directory, which is
+the text MMPose publishes. The backbone is YOLOX's CSPDarknet and the neck is
+RT-DETR's hybrid encoder, both as MMPose re-implements them.
+
+The published checkpoints are taken to be Apache-2.0 as well. MMPose states no
+separate terms for its model zoo, so this is an inference from the repository's
+licence rather than a statement the authors make about the weights. They were
+trained on "body7": COCO, AI Challenger, CrowdPose, MPII, sub-JHMDB, Halpe and
+PoseTrack18, whose own terms govern those datasets.
+
+The joint names in the published labels.json are COCO's own, from the
+person_keypoints annotations (Creative Commons Attribution 4.0), and match the
+checkpoints' own dataset metadata position by position.
+
+NOT INCLUDED
+------------
+Training, the assigner, the losses, the proxy keypoint regression branch and
+the MLE sigma branch are not part of this package; neither is mmdeploy's
+switch_to_deploy re-parameterisation. See PROVENANCE.md for the full list and
+for why.

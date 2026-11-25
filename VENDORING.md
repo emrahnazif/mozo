@@ -296,6 +296,11 @@ found traps it had not predicted, and the predicted ones were mostly real.
   mask changes every vector.
 - **Pooling by `argmax` over token ids, not by position** (CLIP).
 - **Silent truncation.** Upstream usually truncates; mozo raises, naming the count and the cap.
+- **`str.lower()` is not the reference's lowercase even codepoint by codepoint.** OmDet-Turbo's
+  `CLIPTokenizer` lowercases in Rust, one codepoint at a time: Python applies the Greek final-sigma
+  rule (`"ΑΣ".lower()` is `"ας"`, the reference gives `"ασ"`), and 55 single codepoints differ
+  between Python 3.12's tables and the reference's. Fuzzing 20,034 prompts found 17 wrong; a
+  1,488-entry table derived from `tokenizers` fixed all of them.
 - **Lowercasing and separator rules are part of the contract.** Grounding DINO lowercases, appends
   a trailing `.` if absent, and treats `?` as a separator — all of which move the phrase map.
 
@@ -356,6 +361,19 @@ Reproduce them, and record them:
 - A prompt containing a literal `<|endoftext|>` pools there (CLIP). Upstream behaves the same way.
 
 ### Environment traps
+
+- **An environment variable can change the reference's arithmetic.** timm's Swin window attention
+  takes the explicit `q @ k.T` path unless `TIMM_FUSED_ATTN=2`, when it calls
+  `scaled_dot_product_attention` -- different bits. Remove it in the gate before timm is imported.
+- **transformers 5 renames published keys inside `from_pretrained`.** OmDet-Turbo's checkpoint
+  says `language_backbone.model.text_model.*`; transformers 5's `CLIPTextModel` has no
+  `text_model` level. A gate that loads the published file directly has to rename the same way.
+- **transformers 5's default image processor is a different picture.** `AutoProcessor` returns
+  the torchvision backend, which resizes unlike PIL and unlike the authors' pipeline; pin
+  `backend="pil"` when PIL is what the weights were trained and evaluated with.
+- **An upstream text cache can make the reference history-dependent.** OmDet-Turbo's model caches
+  each class prompt across calls and encodes only the new ones, so the same prompt's embedding
+  depends on which batch it was first encoded in. Empty the caches before every reference call.
 
 - **Import-time side effects.** EasyOCR sets `os.environ["LRU_CACHE_CAPACITY"] = "1"` — a
   process-wide torch allocator setting that is not a library's to write. Do not carry it.

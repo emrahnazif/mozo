@@ -22,6 +22,7 @@ itself; this page says what exists, how the choice is made, and when to override
 | Granite Embedding R2 | yes | none | yes |
 | OWLv2 | yes, and fp16 on CUDA | every variant (the image tower in fp16, to build TensorRT engines from) | none |
 | Grounding DINO | yes, and fp16 on CUDA | none (exported on your machine, to build TensorRT engines from) | none |
+| OmDet-Turbo | yes | the image path in fp32 (also run by ONNX Runtime) and fp16, to build TensorRT engines from | none |
 | BEN2, CLIP, Depth Anything V2, EasyOCR, EdgeTAM, Moebius, SAM 2, SigLIP 2 | yes | none | none |
 
 Some of those families publish graphs mozo does not run yet, such as SAM 2's ONNX and CoreML and
@@ -44,7 +45,7 @@ packages can run:
 CoreML needs `pip install 'mozo[coreml]'` and ONNX needs `pip install 'mozo[onnx]'`. Without them,
 `auto` simply never picks those graphs. In practice: on Apple silicon with the CoreML extra, RF-DETR,
 YOLOv8, YOLO12, SAM 3 and Granite Embedding R2 run as CoreML graphs, and everything else runs on
-torch. On CUDA, RF-DETR runs as `tensorrt-fp32` when TensorRT 11 or later is installed, OWLv2 and
+torch. On CUDA, RF-DETR and OmDet-Turbo run as `tensorrt-fp32` when TensorRT 11 or later is installed, OWLv2 and
 Grounding DINO run as `torch-fp16`, and everything else runs on torch in fp32.
 
 ## Choose one yourself
@@ -92,6 +93,9 @@ publishes a graph and `tensorrt-fp16` on its four detection variants. Its fp32 e
 detection on 500 COCO images and runs 1.7 to 2.6 times faster than torch, because RF-DETR is
 limited by kernel launches at one image at a time; its fp16 engine is about 6 times faster and
 changes 0.2–0.5% of detections.
+[OmDet-Turbo](/docs/models/omdet-turbo.md#on-cuda-tensorrt) offers both: its fp32 engine changed no
+detection on 500 COCO images at 1.6 times torch's speed, and its fp16 engine is 2.8 times faster
+and changes 0.1% of them.
 
 [OWLv2](/docs/models/owlv2.md#on-cuda-half-precision-and-tensorrt) and
 [Grounding DINO](/docs/models/grounding-dino.md#on-cuda-half-precision-and-tensorrt) offer both;
@@ -135,8 +139,8 @@ model = ModelManager().get_model("owlv2", "base-ensemble", runtime="tensorrt-fp1
 ```
 
 The first load on a machine builds the engine and keeps it in mozo's cache. That takes 12 s for an
-RF-DETR fp32 engine (about 45 s in fp16), 17 s for OWLv2 `base` and 26 s for `large` on an RTX
-3090, and about 3.5 minutes for Grounding DINO, which exports its graph first. Every later load reuses it and takes about a second. An engine only fits the GPU model and the TensorRT version it
+RF-DETR fp32 engine (about 45 s in fp16), 17 s for OWLv2 `base` and 26 s for `large`, 40 s (fp32) and 90 s
+(fp16) for OmDet-Turbo on an RTX 3090, and about 3.5 minutes for Grounding DINO, which exports its graph first. Every later load reuses it and takes about a second. An engine only fits the GPU model and the TensorRT version it
 was built with, so a different GPU or a TensorRT upgrade builds a new one. To build it ahead of
 time, load the model once when you build the machine or the image, as
 [Production](/docs/deployment/production.md#load-models-before-the-first-request) suggests for

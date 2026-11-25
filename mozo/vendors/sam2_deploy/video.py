@@ -27,8 +27,8 @@ gate can check short clips; mozo does not pass it.
 **Two numeric details that look like noise and are not** (both reproduced, both gated):
 
 - Frames are resized the way upstream's *video* loader does it, not the way its image predictor
-  does: PIL's default (bicubic) resize of the 8-bit image, divided by 255 in float64, stored as
-  float32, normalised in float32 (``sam2/utils/misc.py``). The image path in :mod:`.image` uses an
+  does: PIL's default (bicubic) resize of the 8-bit image, divided by 255 (in float64, which
+  for 8-bit values rounds to exactly the float32 quotient), stored as float32, normalised in float32 (``sam2/utils/misc.py``). The image path in :mod:`.image` uses an
   antialiased bilinear resize; the same frame gives slightly different features through the two.
   That is upstream's own behaviour, kept on both sides.
 - Mask memories are stored in bfloat16 on every device (``SAM2VideoPredictor``) and read back into

@@ -350,9 +350,12 @@ found traps it had not predicted, and the predicted ones were mostly real.
 ### Stateful models (video)
 
 - **One upstream, two preprocessings.** SAM 2's image predictor resizes with an antialiased
-  bilinear `Resize`; its video loader with PIL's default bicubic on the 8-bit frame, divided by
-  255 in **float64**. Same weights, same frame, 0.31 apart on pixels and 95 mask pixels on a box.
+  bilinear `Resize`; its video loader with PIL's default bicubic on the 8-bit frame. Same weights, same frame, 0.31 apart on pixels and 95 mask pixels on a box.
   Reproduce the one the entry point you claim uses, on that path only.
+- **Check a suspected precision trap before keeping it.** SAM 2's loader divides the 8-bit frame
+  by 255 in float64 and stores float32; for all 256 byte values that rounds to exactly what a
+  float32 divide gives, so it is not a trap (a falsifier for it was never caught). Enumerate the
+  inputs when the domain is small.
 - **State stored at a lower precision than it is computed.** SAM 2 keeps mask memories in
   bfloat16 on every device, CPU included, and reads them back into float32 attention. Dropping
   the cast looks like a cleanup and moves every frame after the first.

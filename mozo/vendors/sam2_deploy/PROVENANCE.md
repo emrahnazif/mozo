@@ -130,7 +130,8 @@ size one each), which is what makes adding an object on a later frame exact.
   against the folder-of-frames path, upstream's documented route; mozo decodes video with
   PixelFlow and applies that path's resize to the decoded frame.
 - **The video loader is not the image predictor's preprocessing.** PIL's default (bicubic) resize
-  of the 8-bit frame, `/ 255.0` in float64, stored as float32, normalised in float32 -- against
+  of the 8-bit frame, `/ 255.0` (in float64, which for 8-bit values rounds to exactly the float32
+  quotient -- checked for all 256), stored as float32, normalised in float32 -- against
   `SAM2ImagePredictor`'s antialiased bilinear resize. Upstream's two predictors therefore give
   slightly different first masks for the same prompt on the same frame (95 pixels on a box,
   measured). Both are kept as upstream has them.

@@ -88,7 +88,6 @@ SECOND_BOX = {"points": None, "labels": None, "box": [560, 180, 760, 470]}
 FALSIFIERS = {
     "image-path-resize": "frames resized like the image predictor (antialiased bilinear) instead "
                          "of the video loader's PIL bicubic (fails at: pixels)",
-    "float32-divide": "divide the resized frame by 255 in float32, not float64 (fails at: pixels)",
     "no-bf16-memory": "keep mask memories in float32 (fails at: memory attention, frame 2)",
     "pointer-window": "object-pointer temporal encoding normalised by 16 instead of 15 "
                       "(fails at: memory attention, frame 2)",
@@ -445,15 +444,6 @@ def perturbed(name: str):
 
     if name == "image-path-resize":
         patch(vendor_video, "load_frame", lambda image, size: image_module.preprocess(image, size))
-    elif name == "float32-divide":
-
-        def float32(image, size):
-            resized = np.array(Image.fromarray(image).resize((size, size)))
-            frame = torch.from_numpy(resized).permute(2, 0, 1).float() / 255.0
-            mean = torch.tensor(image_module.MEAN)[:, None, None]
-            std = torch.tensor(image_module.STD)[:, None, None]
-            return ((frame - mean) / std).unsqueeze(0)
-        patch(vendor_video, "load_frame", float32)
     elif name == "no-bf16-memory":
         original = vendor_video.Tracker._compact
 

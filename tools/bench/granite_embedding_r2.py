@@ -52,7 +52,7 @@ from mozo.weights import WeightsError, resolve  # noqa: E402
 #: Input lengths to time, in tokens: a search query, the usual retrieval chunks, and the cap.
 LENGTHS = (32, 512, 1024, 2048, 8192)
 
-#: How many short queries to time as one call: a batch on the CPU, one at a time elsewhere.
+#: How many short queries to time as one call, each run alone.
 QUERIES = 64
 
 
@@ -113,8 +113,6 @@ def main() -> int:
     parser.add_argument("--trials", type=int, default=3, help="interleaved trials per length")
     args = parser.parse_args()
 
-    # Built before anything is timed, so no device's first-text figure pays for the tables.
-    texts = documents(Tokenizer())
     queries = [f"how do I {verb} a video at {n} frames a second?"
                for n in range(QUERIES // 4) for verb in ("run", "read", "track", "blur")]
 
@@ -125,6 +123,10 @@ def main() -> int:
             print(f"{variant}: {error}")
             continue
         reference = reference_for(variant) if args.reference else None
+        # Built before anything is timed, so no device's first-text figure pays for the tables.
+        # Per variant: the two tokenizers count the same text differently.
+        vocabulary = SPECS[variant].vocabulary
+        texts = documents(Tokenizer(None, vocabulary))
 
         for device in args.devices:
             print(f"\n{variant} on {device} ({torch.get_num_threads()} threads, "
@@ -161,9 +163,11 @@ def main() -> int:
                   f"({batch_ms / QUERIES:.2f} ms each)")
 
         page = texts[2048]
-        warm = median_ms(lambda: Tokenizer().encode(page), "cpu", runs=20, warmup=1)
-        print(f"\n  tokenizer alone, 2048 tokens: {cold(lambda: Tokenizer().encode(page)):.2f} ms "
-              f"cold, {warm:.2f} ms warm")
+        warm = median_ms(lambda: Tokenizer(None, vocabulary).encode(page), "cpu", runs=20,
+                         warmup=1)
+        print(f"\n  tokenizer alone, 2048 tokens: "
+              f"{cold(lambda: Tokenizer(None, vocabulary).encode(page)):.2f} ms cold, "
+              f"{warm:.2f} ms warm")
         if reference:
             # Warm too: the Rust tokenizer keeps a cache of its own across calls.
             reference_ms = median_ms(lambda: reference[1](page)["input_ids"], "cpu", runs=20)

@@ -19,23 +19,31 @@ import sys
 import unicodedata
 from pathlib import Path
 
-TOKENIZER = (Path(__file__).resolve().parent.parent.parent
-             / "mozo" / "vendors" / "granite_embedding_r2_deploy" / "tokenizer.py")
+VENDOR = Path(__file__).resolve().parent.parent.parent / "mozo" / "vendors" / "granite_embedding_r2_deploy"
+
+
+def _load(name: str):
+    """One module of the vendored package, by its path: neither imports anything outside the
+    standard library, so neither needs torch, nor the package's ``__init__``, which does."""
+    spec = importlib.util.spec_from_file_location(f"granite_{name}", VENDOR / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # a dataclass looks its module up there
+    spec.loader.exec_module(module)
+    return module
 
 
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__)
         return 2
-    spec = importlib.util.spec_from_file_location("granite_tokenizer", TOKENIZER)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    tokenizer = module.Tokenizer()
-
     corpus = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    # Corpora written before the multilingual variant carry no variant: they are English.
+    variant = corpus.get("variant", "small")
+    tokenizer = _load("tokenizer").Tokenizer(None, _load("config").SPECS[variant].vocabulary)
+
     failures = [text for text, ids in zip(corpus["texts"], corpus["ids"])
                 if tokenizer.encode(text) != ids]
-    print(f"Python {sys.version.split()[0]}, Unicode {unicodedata.unidata_version}: "
+    print(f"{variant}, Python {sys.version.split()[0]}, Unicode {unicodedata.unidata_version}: "
           f"{len(corpus['texts']):,} texts, {len(failures)} differ from the reference")
     for text in failures[:10]:
         print(f"  {text[:60]!r}")

@@ -50,7 +50,7 @@ os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 from bench.granite_embedding_r2 import interleaved  # noqa: E402
 from verify.granite_embedding_r2 import docs_text  # noqa: E402
 
-from fetch.granite_embedding_r2 import REVISION  # noqa: E402
+from fetch.granite_embedding_r2 import REVISIONS  # noqa: E402
 
 from mozo.runtimes import CoreMLRunner, providers_for  # noqa: E402
 from mozo.vendors.granite_embedding_r2_deploy import SPECS, Encoder  # noqa: E402
@@ -238,11 +238,11 @@ def main() -> int:
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--keep", type=Path, help="leave the graphs here rather than deleting them")
     parser.add_argument("--coreml", action="store_true",
-                        help=f"build, check and publish {ARTIFACT} into revision {REVISION}")
+                        help=f"build, check and publish {ARTIFACT} into the variant's revision")
     args = parser.parse_args()
     torch.set_num_threads(args.threads)
     if args.coreml:
-        coreml(args.variant, REVISION)
+        coreml(args.variant, REVISIONS[args.variant])
         return 0
 
     spec = SPECS[args.variant]

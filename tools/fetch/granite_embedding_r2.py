@@ -7,7 +7,8 @@ from is a fact about publishing, not about inference.
 
     python tools/fetch/granite_embedding_r2.py                  # every variant
     python tools/fetch/granite_embedding_r2.py small
-    python tools/fetch/granite_embedding_r2.py --derive-vocab   # rebuild the tokenizer asset
+    python tools/fetch/granite_embedding_r2.py --derive-vocab small               # Python 3.10
+    python tools/fetch/granite_embedding_r2.py --derive-vocab multilingual-small  # any Python
 
 **Pinned to a commit, and verified against the Hub's own hash.** Files are read from
 ``resolve/<commit>/``, not ``resolve/main/``, so a re-release upstream cannot change what this
@@ -27,6 +28,8 @@ safetensors file is read, because a pickle is not something to load from the int
 means ``safetensors`` is a dependency of *this script*, and nothing in ``mozo/`` imports it.
 
 The output is ``weights/granite_embedding_r2/<variant>/<revision>/torch-fp32.pth`` and a NOTICE.
+``multilingual-small`` is published under its own revision, ``2026-11-25``; ``small`` stays at
+``2026-11-24``.
 The LICENSE beside them is not written by this script: a licence is part of what is published, so
 it lives in the weights tree like any other artifact.
 """
@@ -50,16 +53,24 @@ from common import (  # noqa: E402
     digest, download_verified, hub_lfs_sha256s, require_licence, variant_parser)
 
 from mozo.vendors.granite_embedding_r2_deploy.config import SPECS  # noqa: E402
-from mozo.vendors.granite_embedding_r2_deploy.tokenizer import VOCAB_PATH  # noqa: E402
+from mozo.vendors.granite_embedding_r2_deploy.tokenizer import vocab_path  # noqa: E402
 
 _HF = "https://huggingface.co"
 
-#: The revision this family is published under.
-REVISION = "2026-11-24"
+#: The revision each variant is published under: the newest, which a fetch writes by default.
+REVISIONS = {"small": "2026-11-24", "multilingual-small": "2026-11-25"}
 
 #: The upstream commit every file is read from, per variant. A commit rather than ``main``, so
 #: what is fetched cannot move.
-COMMITS = {"small": "2ab6fa8ea2d674564defd37171ae19079b864b33"}
+COMMITS = {"small": "2ab6fa8ea2d674564defd37171ae19079b864b33",
+           "multilingual-small": "835ad14087e140460703cf0fae09f97d469d65c2"}
+
+#: Each variant's paper, for its NOTICE.
+PAPERS = {"small": "Granite Embedding R2 Models (2025), arXiv:2508.21085",
+          "multilingual-small": "Granite Embedding Multilingual R2 Models (2026), arXiv:2605.13521"}
+
+#: What each variant embeds, for its NOTICE.
+LANGUAGES = {"small": "an English", "multilingual-small": "a multilingual (200+ languages)"}
 
 #: Where Apache-2.0's canonical text lives. IBM ships no LICENSE file in the repository; the
 #: licence is stated in the model card's metadata.
@@ -81,10 +92,11 @@ def _notice(variant: str, sha256: str) -> str:
     repo = repository(variant)
     return (
         f"Granite Embedding R2 -- {variant} ({SPECS[variant].upstream})\n"
-        f"an English text embedding model: text in, one {SPECS[variant].width}-dimensional vector out\n\n"
+        f"{LANGUAGES[variant]} text embedding model: text in, one {SPECS[variant].width}-dimensional "
+        "vector out\n\n"
         "Copyright IBM Corp.\n\n"
         f"Source:  {_HF}/{repo} at commit {COMMITS[variant]}\n"
-        "Paper:   Granite Embedding R2 Models (2025), arXiv:2508.21085\n"
+        f"Paper:   {PAPERS[variant]}\n"
         "Licence: Apache-2.0 (full text in the LICENSE file beside this one), as stated in the\n"
         "         model card's metadata. The repository is not gated.\n\n"
         "This file is not the byte stream IBM serves. tools/fetch/granite_embedding_r2.py\n"
@@ -255,11 +267,53 @@ def character_classes(published: str, lstrip: list[str]) -> dict[str, list]:
             "strip": _ranges(next(iter(strip.values()), [])), "boundaries": _ranges(boundaries)}
 
 
-def derive_vocab() -> None:
-    """Rebuild the tokenizer asset from the published ``tokenizer.json``.
+def _published_tokenizer(variant: str) -> str:
+    """*variant*'s ``tokenizer.json`` at its pinned commit, as text: the reference is built from
+    this exact string."""
+    with urllib.request.urlopen(resolve(variant, "tokenizer.json"), timeout=300) as response:
+        return response.read().decode("utf-8")
 
-    Committed to the repository rather than fetched, because it has to be in the wheel before a
-    user runs anything -- the same arrangement as every other tokenizer in this tree.
+
+def _template(spec: dict) -> dict[str, list[int]]:
+    """The template as ids: the special tokens before the text, and those after it."""
+    processor = spec["post_processor"]
+    names = [next(iter(part.values()))["id"] for part in processor["single"]]
+    if names.count("A") != 1 or sum("Sequence" in part for part in processor["single"]) != 1:
+        raise SystemExit(f"the template is {names}; the tokenizer handles one sequence between "
+                         "special tokens")
+    middle = names.index("A")
+    ids = {name: processor["special_tokens"][name]["ids"] for name in names if name != "A"}
+    return {"before": [i for name in names[:middle] for i in ids[name]],
+            "after": [i for name in names[middle + 1:] for i in ids[name]]}
+
+
+def _pieces(model: dict) -> tuple[list[str], list[list[int]]]:
+    """The vocabulary in id order, and the merges as pairs of ids."""
+    vocab = model["vocab"]
+    pieces = [piece for piece, _ in sorted(vocab.items(), key=lambda item: item[1])]
+    if [vocab[piece] for piece in pieces] != list(range(len(pieces))):
+        raise SystemExit("the vocabulary's ids are not contiguous from 0")
+    merges = [merge.split(" ") if isinstance(merge, str) else merge for merge in model["merges"]]
+    return pieces, [[vocab[left], vocab[right]] for left, right in merges]
+
+
+def _write_asset(variant: str, payload: dict) -> None:
+    path = vocab_path(SPECS[variant].vocabulary)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # mtime=0: gzip stamps the current time into its header by default, which would make the
+    # committed asset differ on every rebuild and its recorded sha256 meaningless.
+    path.write_bytes(gzip.compress(json.dumps(payload, ensure_ascii=False).encode(), 9, mtime=0))
+    print(f"{path.relative_to(ROOT)}  {path.stat().st_size:,} bytes")
+    print(f"  {len(payload['pieces']):,} pieces, {len(payload['merges']):,} merges, "
+          f"{len(payload['added'])} added tokens")
+    print("  " + ", ".join(f"{len(payload[key])} {key} runs"
+                           for key in ("letters", "numbers", "spaces", "strip", "upper", "lower",
+                                       "word", "boundaries") if key in payload))
+    print(f"  sha256 {digest(path)}")
+
+
+def derive_english() -> None:
+    """Rebuild the English asset from ``small``'s published ``tokenizer.json``.
 
     Merges are stored as pairs of ids rather than pairs of pieces: it is what the merge loop wants,
     and it avoids escaping questions in an asset whose pieces include raw spaces. Every added
@@ -267,9 +321,7 @@ def derive_vocab() -> None:
     after normalising, and whether it strips whitespace to its left. A flag the tokenizer does not
     implement (``rstrip``, ``single_word``) refuses the derivation instead of being dropped.
     """
-    # Read as text rather than as JSON: the reference is built from this exact string.
-    with urllib.request.urlopen(resolve("small", "tokenizer.json"), timeout=300) as response:
-        published = response.read().decode("utf-8")
+    published = _published_tokenizer("small")
     spec = json.loads(published)
 
     expected = {
@@ -286,23 +338,7 @@ def derive_vocab() -> None:
         settings = {k: v for k, v in model.items() if k not in ("vocab", "merges")}
         raise SystemExit(f"unexpected BPE settings: {settings}")
 
-    # The template as ids: the special tokens before the text, and those after it.
-    processor = spec["post_processor"]
-    names = [next(iter(part.values()))["id"] for part in processor["single"]]
-    if names.count("A") != 1 or sum("Sequence" in part for part in processor["single"]) != 1:
-        raise SystemExit(f"the template is {names}; the tokenizer handles one sequence between "
-                         "special tokens")
-    middle = names.index("A")
-    ids = {name: processor["special_tokens"][name]["ids"] for name in names if name != "A"}
-    template = {"before": [i for name in names[:middle] for i in ids[name]],
-                "after": [i for name in names[middle + 1:] for i in ids[name]]}
-
-    vocab = model["vocab"]
-    pieces = [piece for piece, _ in sorted(vocab.items(), key=lambda item: item[1])]
-    if [vocab[piece] for piece in pieces] != list(range(len(pieces))):
-        raise SystemExit("the vocabulary's ids are not contiguous from 0")
-    merges = [merge.split(" ") if isinstance(merge, str) else merge for merge in model["merges"]]
-
+    pieces, merges = _pieces(model)
     added = []
     for token in spec["added_tokens"]:
         if token["rstrip"] or token["single_word"]:
@@ -318,36 +354,153 @@ def derive_vocab() -> None:
     strip = {chr(c) for low, high in classes["strip"] for c in range(low, high + 1)}
     if any(token["content"][-1:] in strip for token in added if not token["normalized"]):
         raise SystemExit("a raw added token ends in whitespace; the lstrip back-off assumes not")
-    payload = json.dumps({
-        "pieces": pieces,
-        "merges": [[vocab[left], vocab[right]] for left, right in merges],
-        "added": added,
-        "template": template,
-        **classes,
-    }, ensure_ascii=False).encode()
+    _write_asset("small", {"pieces": pieces, "merges": merges, "added": added,
+                           "template": _template(spec), **classes})
 
-    VOCAB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # mtime=0: gzip stamps the current time into its header by default, which would make the
-    # committed asset differ on every rebuild and its recorded sha256 meaningless.
-    VOCAB_PATH.write_bytes(gzip.compress(payload, 9, mtime=0))
-    print(f"{VOCAB_PATH.relative_to(ROOT)}  {VOCAB_PATH.stat().st_size:,} bytes")
-    print(f"  {len(pieces):,} pieces, {len(merges):,} merges, {len(added)} added tokens")
-    print(f"  {len(classes['letters'])} letter runs, {len(classes['numbers'])} digit runs, "
-          f"{len(classes['spaces'])} space runs, {len(classes['strip'])} lstrip runs, "
-          f"{len(classes['boundaries'])} NFC boundary runs")
-    print(f"  sha256 {digest(VOCAB_PATH)}")
+
+#: o200k's split pattern, exactly as the multilingual ``tokenizer.json`` writes it. The tokenizer
+#: rebuilds this pattern from probed classes, so a published pattern that differs by one character
+#: refuses the derivation rather than producing an asset for a pattern it does not implement.
+O200K = ("[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]*[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]+"
+         "(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]+"
+         "[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+"
+         "[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+")
+
+
+def o200k_classes(published: str, single_word: list[str]) -> dict:
+    """Read every class o200k's split pattern names out of the reference, by probing it.
+
+    The pattern asks seven Unicode questions -- ``\\p{L}``, ``\\p{N}``, ``\\s``, and two unions of
+    letter categories with ``\\p{M}`` -- and case-insensitive matching asks an eighth, case folding.
+    Each codepoint is put to the reference's own pre-tokenizer in a context where only one answer
+    can split it differently, so the asset holds the reference's Unicode rather than Python's:
+
+    - *lower* (``Ll Lm Lo M``): ``"a" + c`` is one piece.
+    - *not whitespace, letter or digit*: ``"!!" + c`` is one piece (punctuation runs on).
+    - *digit*: ``"1" + c`` is one piece.
+    - *whitespace*: ``"!" + c`` is two pieces and ``c`` is not a digit; plus CR and LF, which
+      the punctuation branch's ``[\\r\\n/]*`` would otherwise swallow.
+    - *letter*: everything else. *Mark* is lower and not a letter.
+    - *upper* (``Lu Lt Lm Lo M``): a letter for which ``c + "Aa"`` is one piece, and every mark.
+    - *contractions*: for each letter of ``'s 't 're 've 'm 'll 'd``, the characters ``c`` that
+      join ``"a'" + c`` (with the rest of the suffix) into one piece. ``ſ`` joins ``'s``.
+
+    And the characters that stop a ``single_word`` token from counting -- the regular-expression
+    engine's word characters -- read off which neighbours, before and after, make the reference
+    ignore the first such token. Before and after must agree, and the other tokens are checked on a
+    sample, since the asset carries one set.
+    """
+    from tokenizers import Tokenizer
+
+    reference = Tokenizer.from_str(published)
+    pre = reference.pre_tokenizer
+
+    def pieces(text: str) -> int:
+        return len(pre.pre_tokenize_str(text))
+
+    every = [cp for cp in range(0x110000) if not 0xD800 <= cp <= 0xDFFF]
+    lower = {cp for cp in every if pieces("a" + chr(cp)) == 1}
+    other = {cp for cp in every if pieces("!!" + chr(cp)) == 1}
+    numbers = {cp for cp in every if pieces("1" + chr(cp)) == 1}
+    spaces = ({cp for cp in every if pieces("!" + chr(cp)) == 2} - numbers) | {0x0A, 0x0D}
+    letters = set(every) - other - numbers - spaces
+    marks = other & lower
+    upper = {cp for cp in letters if pieces(chr(cp) + "Aa") == 1} | marks
+    if not lower - marks <= letters:
+        raise SystemExit("a character the lower-case class takes is neither letter nor mark")
+
+    # Each contraction is a sequence of classes. Which letter a single-character suffix folds to
+    # is not observable -- ``'s 't 'm 'd`` are alternatives of one group -- so they are one class,
+    # and so are ``r`` and ``v``, both followed by ``e``.
+    def joining(before: str, after: str) -> str:
+        return "".join(chr(cp) for cp in every if pieces(before + chr(cp) + after) == 1)
+
+    contractions = [[joining("a'", "")], [joining("a'", "e"), joining("a'r", "")],
+                    [joining("a'", "l"), joining("a'l", "")]]
+    if joining("a'v", "") != contractions[1][1]:
+        raise SystemExit("'re and 've end in different classes; the asset holds them as one")
+    firsts = [set(alternative[0]) for alternative in contractions]
+    if any(firsts[i] & firsts[j] for i in range(3) for j in range(i + 1, 3)):
+        raise SystemExit("two contractions start with the same character; their order would "
+                         "matter, and the asset does not keep it")
+
+    word: list[int] = []
+    if single_word:
+        def stops(token: str, before: str, after: str) -> bool:
+            ids = reference.encode(before + token + after, add_special_tokens=False).ids
+            return reference.token_to_id(token) not in ids
+
+        first = single_word[0]
+        word = [cp for cp in every if stops(first, chr(cp), "")]
+        if word != [cp for cp in every if stops(first, "", chr(cp))]:
+            raise SystemExit(f"{first!r} is stopped by different characters before and after")
+        sample = list(range(0x250)) + word[::997] + [0x200C, 0x200D, 0x3000, 0x10FFFF]
+        known = set(word)
+        for token in single_word[1:]:
+            if any(stops(token, chr(cp), "") != (cp in known) for cp in sample):
+                raise SystemExit(f"{token!r} is stopped by different characters than {first!r}")
+    return {"letters": _ranges(sorted(letters)), "numbers": _ranges(sorted(numbers)),
+            "spaces": _ranges(sorted(spaces)), "upper": _ranges(sorted(upper)),
+            "lower": _ranges(sorted(lower)), "contractions": contractions,
+            "word": _ranges(word)}
+
+
+def derive_multilingual() -> None:
+    """Rebuild the multilingual asset from ``multilingual-small``'s published ``tokenizer.json``.
+
+    Checks every stage against what the tokenizer implements first -- no normaliser, o200k's split
+    then the byte mapping without its own regex, BPE taking known pieces whole, no added token
+    matched after normalising, none with ``lstrip`` or ``rstrip`` -- and refuses anything else.
+    Needs no particular Python: there is no normaliser, so no NFC to pin to a Unicode version.
+    """
+    published = _published_tokenizer("multilingual-small")
+    spec = json.loads(published)
+    expected = {
+        "normalizer": None,
+        "pre_tokenizer": {"type": "Sequence", "pretokenizers": [
+            {"type": "Split", "pattern": {"Regex": O200K}, "behavior": "Isolated",
+             "invert": False},
+            {"type": "ByteLevel", "add_prefix_space": False, "trim_offsets": True,
+             "use_regex": False}]},
+    }
+    for stage, value in expected.items():
+        if spec[stage] != value:
+            raise SystemExit(f"tokenizer.json's {stage} is {spec[stage]}, not {value}; the "
+                             "tokenizer implements only the latter")
+    model = spec["model"]
+    settings = {k: v for k, v in model.items() if k not in ("vocab", "merges")}
+    if settings != {"type": "BPE", "dropout": None, "unk_token": None,
+                    "continuing_subword_prefix": None, "end_of_word_suffix": None,
+                    "fuse_unk": False, "byte_fallback": False, "ignore_merges": True}:
+        raise SystemExit(f"unexpected BPE settings: {settings}")
+
+    pieces, merges = _pieces(model)
+    added = []
+    for token in spec["added_tokens"]:
+        if token["normalized"] or token["lstrip"] or token["rstrip"]:
+            raise SystemExit(f"{token['content']!r} is normalised, lstrip or rstrip, which this "
+                             "pipeline does not implement")
+        added.append({"id": token["id"], "content": token["content"], "normalized": False,
+                      "lstrip": False, "single_word": token["single_word"]})
+    single_word = [token["content"] for token in added if token["single_word"]]
+    _write_asset("multilingual-small", {
+        "pattern": "o200k", "normalizer": None, "ignore_merges": True,
+        "pieces": pieces, "merges": merges, "added": added, "template": _template(spec),
+        **o200k_classes(published, single_word)})
 
 
 def main() -> int:
-    parser = variant_parser(__doc__, ROOT / "weights", revision=REVISION)
+    parser = variant_parser(__doc__, ROOT / "weights", revision=None)
     parser.add_argument("--derive-vocab", action="store_true",
-                        help="rebuild the tokenizer asset and exit")
+                        help="rebuild the named variants' tokenizer assets and exit")
     args = parser.parse_args()
 
     if args.derive_vocab:
-        if args.variants:
-            raise SystemExit("--derive-vocab writes the tokenizer asset and takes no variants")
-        derive_vocab()
+        derivations = {"small": derive_english, "multilingual-small": derive_multilingual}
+        if not args.variants or not set(args.variants) <= set(derivations):
+            raise SystemExit(f"--derive-vocab takes one or more of {list(derivations)}")
+        for variant in args.variants:
+            derivations[variant]()
         return 0
 
     wanted = args.variants or list(SPECS)
@@ -356,7 +509,7 @@ def main() -> int:
         raise SystemExit(f"unknown variants: {unknown}. Known: {list(SPECS)}")
 
     for variant in wanted:
-        fetch(variant, args.revision, args.weights_dir)
+        fetch(variant, args.revision or REVISIONS[variant], args.weights_dir)
 
     print(f"\n{len(wanted)} checkpoint(s) in {args.weights_dir}, all Apache-2.0")
     return 0

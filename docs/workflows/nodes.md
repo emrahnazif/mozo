@@ -1,7 +1,7 @@
 # Every built-in workflow node
 
 <!--
-summary: All 50 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
+summary: All 51 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
 label: Nodes
 keywords: mozo, workflow nodes, node catalogue, workflow editor, pipeline
 -->
@@ -94,6 +94,7 @@ what runs.
 | Node | Inputs → outputs | Parameters | What it does |
 |---|---|---|---|
 | `track` | detections → detections | `tracker`=bytetrack, `lost_after`=1.0 | Give each object the same `tracker_id` from frame to frame, so it's counted once however many frames it is in. |
+| `sam2_track` | image, detections → detections | `variant`=tiny | SAM 2 by Meta: follow objects through a video with a mask on every frame. The first frame's detections start the objects; each keeps its `tracker_id` and the class of the row that started it. |
 
 ## Transform
 

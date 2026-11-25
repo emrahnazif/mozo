@@ -255,8 +255,8 @@ results = Workflow.load("blur_faces.json").run(source="street.jpg")
 mozo run blur_faces.json --file street.jpg
 ```
 
-50 nodes: every model family that answers about an image, SAM 2, EdgeTAM and SAM 3 segmenting the boxes another node found, RF-DETR
-from a checkpoint of your own, tracking objects across a video's frames, the image transforms and
+51 nodes: every model family that answers about an image, SAM 2, EdgeTAM and SAM 3 segmenting the boxes another node found, RF-DETR
+from a checkpoint of your own, tracking objects across a video's frames (by their boxes, or with SAM 2's masks), the image transforms and
 annotations PixelFlow provides, and the ends that read images and annotations and write results. A
 node is an ordinary Python function — its signature *is* its
 declaration, so what the editor offers you and what actually runs cannot disagree:

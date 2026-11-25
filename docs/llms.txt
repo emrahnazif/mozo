@@ -70,7 +70,7 @@ python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_
 ## Workflows
 
 - [Build a workflow in the editor](https://emrah.fr/mozo/workflows/editor/): Chain models and image operations into a workflow: draw it in mozo's browser editor, keep it as JSON, and embed the editor in your own app. File: `workflows/editor.md`
-- [Every built-in workflow node](https://emrah.fr/mozo/workflows/nodes/): All 50 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults. File: `workflows/nodes.md`
+- [Every built-in workflow node](https://emrah.fr/mozo/workflows/nodes/): All 51 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults. File: `workflows/nodes.md`
 - [Run a workflow from Python or the command line](https://emrah.fr/mozo/workflows/python/): Run a mozo workflow file from Python, the command line or HTTP: override parameters, run it over many images, check it first, and use your own models. File: `workflows/python.md`
 - [Run a workflow over videos and folders](https://emrah.fr/mozo/workflows/video/): Run a mozo workflow over every frame of a video or every image in a folder: sample frames, track objects, and save videos and annotations. File: `workflows/video.md`
 - [Write your own workflow node](https://emrah.fr/mozo/workflows/writing-nodes/): Add a node to mozo's workflows by writing one Python function: its signature declares its ports and parameters, and the editor follows. File: `workflows/writing-nodes.md`

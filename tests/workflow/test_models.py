@@ -18,7 +18,7 @@ import mozo
 from conftest import FIXTURE, document, fresh_interpreter, on_cpu, require_present
 from mozo.manager import ModelManager
 from mozo.workflow import Workflow
-from mozo.workflow.node import Models, NodeSpec, Weights
+from mozo.workflow.node import Models, NodeSpec, State, Weights
 from mozo.workflow.nodes.model import variants
 
 
@@ -323,6 +323,8 @@ class TestEveryModelNodeDeclaresItsModel:
         arguments = {port.name: given[port.type] for port in spec.inputs}
         arguments |= {p.name: p.default for p in spec.parameters}
         arguments[spec.models] = models
+        if spec.state:  # a stateful node (a tracker) is handed its run's State, as the engine does
+            arguments[spec.state] = State()
         with pytest.raises(Asked):
             spec.run(**arguments)
         assert asked == [(spec.weights.family, spec.weights.default)]
@@ -361,6 +363,8 @@ class TestEveryPromptedNodeIsMarked:
         arguments = {port.name: inputs[port.type] for port in spec.inputs}
         arguments |= {p.name: p.default for p in spec.parameters}
         arguments[spec.models] = lambda family, variant, **kwargs: Recording()
+        if spec.state:
+            arguments[spec.state] = State()
         with pytest.raises(Asked):
             spec.run(**arguments)
 

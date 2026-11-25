@@ -126,6 +126,216 @@
         }
       }
     },
+    "deim/large": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "deim/large/2026-11-25/LICENSE",
+              "sha256": "f25a3c7b894c50f203813bc72183a22124c89c27b15d420b92e4621ca4b0f9cf",
+              "size": 11564
+            },
+            "NOTICE": {
+              "path": "deim/large/2026-11-25/NOTICE",
+              "sha256": "c94c754515e59eba0267c8535724723f453f46f4a11bff93b747746ea5242fad",
+              "size": 1190
+            },
+            "labels": {
+              "path": "deim/large/2026-11-25/labels.json",
+              "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
+              "size": 2451
+            },
+            "onnx-fp32": {
+              "path": "deim/large/2026-11-25/onnx-fp32.onnx",
+              "sha256": "ed59e8eca360c482943e85442531967ee9098e033b923c104b27551beb4cd0b1",
+              "size": 124027299
+            },
+            "torch-fp32": {
+              "path": "deim/large/2026-11-25/torch-fp32.pth",
+              "sha256": "a9ac1f9bf51a41a7ec02c373c85e0109f84908dde11d80759b43248dcb638baa",
+              "size": 126125711
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "deim/medium": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "deim/medium/2026-11-25/LICENSE",
+              "sha256": "f25a3c7b894c50f203813bc72183a22124c89c27b15d420b92e4621ca4b0f9cf",
+              "size": 11564
+            },
+            "NOTICE": {
+              "path": "deim/medium/2026-11-25/NOTICE",
+              "sha256": "df36e0a3ce88a259420bdf3e1de16c06d07e68f345b5e4aee82c158b0c7d5c13",
+              "size": 1191
+            },
+            "labels": {
+              "path": "deim/medium/2026-11-25/labels.json",
+              "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
+              "size": 2451
+            },
+            "onnx-fp32": {
+              "path": "deim/medium/2026-11-25/onnx-fp32.onnx",
+              "sha256": "b3c7a74e40a4b63e9f4700b80acddfc48d3033cd993b69ee0f92a4b7076e3a76",
+              "size": 77855119
+            },
+            "torch-fp32": {
+              "path": "deim/medium/2026-11-25/torch-fp32.pth",
+              "sha256": "2b6cd0582a4aa711f583982057b7fb0f3daebdd98e4dc168824714014c3219bc",
+              "size": 79143599
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "deim/nano": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "deim/nano/2026-11-25/LICENSE",
+              "sha256": "f25a3c7b894c50f203813bc72183a22124c89c27b15d420b92e4621ca4b0f9cf",
+              "size": 11564
+            },
+            "NOTICE": {
+              "path": "deim/nano/2026-11-25/NOTICE",
+              "sha256": "cc4ef4f4b302a9a3ac7c624cc3d7342964bd801759eb504ba5410405c404d30f",
+              "size": 1190
+            },
+            "labels": {
+              "path": "deim/nano/2026-11-25/labels.json",
+              "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
+              "size": 2451
+            },
+            "onnx-fp32": {
+              "path": "deim/nano/2026-11-25/onnx-fp32.onnx",
+              "sha256": "597617c0843f086c278b9f7779e492183fc2a502f17c7b40303a6d11bf2f8ab1",
+              "size": 15499204
+            },
+            "torch-fp32": {
+              "path": "deim/nano/2026-11-25/torch-fp32.pth",
+              "sha256": "8536a97a57bad2951cb4679e8578be225e4a19db678ab568a44e538f4f0fc917",
+              "size": 15500899
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "deim/small": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "deim/small/2026-11-25/LICENSE",
+              "sha256": "f25a3c7b894c50f203813bc72183a22124c89c27b15d420b92e4621ca4b0f9cf",
+              "size": 11564
+            },
+            "NOTICE": {
+              "path": "deim/small/2026-11-25/NOTICE",
+              "sha256": "640f907ff08fe0f3f158db189b26e9ce1205f528c954d5f177e71885468ffc75",
+              "size": 1191
+            },
+            "labels": {
+              "path": "deim/small/2026-11-25/labels.json",
+              "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
+              "size": 2451
+            },
+            "onnx-fp32": {
+              "path": "deim/small/2026-11-25/onnx-fp32.onnx",
+              "sha256": "c583d93b33cf22bd7ce8ce7d438181dafeb79d6caa6fa24c09ba32ca3b2539dc",
+              "size": 41750598
+            },
+            "torch-fp32": {
+              "path": "deim/small/2026-11-25/torch-fp32.pth",
+              "sha256": "a089c9eb798f8a0322e05f757fe8e8188eee34aa578788a35ec253bcec8a6b38",
+              "size": 41867693
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "deim/xlarge": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "deim/xlarge/2026-11-25/LICENSE",
+              "sha256": "f25a3c7b894c50f203813bc72183a22124c89c27b15d420b92e4621ca4b0f9cf",
+              "size": 11564
+            },
+            "NOTICE": {
+              "path": "deim/xlarge/2026-11-25/NOTICE",
+              "sha256": "807b93c266da460b50ee2e54a60d157d870a7f9fe8a39035b57571f99c396774",
+              "size": 1191
+            },
+            "labels": {
+              "path": "deim/xlarge/2026-11-25/labels.json",
+              "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
+              "size": 2451
+            },
+            "onnx-fp32": {
+              "path": "deim/xlarge/2026-11-25/onnx-fp32.onnx",
+              "sha256": "33eccdd83c1d59924daadbbe85789958cee27bc40d98a8e78a7716444cd516a1",
+              "size": 247864874
+            },
+            "torch-fp32": {
+              "path": "deim/xlarge/2026-11-25/torch-fp32.pth",
+              "sha256": "e729436f96d95e78dbf67452bf3fb654cd5bed37de43067f5cf0aafb24d0fc7a",
+              "size": 252221511
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "deim/xlarge-obj365": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "deim/xlarge-obj365/2026-11-25/LICENSE",
+              "sha256": "f25a3c7b894c50f203813bc72183a22124c89c27b15d420b92e4621ca4b0f9cf",
+              "size": 11564
+            },
+            "NOTICE": {
+              "path": "deim/xlarge-obj365/2026-11-25/NOTICE",
+              "sha256": "f56ea6ffdb64090fe0015c0c67e66fc3e24bb5c32b75123e6da31f72c4c7be0a",
+              "size": 1250
+            },
+            "labels": {
+              "path": "deim/xlarge-obj365/2026-11-25/labels.json",
+              "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
+              "size": 2451
+            },
+            "onnx-fp32": {
+              "path": "deim/xlarge-obj365/2026-11-25/onnx-fp32.onnx",
+              "sha256": "4c2331a25a0b9b77216c4137d5904adf05ce1bc254689d60797c08f4d7f4f375",
+              "size": 248114037
+            },
+            "torch-fp32": {
+              "path": "deim/xlarge-obj365/2026-11-25/torch-fp32.pth",
+              "sha256": "f240a1128280eb6ce0fff911e8811a8dff669e18be25f5160db7b4263452277d",
+              "size": 252173726
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
     "depth_anything_v2/base": {
       "latest": "2026-08-19",
       "revisions": {

@@ -109,6 +109,13 @@ def rfdetr(image: Image, models: Models, variant: variants("rfdetr") = "nano",
 
 
 @node(category="Detect", exclusive=True)
+def deim(image: Image, models: Models, variant: variants("deim") = "medium",
+         threshold: float = 0.4) -> Detections:
+    """DEIM -- real-time NMS-free DETR detection of COCO's 80 classes, nano to xlarge."""
+    return models("deim", variant).predict(image, threshold=threshold)
+
+
+@node(category="Detect", exclusive=True)
 def rfdetr_checkpoint(image: Image, models: Models, checkpoint: Optional[FilePath] = None,
                       architecture: architectures("rfdetr") = "nano", labels: list[str] = [],
                       threshold: float = 0.5) -> Detections:

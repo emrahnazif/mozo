@@ -145,6 +145,7 @@ NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
     **{family: {"onnx": ("labels",), "coreml": ("labels",)}
        for family in ("yolov8", "yolov11", "yolov12", "yolov26")},
     "rfdetr": {"*": ("labels",)},
+    "deim": {"*": ("labels",)},
     "vitpose": {"*": ("labels",)},
     "sam3": {"onnx": ("torch-fp32",), "coreml": ("torch-fp32",)},
     "owlv2": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
@@ -186,6 +187,23 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'weights are both MIT.'
         ),
         'variants': ['base', 'base-16', 'large', 'large-336'],
+    },
+
+    'deim': {
+        'adapter_class': 'DEIMPredictor',
+        'module': 'mozo.adapters.deim',
+        'task_type': 'object_detection',
+        'description': (
+            'DEIM by Intellindust AI Lab (CVPR 2025) — real-time object detection, COCO\'s 80 '
+            'classes. A DETR: 300 queries each propose a box, and there is no non-maximum '
+            'suppression to tune. D-FINE\'s architecture (HGNetv2 backbone, hybrid encoder, a '
+            'decoder that refines each box edge as a distribution) trained with DEIM\'s denser '
+            'matching. 6 variants: nano/small/medium/large/xlarge trained on COCO (43.0 to 56.5 '
+            'AP, upstream\'s numbers), and xlarge-obj365, pretrained on Objects365 then '
+            'fine-tuned on COCO, the most accurate (59.5 AP). Runs at 640x640. Code is '
+            'Apache-2.0; the weights are published beside it with no terms of their own.'
+        ),
+        'variants': ['nano', 'small', 'medium', 'large', 'xlarge', 'xlarge-obj365'],
     },
 
     'depth_anything_v2': {

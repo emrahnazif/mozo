@@ -316,7 +316,7 @@ class TestWritingAnnotations:
 
 # --- Prompts as a list -------------------------------------------------------------------------
 
-TEXT_NODES = ["sam3", "owlv2", "grounding_dino", "clip", "siglip2"]
+TEXT_NODES = ["sam3", "owlv2", "grounding_dino", "omdet_turbo", "clip", "siglip2"]
 
 
 class Prompted:

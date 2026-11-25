@@ -1,0 +1,48 @@
+omdet_turbo_deploy
+Copyright 2024 Om Research Lab and The HuggingFace Inc. team.
+Copyright 2021 Ross Wightman (timm).
+
+This product includes software developed by Om AI Lab, published as OmDet
+(https://github.com/om-ai-lab/OmDet), and described in "Real-time
+Transformer-based Open-Vocabulary Detection with Efficient Fusion Head" (Zhao,
+Liu, He, Zhang, Lee; arXiv:2403.06892).
+
+The modules here are extracted from the PyTorch implementation published as
+transformers/models/omdet_turbo (Copyright 2024 Om Research Lab and The
+HuggingFace Inc. team), the hybrid encoder it copies from
+transformers/models/rt_detr, the deformable attention it copies from
+transformers/models/deformable_detr, and the Swin Transformer it runs from
+timm/models/swin_transformer.py (Copyright 2021 Ross Wightman). All four are
+licensed under the Apache License, Version 2.0; see the LICENSE file in this
+directory. The authors' own repository is Apache-2.0 as well.
+
+Swin Transformer itself is Microsoft's:
+
+  - Swin Transformer
+    Copyright (c) Microsoft Corporation
+    https://github.com/microsoft/Swin-Transformer
+    MIT License
+
+The published checkpoint is Apache-2.0, as Om AI Lab states on its model card.
+
+The byte-pair tokenizer and its vocabulary are OpenAI's:
+
+  - CLIP
+    Copyright (c) 2021 OpenAI
+    https://github.com/openai/CLIP
+    MIT License
+
+  assets/bpe_simple_vocab_16e6.txt.gz is byte-identical to the file published
+  there (sha256 924691ac288e54409236115652ad4aa250f48203de50a9e4722a6ecd48d6804a),
+  and the vocabulary it builds is identical, id for id, to the vocab.json and
+  merges.txt Om AI Lab publishes beside the checkpoint.
+
+  assets/lowercase.json.gz is a table of Unicode lowercase mappings, derived from
+  the Lowercase normaliser of Hugging Face's tokenizers (Apache-2.0) by
+  tools/fetch/omdet_turbo.py.
+
+NOT INCLUDED
+------------
+Training (denoising queries, losses, intermediate class logits), batched
+inference, custom task sentences and the authors' detectron2 pipeline are not
+part of this package. See PROVENANCE.md.

@@ -63,7 +63,8 @@ def _notice(sha256: str) -> str:
         "real-time open-vocabulary object detection\n\n"
         "Copyright 2024 Om AI Lab.\n"
         "Tiancheng Zhao, Peng Liu, Xuan He, Lu Zhang, Kyusong Lee.\n\n"
-        f"Source:  https://huggingface.co/{REPO} (commit {COMMIT})\n"
+        f"Source:  https://huggingface.co/{REPO}\n"
+        f"         commit {COMMIT}\n"
         "Project: https://github.com/om-ai-lab/OmDet\n"
         "Paper:   Real-time Transformer-based Open-Vocabulary Detection with Efficient Fusion\n"
         "         Head, arXiv:2403.06892\n"
@@ -73,9 +74,10 @@ def _notice(sha256: str) -> str:
         "tower (OpenAI, MIT), both fine-tuned into this detector by Om AI Lab and released by\n"
         "them under Apache-2.0.\n\n"
         "This file is not the byte stream the Hub serves: tools/fetch/omdet_turbo.py verifies\n"
-        f"model.safetensors (sha256 {sha256}) against the hash the Hub records, then writes the\n"
-        "same tensors back out as an ordinary checkpoint. No tensor is altered, renamed, cast or\n"
-        "dropped.\n"
+        "model.safetensors against the sha256 the Hub records,\n"
+        f"    {sha256}\n"
+        "then writes the same tensors back out as an ordinary checkpoint. No tensor is altered,\n"
+        "renamed, cast or dropped.\n"
     )
 
 

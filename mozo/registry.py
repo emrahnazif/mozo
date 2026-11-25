@@ -97,6 +97,8 @@ EXECUTES: dict[str, tuple[str, ...]] = {
     # A TensorRT engine exported from the checkpoint at the input size the user picks.
     "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
+    # The graph is the image path; the text tower always runs in torch, once per vocabulary.
+    "omdet_turbo": ("torch", "onnx", "tensorrt"),
     # Not "onnx": the vision graph is published to build TensorRT engines from, and ONNX Runtime
     # ran it twice as slow as torch on the CPU. See the OWLv2 PROVENANCE, under Export.
     "owlv2": ("torch", "tensorrt"),
@@ -132,6 +134,7 @@ DERIVES: dict[str, dict[str, str]] = {
     # 1.4-1.9x torch's forward pass; fp16 changed none either, moving AP by at most 0.1, so
     # ``auto`` takes fp16 (:data:`PREFERS`). See docs/models/mayaku.md.
     "mayaku": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    "omdet_turbo": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
 #: Runtimes a family's ``auto`` tries before the shared order (:data:`mozo.runtimes._PREFERENCE`),
@@ -167,6 +170,9 @@ NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
     "vitpose": {"*": ("labels",)},
     "sam3": {"onnx": ("torch-fp32",), "coreml": ("torch-fp32",)},
     "owlv2": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
+    # Its graph is the image path and takes the text features as inputs; the text tower that
+    # makes them comes from the checkpoint.
+    "omdet_turbo": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
 }
 
 #: Family -> where its adapter lives, what it does, and which variants it publishes.
@@ -320,6 +326,21 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'permissive and both permitting commercial use.'
         ),
         'variants': ['general', 'places2'],
+    },
+
+    'omdet_turbo': {
+        'adapter_class': 'OmDetTurboPredictor',
+        'module': 'mozo.adapters.omdet_turbo',
+        'task_type': 'open_vocabulary_detection',
+        'description': (
+            'OmDet-Turbo by Om AI Lab — real-time open-vocabulary detection. Name things in '
+            'words and it returns boxes for them, with no class list and no training. 1 variant, '
+            'tiny (Swin-T). The prompts are encoded once per vocabulary and the decoder reads '
+            'them as a sentence as well as a list, so it sits between OWLv2 and Grounding DINO: '
+            'faster than either, and the one to reach for when a fixed vocabulary meets many '
+            'images. Boxes, not masks. Code and weights are both Apache-2.0.'
+        ),
+        'variants': ['tiny'],
     },
 
     'owlv2': {

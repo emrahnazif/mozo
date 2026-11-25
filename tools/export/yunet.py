@@ -22,6 +22,11 @@ model it came from, on the fixture photographs at three sizes (so the dynamic ax
 the same faces above 0.5, and boxes, landmarks and scores within the bounds below. A graph that
 fails is not written. Whether a graph is *published* is decided by measurement; see the family's
 PROVENANCE.
+
+The export is byte-for-byte repeatable, **but not across ``MKL_CBWR``**: the exporter folds batch
+norm into the convolutions on the CPU, and ``MKL_CBWR=AVX2,STRICT`` moves the folded weights by up
+to 2.4e-07. The published graphs were exported without it; export them the same way to reproduce
+their sha256.
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 from common import fixtures, require_one_file, variant_parser  # noqa: E402
+from mozo.adapters.yunet import GRAPH_INPUT, GRAPH_OUTPUTS  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import OnnxRunner  # noqa: E402
 from mozo.vendors.yunet_deploy import Predictor  # noqa: E402
@@ -48,10 +54,8 @@ from mozo.vendors.yunet_deploy.postprocess import decode  # noqa: E402
 from mozo.vendors.yunet_deploy.preprocess import to_batch  # noqa: E402
 from mozo.weights import resolve  # noqa: E402
 
-INPUT_NAME = "input"
-#: In the order :class:`~mozo.vendors.yunet_deploy.network.YuNet` returns them, flattened.
-OUTPUT_NAMES = tuple(f"{kind}_{stride}" for kind in ("cls", "bbox", "obj", "kps")
-                     for stride in (8, 16, 32))
+#: The names the adapter maps a graph's outputs by, so the two cannot drift apart.
+INPUT_NAME, OUTPUT_NAMES = GRAPH_INPUT, GRAPH_OUTPUTS
 OPSET = 17
 FP16_OPSET = 18
 
@@ -137,11 +141,11 @@ def export(variant: str, revision: str | None, weights_dir: Path, fp16: bool) ->
         print(f"  exported  dynamic HxW, opset {opset}, {len(OUTPUT_NAMES)} outputs")
 
         runner = OnnxRunner(staged, device="cpu")
-        levels = len(reference.spec.strides)
+        graph = Predictor(None, variant, forward=lambda b: [torch.from_numpy(a)
+                                                             for a in runner(b.numpy())])
         for name, batch, want in frames:
-            maps = [torch.from_numpy(a).float() for a in runner(batch.numpy())]
-            got = decode(tuple(maps[i:i + levels] for i in range(0, len(maps), levels)),
-                         reference.spec.strides, THRESHOLD, reference.spec.nms_threshold)
+            got = decode(graph.network(batch), reference.spec.strides, THRESHOLD,
+                         reference.spec.nms_threshold)
             print(_compare(name, want, got, px, score))
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(staged, destination)

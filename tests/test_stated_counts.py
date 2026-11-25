@@ -330,7 +330,7 @@ def test_the_permissive_deployment_offers_what_it_claims(deploy, document):
     shown = (ROOT / document).read_text()
     example = re.search(r"```bash\nMOZO_ENABLE=(.*?)\n```", shown, re.S)
     assert example, f"{document} no longer shows a MOZO_ENABLE example -- update this test"
-    stated = re.search(r"That is the (\d+) Apache-2\.0, MIT and BSD-3-Clause variants", shown)
+    stated = re.search(r"That is the (\d+) [\w., -]+? variants", shown)
     assert stated, f"{document} no longer states what that line offers -- update this test"
 
     deployment = deploy(example.group(1).replace("\\\n", ""))

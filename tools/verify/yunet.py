@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import hashlib
 import os
 import random
 import subprocess
@@ -50,7 +49,7 @@ import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
-from common import fixtures as photographs  # noqa: E402
+from common import digest, fixtures as photographs  # noqa: E402
 from tools.fetch.yunet import CHECKPOINTS, COMMIT  # noqa: E402
 
 THRESHOLDS = (0.02, 0.5)
@@ -66,10 +65,6 @@ FALSIFIERS = {
     "nms": "NMS IoU 0.45 -> 0.4 (caught at the final rows only)",
     "centre": "priors at cell centres instead of corners (caught at boxes and landmarks)",
 }
-
-
-def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def fixtures(wider: Path | None, count: int, seed: int = 0) -> list[tuple[str, np.ndarray]]:
@@ -256,15 +251,15 @@ def upstream_pipeline(upstream: Path):
     return build_yunet, batch_of, YuNetPostprocessor
 
 
-def verify_variant(variant: str, args, checkpoint: Path, mozo, frames, gate: Gate) -> None:
-    from mozo.vendors.yunet_deploy import Predictor
+def verify_variant(variant: str, args, pipeline, checkpoint: Path, mozo, frames, gate: Gate) -> None:
+    from mozo.vendors.yunet_deploy import Predictor, get_spec
 
-    build_yunet, batch_of, YuNetPostprocessor = upstream_pipeline(args.upstream)
+    build_yunet, batch_of, YuNetPostprocessor = pipeline
     filename, _, pinned, _ = CHECKPOINTS[variant]
     original = args.upstream / "weights" / filename
-    if sha256(original) != pinned:
+    if digest(original) != pinned:
         raise SystemExit(f"{original} is not the pinned upstream file (sha256 {pinned})")
-    upstream = build_yunet(f"yunet_{filename[6]}")
+    upstream = build_yunet(get_spec(variant).upstream)
     state = torch.load(original, map_location="cpu", weights_only=True)["state_dict"]
     upstream.load_state_dict(state, strict=True)
     upstream.eval()
@@ -361,11 +356,11 @@ def main() -> int:
     if os.environ.get("MKL_CBWR") != "AVX2,STRICT":
         print("warning: MKL_CBWR is not AVX2,STRICT; CPU results may differ between processes")
 
-    head = (args.upstream / ".git" / "HEAD")
-    commit = subprocess.run(["git", "-C", str(args.upstream), "rev-parse", "HEAD"],
-                            capture_output=True, text=True).stdout.strip() if head.exists() else "?"
+    commit = ((subprocess.run(["git", "-C", str(args.upstream), "rev-parse", "HEAD"],
+                              capture_output=True, text=True).stdout.strip() or "?")
+              if (args.upstream / ".git").exists() else "?")
     print(f"torch {torch.__version__}, cv2 {cv2.__version__}, numpy {np.__version__}, "
-          f"upstream {commit[:8] or '?'} (pinned {COMMIT[:8]})")
+          f"upstream {commit[:8]} (pinned {COMMIT[:8]})")
     if commit not in ("?", COMMIT):
         print("warning: the upstream checkout is not at the pinned commit")
     torch.set_grad_enabled(False)
@@ -388,8 +383,9 @@ def main() -> int:
         return resolve("yunet", variant, "torch-fp32")
 
     gate = Gate()
+    pipeline = upstream_pipeline(args.upstream)
     for variant in args.variants:
-        verify_variant(variant, args, checkpoint_for(variant), mozo, frames, gate)
+        verify_variant(variant, args, pipeline, checkpoint_for(variant), mozo, frames, gate)
 
     print(f"\n{gate.passed} comparisons exact, {len(gate.failed)} differ")
     for line in gate.failed[:40]:

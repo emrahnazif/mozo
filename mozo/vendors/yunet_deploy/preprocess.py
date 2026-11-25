@@ -10,14 +10,13 @@ missed.
 
 Every value is an integer 0..255 in float32 either way, so the order of the three steps does not
 change a pixel: here the uint8 image goes to the device first and is flipped, cast and padded
-there, which moves a quarter of the bytes a float copy would.
+there, cast once into a zeroed float batch: a quarter of the bytes a float copy would move.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 __all__ = ["to_batch"]
 
@@ -30,8 +29,8 @@ def to_batch(image: np.ndarray, size_divisor: int, device: torch.device) -> torc
     them; mozo's images are RGB, so the channels are reversed here.
     """
     height, width = image.shape[:2]
-    pad_h = -height % size_divisor
-    pad_w = -width % size_divisor
+    padded = (-(-height // size_divisor) * size_divisor, -(-width // size_divisor) * size_divisor)
     pixels = torch.from_numpy(np.ascontiguousarray(image)).to(device)
-    batch = pixels.permute(2, 0, 1).flip(0).unsqueeze(0).float()
-    return F.pad(batch, (0, pad_w, 0, pad_h)).contiguous()
+    batch = torch.zeros((1, 3, *padded), dtype=torch.float32, device=device)
+    batch[0, :, :height, :width] = pixels.permute(2, 0, 1).flip(0)
+    return batch

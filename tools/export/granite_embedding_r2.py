@@ -50,7 +50,7 @@ os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 from bench.granite_embedding_r2 import interleaved  # noqa: E402
 from verify.granite_embedding_r2 import docs_text  # noqa: E402
 
-from fetch.granite_embedding_r2 import REVISIONS  # noqa: E402
+from fetch.granite_embedding_r2 import UPSTREAM  # noqa: E402
 
 from mozo.runtimes import CoreMLRunner, providers_for  # noqa: E402
 from mozo.vendors.granite_embedding_r2_deploy import SPECS, Encoder  # noqa: E402
@@ -93,11 +93,17 @@ class Graph(nn.Module):
         return F.normalize(self.network(input_ids)[:, 0], p=2, dim=1)
 
 
-def export(graph: Graph, path: Path) -> None:
-    """Trace *graph* to ONNX with batch and length dynamic."""
-    example = torch.randint(5, 50000, (1, 100))
-    with torch.no_grad():
-        torch.onnx.export(graph, (example,), str(path), opset_version=OPSET, dynamo=False,
+def export(graph: Graph, path: Path, *, half: bool = False) -> None:
+    """Trace *graph* to ONNX with batch and length dynamic.
+
+    With *half*, on CUDA under fp16 autocast, so the graph carries autocast's types for a strongly
+    typed TensorRT engine; opset 18, which writes autocast's casts.
+    """
+    device = next(graph.parameters()).device
+    example = torch.randint(5, 50000, (1, 100), device=device)
+    with torch.no_grad(), torch.autocast("cuda", torch.float16, enabled=half):
+        torch.onnx.export(graph, (example,), str(path), opset_version=18 if half else OPSET,
+                          dynamo=False,
                           input_names=["input_ids"], output_names=["embedding"],
                           dynamic_axes={"input_ids": {0: "batch", 1: "length"},
                                         "embedding": {0: "batch"}})
@@ -112,7 +118,10 @@ def session(path: Path, device: str, threads: int):
     # ONNX Runtime's workers spin after each call by default, and spinning threads steal the CPU
     # from whichever side runs next -- torch, or another session -- in an interleaved benchmark.
     options.add_session_config_entry("session.intra_op.allow_spinning", "0")
-    created = ort.InferenceSession(str(path), options, providers=providers_for(device))
+    # TF32 off on CUDA, as torch's matmuls are compared with it off: IEEE fp32 on both sides.
+    providers = [("CUDAExecutionProvider", {"use_tf32": 0}) if name == "CUDAExecutionProvider"
+                 else name for name in providers_for(device)]
+    created = ort.InferenceSession(str(path), options, providers=providers)
     if device.startswith("cuda") and "CUDAExecutionProvider" not in created.get_providers():
         raise SystemExit("ONNX Runtime fell back to the CPU; install onnxruntime-gpu, or these "
                          "would be CPU numbers labelled cuda")
@@ -242,7 +251,7 @@ def main() -> int:
     args = parser.parse_args()
     torch.set_num_threads(args.threads)
     if args.coreml:
-        coreml(args.variant, REVISIONS[args.variant])
+        coreml(args.variant, UPSTREAM[args.variant].revision)
         return 0
 
     spec = SPECS[args.variant]

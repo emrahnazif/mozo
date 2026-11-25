@@ -69,9 +69,6 @@ __all__ = ["Tokenizer"]
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 
-#: The English vocabulary, ModernBERT's.
-ENGLISH = "granite_bpe"
-
 
 def vocab_path(vocabulary: str) -> Path:
     """Where the asset named *vocabulary* lives."""
@@ -296,6 +293,8 @@ def _nfc(text: str, boundaries: "re.Pattern[str]") -> str:
     run normalises identically on every Python from 3.10 up, because it contains only characters
     Unicode 13 assigned.
     """
+    if text.isascii():
+        return text  # ASCII is NFC already, and no boundary is ASCII: skips the scan for most text
     out, position = [], 0
     for match in boundaries.finditer(text):
         out.append(unicodedata.normalize("NFC", text[position:match.start()]))
@@ -363,14 +362,15 @@ def _word(vocabulary: str, word: str) -> tuple[int, ...]:
     every tokenizer in the process can use one cache.
     """
     tables = _vocabulary(vocabulary)
+    raw = word.encode("utf-8")
     if tables.whole:
         # Upstream looks the whole byte-mapped piece up before merging anything. Not a shortcut:
         # merging can reach a different split of a piece the vocabulary has whole.
         encoder = byte_encoder()
-        whole = tables.whole.get("".join(encoder[byte] for byte in word.encode("utf-8")))
+        whole = tables.whole.get("".join(encoder[byte] for byte in raw))
         if whole is not None:
             return (whole,)
-    symbols = [i for i in (tables.byte_ids[byte] for byte in word.encode("utf-8")) if i >= 0]
+    symbols = [i for i in (tables.byte_ids[byte] for byte in raw) if i >= 0]
     return tuple(_merge(symbols, tables.ranks, tables.merged))
 
 
@@ -378,7 +378,7 @@ class Tokenizer:
     """Turn text into the token ids the encoder expects, the template's special tokens included.
 
     Examples:
-        >>> Tokenizer().encode("Hello  world")             # doctest: +SKIP
+        >>> Tokenizer(8192, "granite_bpe").encode("Hello  world")   # doctest: +SKIP
         [50281, 12092, 50276, 10186, 50282]
 
     Args:
@@ -386,11 +386,12 @@ class Tokenizer:
             :meth:`__call__`, not by :meth:`encode`, which reproduces upstream and so enforces
             nothing. A parameter rather than an import, so this module stays free of the rest of
             the package and can be checked under any Python on its own.
-        vocabulary: Which asset: :data:`ENGLISH`, or ``"granite_multilingual_bpe"``. A variant's
-            ``Spec.vocabulary`` names it.
+        vocabulary: Which asset: ``"granite_bpe"`` (English) or ``"granite_multilingual_bpe"``.
+            A variant's ``Spec.vocabulary`` names it. No default: the wrong one gives plausible
+            ids and no error.
     """
 
-    def __init__(self, context: int | None = None, vocabulary: str = ENGLISH) -> None:
+    def __init__(self, context: int | None, vocabulary: str) -> None:
         self.context = context
         self.vocabulary = vocabulary
         self._tables = _vocabulary(vocabulary)

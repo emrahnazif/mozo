@@ -33,30 +33,34 @@ FAMILY = "granite_embedding_r2"
 PUBLISHED = {"small": ["coreml-fp32", "torch-fp32"], "multilingual-small": ["torch-fp32"]}
 
 
-@pytest.fixture(scope="module", params=VARIANTS)
-def predictor(request):
-    """Each variant on the CPU, built once for the file."""
-    require_weights(FAMILY, request.param)
+def _load(variant: str):
+    """*variant* on the CPU, or a skip when its weights are not to be had."""
+    require_weights(FAMILY, variant)
     from mozo.adapters.granite_embedding_r2 import GraniteEmbeddingR2Predictor
     from mozo.weights import WeightsError
 
     try:
-        return GraniteEmbeddingR2Predictor(request.param, device="cpu")
+        return GraniteEmbeddingR2Predictor(variant, device="cpu")
     except WeightsError as error:
         pytest.skip(str(error))
+
+
+@pytest.fixture(scope="module", params=VARIANTS)
+def predictor(request):
+    """Each variant, built once for the file."""
+    return _load(request.param)
 
 
 @pytest.fixture(scope="module")
 def small():
     """The English variant alone, for what only it has."""
-    require_weights(FAMILY, "small")
-    from mozo.adapters.granite_embedding_r2 import GraniteEmbeddingR2Predictor
-    from mozo.weights import WeightsError
+    return _load("small")
 
-    try:
-        return GraniteEmbeddingR2Predictor("small", device="cpu")
-    except WeightsError as error:
-        pytest.skip(str(error))
+
+@pytest.fixture(scope="module")
+def multilingual():
+    """The multilingual variant alone, for what only it does."""
+    return _load("multilingual-small")
 
 
 # --- the registry and the adapter must agree ---
@@ -167,7 +171,8 @@ def test_padding_to_a_bucket_does_not_move_the_vector(length):
 def tokenizer():
     from mozo.vendors.granite_embedding_r2_deploy.tokenizer import Tokenizer
 
-    return Tokenizer(SPECS["small"].context)
+    spec = SPECS["small"]
+    return Tokenizer(spec.context, spec.vocabulary)
 
 
 @pytest.fixture(scope="module")
@@ -272,23 +277,15 @@ def test_a_vector_does_not_depend_on_what_it_was_encoded_beside(predictor):
     assert np.array_equal(together, alone)
 
 
-def test_a_question_finds_its_answer_across_languages():
+def test_a_question_finds_its_answer_across_languages(multilingual):
     """What the multilingual variant is for: IBM's own card example, a query in one language and
     passages in three, each query nearest its own passage."""
-    require_weights(FAMILY, "multilingual-small")
-    from mozo.adapters.granite_embedding_r2 import GraniteEmbeddingR2Predictor
-    from mozo.weights import WeightsError
-
-    try:
-        model = GraniteEmbeddingR2Predictor("multilingual-small", device="cpu")
-    except WeightsError as error:
-        pytest.skip(str(error))
-    queries = model.encode_text([
+    queries = multilingual.encode_text([
         "What is the tallest mountain in Japan?",
         "Wer hat das Lied Achy Breaky Heart geschrieben?",
         "ドイツの首都はどこですか？",
     ])
-    passages = model.encode_text([
+    passages = multilingual.encode_text([
         "富士山は、静岡県と山梨県にまたがる活火山で、標高3776.12 mで日本最高峰の独立峰である。",
         "Achy Breaky Heart is a country song written by Don Von Tress.",
         "Berlin ist die Hauptstadt und ein Land der Bundesrepublik Deutschland.",

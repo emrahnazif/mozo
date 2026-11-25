@@ -23,23 +23,25 @@ into a scratch directory, the fp16 one under CUDA autocast; engines are strongly
 from __future__ import annotations
 
 import argparse
-import json
+import gc
 import os
 import shutil
 import statistics
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
+
+from common import median_ms  # noqa: E402
+from export.granite_embedding_r2 import Graph, export, session  # noqa: E402
+from verify.granite_embedding_r2 import belebele_rows  # noqa: E402
 
 from mozo.runtimes import TensorRTRunner  # noqa: E402
 from mozo.vendors.granite_embedding_r2_deploy import SPECS, Encoder  # noqa: E402
@@ -56,32 +58,9 @@ LENGTHS = (16, 64, 256, 1024, 4096, 8192)
 RUNTIMES = ("torch-fp32", "torch-fp16", "onnx-fp32", "tensorrt-fp32", "tensorrt-fp16")
 
 
-class Graph(torch.nn.Module):
-    """``input_ids (1, L)`` -> the unit vector, as ``Encoder.encode_text`` computes it."""
-
-    def __init__(self, network):
-        super().__init__()
-        self.network = network
-
-    def forward(self, input_ids):
-        return F.normalize(self.network(input_ids)[:, 0], p=2, dim=1)
-
-
-def export(graph: Graph, path: Path, half: bool) -> None:
-    example = torch.randint(5, 50000, (1, 100), device="cuda")
-    with torch.no_grad(), torch.autocast("cuda", torch.float16, enabled=half):
-        torch.onnx.export(graph, (example,), str(path), opset_version=18 if half else 17,
-                          dynamo=False, input_names=["input_ids"], output_names=["embedding"],
-                          dynamic_axes={"input_ids": {0: "batch", 1: "length"},
-                                        "embedding": {0: "batch"}})
-
-
 def belebele(language: str) -> tuple[list[str], list[str], list[int]]:
     """``(passages, questions, the passage each question is about)`` for one language."""
-    from huggingface_hub import hf_hub_download
-
-    path = hf_hub_download("facebook/belebele", f"data/{language}.jsonl", repo_type="dataset")
-    rows = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines()]
+    rows = belebele_rows(language)
     passages = list(dict.fromkeys(row["flores_passage"] for row in rows))
     index = {passage: i for i, passage in enumerate(passages)}
     return passages, [row["question"] for row in rows], [index[r["flores_passage"]] for r in rows]
@@ -124,26 +103,19 @@ def main() -> int:
     scratch = Path(tempfile.mkdtemp(prefix="granite-runtimes-"))
 
     def runner(name: str):
+        half = name.endswith("fp16")
         if name.startswith("torch"):
-            half = name.endswith("fp16")
-
             def run(row):
                 with torch.inference_mode(), torch.autocast("cuda", torch.float16, enabled=half):
                     return graph(torch.tensor([row], device="cuda")).float()
             return run
-        half = name.endswith("fp16")
         path = scratch / f"{'fp16' if half else 'fp32'}.onnx"
         if not path.exists():
-            export(graph, path, half)
+            export(graph, path, half=half)
         if name == "onnx-fp32":
-            import onnxruntime as ort
-
-            session = ort.InferenceSession(str(path), providers=[
-                ("CUDAExecutionProvider", {"use_tf32": 0}), "CPUExecutionProvider"])
-            if session.get_providers()[0] != "CUDAExecutionProvider":
-                raise SystemExit("ONNX Runtime has no CUDA provider; install onnxruntime-gpu")
+            ort_session = session(path, "cuda", threads=1)
             return lambda row: torch.from_numpy(
-                session.run(None, {"input_ids": np.array([row], dtype=np.int64)})[0])
+                ort_session.run(None, {"input_ids": np.array([row], dtype=np.int64)})[0])
         engine = TensorRTRunner(path, "cuda", engines=scratch,
                                 shapes={"input_ids": ((1, 1), (1, 256), (1, args.max_length))},
                                 probe=(torch.tensor([ids[texts[0]]], device="cuda"),))
@@ -160,20 +132,15 @@ def main() -> int:
         speeds = []
         for length in (n for n in LENGTHS if n <= args.max_length):
             row = [body[0]] + body[1:length - 1] + [body[-1]]
-            for _ in range(3):
-                run(row)
-            timings = []
-            for _ in range(max(5, 2000 // length)):
-                torch.cuda.synchronize()
-                started = time.perf_counter()
-                run(row)
-                torch.cuda.synchronize()
-                timings.append(time.perf_counter() - started)
-            speeds.append(f"{length}: {1000 * statistics.median(timings):.2f} ms")
+            ms = median_ms(lambda: run(row), "cuda", runs=max(5, 2000 // length), warmup=3)
+            speeds.append(f"{length}: {ms:.2f} ms")
         print(f"{name:14s} nDCG@10 {alone['nDCG@10']:.3f}  R@1 {alone['R@1']:.3f}  mixed nDCG@10 "
               f"{mixed['nDCG@10']:.3f}  max|d| {drift.max():.2e}  p99 {np.quantile(drift, .99):.2e}"
               f"  min cos {cosine:.6f}\n               {', '.join(speeds)}")
-        del run
+        # Drop this runtime before building the next: an ONNX Runtime session or an engine still
+        # holding its GPU memory leaves the next engine's context too little to start.
+        run = None  # noqa: F841
+        gc.collect()
         torch.cuda.empty_cache()
     shutil.rmtree(scratch)
     return 0

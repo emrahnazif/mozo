@@ -42,6 +42,7 @@ import sys
 import unicodedata
 import urllib.request
 from pathlib import Path
+from typing import NamedTuple
 
 import torch
 
@@ -57,20 +58,27 @@ from mozo.vendors.granite_embedding_r2_deploy.tokenizer import vocab_path  # noq
 
 _HF = "https://huggingface.co"
 
-#: The revision each variant is published under: the newest, which a fetch writes by default.
-REVISIONS = {"small": "2026-11-24", "multilingual-small": "2026-11-25"}
+class Upstream(NamedTuple):
+    """Where one variant comes from, and what its NOTICE says about it."""
 
-#: The upstream commit every file is read from, per variant. A commit rather than ``main``, so
-#: what is fetched cannot move.
-COMMITS = {"small": "2ab6fa8ea2d674564defd37171ae19079b864b33",
-           "multilingual-small": "835ad14087e140460703cf0fae09f97d469d65c2"}
+    #: The revision it is published under: the newest, which a fetch writes by default.
+    revision: str
+    #: The upstream commit every file is read from. A commit rather than ``main``, so what is
+    #: fetched cannot move.
+    commit: str
+    paper: str
+    #: What it embeds, as the NOTICE's opening phrase.
+    kind: str
 
-#: Each variant's paper, for its NOTICE.
-PAPERS = {"small": "Granite Embedding R2 Models (2025), arXiv:2508.21085",
-          "multilingual-small": "Granite Embedding Multilingual R2 Models (2026), arXiv:2605.13521"}
 
-#: What each variant embeds, for its NOTICE.
-LANGUAGES = {"small": "an English", "multilingual-small": "a multilingual (200+ languages)"}
+UPSTREAM = {
+    "small": Upstream("2026-11-24", "2ab6fa8ea2d674564defd37171ae19079b864b33",
+                      "Granite Embedding R2 Models (2025), arXiv:2508.21085", "an English"),
+    "multilingual-small": Upstream(
+        "2026-11-25", "835ad14087e140460703cf0fae09f97d469d65c2",
+        "Granite Embedding Multilingual R2 Models (2026), arXiv:2605.13521",
+        "a multilingual (200+ languages)"),
+}
 
 #: Where Apache-2.0's canonical text lives. IBM ships no LICENSE file in the repository; the
 #: licence is stated in the model card's metadata.
@@ -84,7 +92,7 @@ def repository(variant: str) -> str:
 
 def resolve(variant: str, name: str) -> str:
     """The URL of one file of *variant*, at its pinned commit."""
-    return f"{_HF}/{repository(variant)}/resolve/{COMMITS[variant]}/{name}"
+    return f"{_HF}/{repository(variant)}/resolve/{UPSTREAM[variant].commit}/{name}"
 
 
 def _notice(variant: str, sha256: str) -> str:
@@ -92,11 +100,11 @@ def _notice(variant: str, sha256: str) -> str:
     repo = repository(variant)
     return (
         f"Granite Embedding R2 -- {variant} ({SPECS[variant].upstream})\n"
-        f"{LANGUAGES[variant]} text embedding model: text in, one {SPECS[variant].width}-dimensional "
+        f"{UPSTREAM[variant].kind} text embedding model: text in, one {SPECS[variant].width}-dimensional "
         "vector out\n\n"
         "Copyright IBM Corp.\n\n"
-        f"Source:  {_HF}/{repo} at commit {COMMITS[variant]}\n"
-        f"Paper:   {PAPERS[variant]}\n"
+        f"Source:  {_HF}/{repo} at commit {UPSTREAM[variant].commit}\n"
+        f"Paper:   {UPSTREAM[variant].paper}\n"
         "Licence: Apache-2.0 (full text in the LICENSE file beside this one), as stated in the\n"
         "         model card's metadata. The repository is not gated.\n\n"
         "This file is not the byte stream IBM serves. tools/fetch/granite_embedding_r2.py\n"
@@ -114,7 +122,7 @@ def fetch(variant: str, revision: str, weights_dir: Path) -> None:
     target = weights_dir / "granite_embedding_r2" / variant / revision / "torch-fp32.pth"
     staged = target.with_name("model.safetensors")
 
-    sha256 = hub_lfs_sha256s(repository(variant), COMMITS[variant])["model.safetensors"]
+    sha256 = hub_lfs_sha256s(repository(variant), UPSTREAM[variant].commit)["model.safetensors"]
     if not target.is_file():
         download_verified(resolve(variant, "model.safetensors"), staged, sha256,
                           label=variant, width=6, detail="Apache-2.0")
@@ -509,7 +517,7 @@ def main() -> int:
         raise SystemExit(f"unknown variants: {unknown}. Known: {list(SPECS)}")
 
     for variant in wanted:
-        fetch(variant, args.revision or REVISIONS[variant], args.weights_dir)
+        fetch(variant, args.revision or UPSTREAM[variant].revision, args.weights_dir)
 
     print(f"\n{len(wanted)} checkpoint(s) in {args.weights_dir}, all Apache-2.0")
     return 0

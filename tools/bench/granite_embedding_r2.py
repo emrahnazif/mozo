@@ -42,7 +42,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 
 from common import median_ms, synchronise  # noqa: E402
-from fetch.granite_embedding_r2 import COMMITS, repository  # noqa: E402
+from fetch.granite_embedding_r2 import UPSTREAM, repository  # noqa: E402
 from verify.granite_embedding_r2 import docs_text, prefix_within  # noqa: E402
 
 from mozo.vendors.granite_embedding_r2_deploy import SPECS, Encoder  # noqa: E402
@@ -74,7 +74,7 @@ def reference_for(variant: str):
     """``transformers``' model and tokenizer for *variant*, loaded once, on the CPU."""
     from transformers import AutoModel, AutoTokenizer
 
-    repo, commit = repository(variant), COMMITS[variant]
+    repo, commit = repository(variant), UPSTREAM[variant].commit
     model = AutoModel.from_pretrained(repo, revision=commit, dtype=torch.float32,
                                       attn_implementation="sdpa").eval()
     return model, AutoTokenizer.from_pretrained(repo, revision=commit)
@@ -126,7 +126,8 @@ def main() -> int:
         # Built before anything is timed, so no device's first-text figure pays for the tables.
         # Per variant: the two tokenizers count the same text differently.
         vocabulary = SPECS[variant].vocabulary
-        texts = documents(Tokenizer(None, vocabulary))
+        tokenizer = Tokenizer(None, vocabulary)
+        texts = documents(tokenizer)
 
         for device in args.devices:
             print(f"\n{variant} on {device} ({torch.get_num_threads()} threads, "
@@ -163,11 +164,9 @@ def main() -> int:
                   f"({batch_ms / QUERIES:.2f} ms each)")
 
         page = texts[2048]
-        warm = median_ms(lambda: Tokenizer(None, vocabulary).encode(page), "cpu", runs=20,
-                         warmup=1)
-        print(f"\n  tokenizer alone, 2048 tokens: "
-              f"{cold(lambda: Tokenizer(None, vocabulary).encode(page)):.2f} ms cold, "
-              f"{warm:.2f} ms warm")
+        warm = median_ms(lambda: tokenizer.encode(page), "cpu", runs=20, warmup=1)
+        print(f"\n  tokenizer alone, 2048 tokens: {cold(lambda: tokenizer.encode(page)):.2f} ms "
+              f"cold, {warm:.2f} ms warm")
         if reference:
             # Warm too: the Rust tokenizer keeps a cache of its own across calls.
             reference_ms = median_ms(lambda: reference[1](page)["input_ids"], "cpu", runs=20)

@@ -65,6 +65,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
+import gzip
 import json
 import os
 import random
@@ -83,7 +84,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 # bytes. Same line, same reason, as the other gates.
 os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 
-from fetch.granite_embedding_r2 import COMMITS, repository  # noqa: E402
+from fetch.granite_embedding_r2 import UPSTREAM, repository  # noqa: E402
 
 from mozo.vendors.granite_embedding_r2_deploy import SPECS, Encoder  # noqa: E402
 from mozo.vendors.granite_embedding_r2_deploy import layers as vendor_layers  # noqa: E402
@@ -97,7 +98,7 @@ PINNED = {"torch": "2.13.0", "transformers": "5.9.0"}
 #: Texts that exercise the English tokenizer's awkward corners: whitespace runs that are added
 #: tokens, ``[MASK]``'s left strip, special tokens written out, NFC, a mark the reference will not
 #: compose across, a codepoint newer than the reference's tables, mixed scripts.
-AWKWARD = [
+_ENGLISH_AWKWARD = [
     "forklift",
     "How do I run a workflow on a video at five frames a second?",
     "a  b   c" + " " * 24 + "d" + " " * 25 + "e",
@@ -114,7 +115,7 @@ AWKWARD = [
 #: case-insensitive contractions including the long s), whole pieces before merges, control bytes
 #: and UTF-8 lead bytes with no piece, special tokens, and ``single_word`` tokens against a word
 #: character or not.
-AWKWARD_MULTILINGUAL = [
+_MULTILINGUAL_AWKWARD = [
     "forklift",
     "What is the tallest mountain in Japan?",
     "富士山は、静岡県と山梨県にまたがる活火山で、標高3776.12 mで日本最高峰の独立峰である。",
@@ -127,6 +128,17 @@ AWKWARD_MULTILINGUAL = [
     "   leading and trailing   \r\n\t",
     "def f(x):\n\treturn x  # 🚜🤖 👩🏽\u200d🔧",
 ]
+
+#: The awkward texts, by the tokenizer asset they exercise: the variants differ there and nowhere
+#: else that the fixtures care about.
+AWKWARD = {"granite_bpe": _ENGLISH_AWKWARD, "granite_multilingual_bpe": _MULTILINGUAL_AWKWARD}
+
+
+def _multilingual(variant: str) -> bool:
+    """Whether *variant* runs the multilingual tokenizer: what its fixtures and perturbations
+    depend on, read off its spec rather than its name."""
+    return SPECS[variant].vocabulary == "granite_multilingual_bpe"
+
 
 #: A paragraph in eleven scripts, repeated to make the long multilingual fixtures.
 MULTILINGUAL_PARAGRAPH = (
@@ -172,9 +184,8 @@ def texts(variant: str, tokenizer, long: bool) -> dict[str, str]:
     """The fixtures, by name: the awkward ones, lengths either side of the attention window and
     of 128, a long text, and one exactly at the context -- English's 8,192 always, the
     multilingual 32,768 only with *long* (minutes on one thread)."""
-    multilingual = variant.startswith("multilingual")
-    awkward = AWKWARD_MULTILINGUAL if multilingual else AWKWARD
-    out = {f"awkward {i}": text for i, text in enumerate(awkward)}
+    multilingual = _multilingual(variant)
+    out = {f"awkward {i}": text for i, text in enumerate(AWKWARD[SPECS[variant].vocabulary])}
     for length in (63, 64, 65, 66, 127, 128, 129, 130):
         out[f"{length} tokens"] = "hello" + " hello" * (length - 3)
     if multilingual:
@@ -191,18 +202,29 @@ def texts(variant: str, tokenizer, long: bool) -> dict[str, str]:
     return out
 
 
-def belebele() -> list[str]:
-    """Belebele's passages, questions and answers in all 122 of its languages (CC-BY-SA-4.0),
-    from the Hub's cache: real text in every script the multilingual model claims."""
-    from huggingface_hub import HfApi, hf_hub_download
+#: Belebele (CC-BY-SA-4.0) on the Hub: 900 questions per language, about 488 FLORES passages.
+BELEBELE = "facebook/belebele"
 
-    files = sorted(name for name in HfApi().list_repo_files("facebook/belebele", repo_type="dataset")
-                   if name.startswith("data/") and name.endswith(".jsonl"))
+
+def belebele_rows(language: str) -> list[dict]:
+    """One language's rows of Belebele, from the Hub's cache."""
+    from huggingface_hub import hf_hub_download
+
+    path = hf_hub_download(BELEBELE, f"data/{language}.jsonl", repo_type="dataset")
+    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines()]
+
+
+def belebele() -> list[str]:
+    """Belebele's passages, questions and answers in all 122 of its languages: real text in every
+    script the multilingual model claims."""
+    from huggingface_hub import HfApi
+
+    languages = sorted(name[len("data/"):-len(".jsonl")]
+                       for name in HfApi().list_repo_files(BELEBELE, repo_type="dataset")
+                       if name.startswith("data/") and name.endswith(".jsonl"))
     out: dict[str, None] = {}
-    for name in files:
-        path = hf_hub_download("facebook/belebele", name, repo_type="dataset")
-        for line in Path(path).read_text(encoding="utf-8").splitlines():
-            row = json.loads(line)
+    for language in languages:
+        for row in belebele_rows(language):
             for key in ("flores_passage", "question", "mc_answer1", "mc_answer2", "mc_answer3",
                         "mc_answer4"):
                 out[row[key]] = None
@@ -215,7 +237,7 @@ def tokenizer_corpus(variant: str, sweep: bool) -> list[str]:
     *sweep*, every codepoint in contexts that cross each class boundary -- plus, in English, bases
     followed by runs of combining marks, the shape that exercises NFC, where interpreters
     disagree."""
-    multilingual = variant.startswith("multilingual")
+    multilingual = _multilingual(variant)
     corpus = docs_text().split("\n")
     rng = random.Random(0)
     pool = (list(" \t\n\r\x0b\x0c\x85\xa0\u1680\u2000\u2028\u2029\u3000aA\u00e9\u00df0٠\u00bd'!?[]<>|")
@@ -271,8 +293,8 @@ def _record(network, stages: dict) -> list:
     return [module.register_forward_hook(keep(name)) for name, module in modules]
 
 
-#: The order stages run in, so a perturbation's first failure can be named.
 def stage_order(spec) -> list[str]:
+    """The order stages run in, so a perturbation's first failure can be named."""
     return (["ids", "embeddings"] + [f"layer {i:02d}" for i in range(spec.layers)]
             + ["final_norm", "unit"])
 
@@ -283,7 +305,7 @@ def reference_stages(variant: str, fixtures: dict[str, str]) -> tuple[object, di
     from transformers import AutoModel
     from huggingface_hub import hf_hub_download
 
-    repo, commit = repository(variant), COMMITS[variant]
+    repo, commit = repository(variant), UPSTREAM[variant].commit
     theirs = AutoModel.from_pretrained(repo, revision=commit, dtype=torch.float32,
                                        attn_implementation="sdpa").eval()
     for parameter in theirs.parameters():
@@ -367,7 +389,7 @@ def against_upstream(variant: str, ours: Encoder, sweep: bool, long: bool,
     failures += problems
     print(f"  model: {len(fixtures)} texts, every stage")
 
-    # Encoding them together must not move any vector. Repeats force equal-length batches.
+    # Encoding them together must not move any vector, wherever in a call a text comes.
     vectors = {text: recorded[name]["unit"] for name, text in fixtures.items()}
     batch = list(vectors)
     batch += [text for text in batch if len(text) < 2000] * 3
@@ -383,8 +405,7 @@ def against_mozo(variant: str, vendor: Encoder) -> tuple[int, list[str]]:
 
     adapter = GraniteEmbeddingR2Predictor(variant, device="cpu")
     checked, failures = 0, []
-    awkward = AWKWARD_MULTILINGUAL if variant.startswith("multilingual") else AWKWARD
-    batch = awkward + ["one more, to make a batch"]
+    batch = AWKWARD[SPECS[variant].vocabulary] + ["one more, to make a batch"]
     checked += 1
     if not torch.equal(torch.from_numpy(adapter.encode_text(batch)), vendor.encode_text(batch)):
         failures.append("the adapter's vectors differ from the vendor's")
@@ -433,74 +454,74 @@ class _PoolSecond(Encoder):
 
 
 def falsifications(variant: str) -> list[tuple[str, object, str, set[str] | None]]:
-    """``(what, how, the stage it must first fail at, the fixtures it must fail on)``.
+    """``(what, build, the stage it must first fail at, the fixtures it must fail on)``.
 
-    *how* is either a replacement ``Spec`` or a zero-argument context manager factory. A fixture
-    set of ``None`` means every fixture that exercises the change must fail and at least one must.
+    *build* takes the checkpoint and returns ``(encoder, context)``: the encoder to compare, and
+    the context to compare it in. A fixture set of ``None`` means every fixture that exercises the
+    change may fail and at least one must.
     """
     spec = SPECS[variant]
-    multilingual = variant.startswith("multilingual")
-    replace = dataclasses.replace
     vocabulary = spec.vocabulary
+    replace, plain = dataclasses.replace, contextlib.nullcontext
+
+    def with_spec(changed):
+        return lambda checkpoint: (Encoder(checkpoint, changed, device="cpu"), plain())
+
+    def within(context):
+        return lambda checkpoint: (Encoder(checkpoint, spec, device="cpu"), context())
+
     cases = [
-        ("local rotary base +1", replace(spec, local_theta=spec.local_theta + 1), "layer 01",
-         None),
-        ("global rotary base +1", replace(spec, global_theta=spec.global_theta + 1), "layer 00",
-         None),
+        ("local rotary base +1", with_spec(replace(spec, local_theta=spec.local_theta + 1)),
+         "layer 01", None),
+        ("global rotary base +1", with_spec(replace(spec, global_theta=spec.global_theta + 1)),
+         "layer 00", None),
         # Only an input longer than the window can see the difference.
-        ("window 64 -> 63", replace(spec, window=63), "layer 01", None),
-        ("LayerNorm eps 1e-5 -> 1e-6", replace(spec, norm_eps=1e-6), "embeddings", None),
-        ("pool position 1", _PoolSecond, "unit", None),
+        ("window 64 -> 63", with_spec(replace(spec, window=63)), "layer 01", None),
+        ("LayerNorm eps 1e-5 -> 1e-6", with_spec(replace(spec, norm_eps=1e-6)), "embeddings",
+         None),
+        ("pool position 1",
+         lambda checkpoint: (_PoolSecond(checkpoint, spec, device="cpu"), plain()), "unit", None),
     ]
-    if multilingual:
+    if _multilingual(variant):
         cases += [
-            ("SiLU -> exact GELU", lambda: _activation("silu", F.gelu), "layer 00", None),
+            ("SiLU -> exact GELU", with_spec(replace(spec, activation="gelu")), "layer 00", None),
             # ``INCLUDING`` is one piece whole and four merged.
-            ("merge every piece (no ignore_merges)", lambda: _tables(vocabulary, whole={}),
+            ("merge every piece (no ignore_merges)", within(lambda: _tables(vocabulary, whole={})),
              "ids", {"awkward 4"}),
-            ("single_word ignored", lambda: _tables(vocabulary, single_word=frozenset()), "ids",
-             {"awkward 8"}),
+            ("single_word ignored", within(lambda: _tables(vocabulary, single_word=frozenset())),
+             "ids", {"awkward 8"}),
             # ``O'Shannessy`` takes ``'S`` as a contraction; most joins give the same ids anyway.
-            ("contractions case-sensitive", lambda: _tables(vocabulary, split=_case_sensitive()),
-             "ids", {"awkward 5"}),
+            ("contractions case-sensitive",
+             within(lambda: _tables(vocabulary, split=_case_sensitive(vocabulary))), "ids",
+             {"awkward 5"}),
         ]
     else:
         cases += [
             ("exact GELU -> tanh GELU",
-             lambda: _activation("gelu", lambda x: F.gelu(x, approximate="tanh")), "layer 00",
-             None),
-            ("no NFC", lambda: _tables(vocabulary, boundaries=None), "ids", {"awkward 5"}),
-            ("[MASK] keeps its whitespace", lambda: _tables(vocabulary, lstrip=frozenset()),
+             within(lambda: _activation("gelu", lambda x: F.gelu(x, approximate="tanh"))),
+             "layer 00", None),
+            ("no NFC", within(lambda: _tables(vocabulary, boundaries=None)), "ids",
+             {"awkward 5"}),
+            ("[MASK] keeps its whitespace", within(lambda: _tables(vocabulary, lstrip=frozenset())),
              "ids", {"awkward 8"}),
         ]
     return cases
 
 
-def _case_sensitive():
-    """The multilingual split pattern with its contractions in lower case only."""
-    import gzip
-    import re
-
-    data = json.loads(gzip.decompress(vendor_tokenizer.vocab_path(
-        SPECS["multilingual-small"].vocabulary).read_bytes()))
+def _case_sensitive(vocabulary: str):
+    """The o200k split pattern of *vocabulary* with its contractions in ASCII lower case only."""
+    data = json.loads(gzip.decompress(vendor_tokenizer.vocab_path(vocabulary).read_bytes()))
     data["contractions"] = [["".join(c for c in characters if c.islower() and c.isascii())
                              for characters in alternative] for alternative in data["contractions"]]
-    pattern = vendor_tokenizer._o200k(data)
-    assert isinstance(pattern, re.Pattern)
-    return pattern
+    return vendor_tokenizer._o200k(data)
 
 
 def falsify(variant: str, checkpoint: Path, fixtures: dict[str, str],
             recorded: dict) -> list[str]:
     """Run every perturbation; return what was *not* caught as expected."""
     problems = []
-    for what, how, stage, must in falsifications(variant):
-        if isinstance(how, type) and issubclass(how, Encoder):
-            encoder, context = how(checkpoint, SPECS[variant], device="cpu"), contextlib.nullcontext()
-        elif dataclasses.is_dataclass(how):
-            encoder, context = Encoder(checkpoint, how, device="cpu"), contextlib.nullcontext()
-        else:
-            encoder, context = Encoder(checkpoint, SPECS[variant], device="cpu"), how()
+    for what, build, stage, must in falsifications(variant):
+        encoder, context = build(checkpoint)
         with context:
             _, failures, first = compare(encoder, fixtures, recorded)
         stages = sorted(set(first.values()), key=stage_order(SPECS[variant]).index)

@@ -146,6 +146,11 @@
               "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
               "size": 2451
             },
+            "onnx-fp16": {
+              "path": "deim/large/2026-11-25/onnx-fp16.onnx",
+              "sha256": "b23f0293bfe9e8590abef895434de1612e7e537f57cc883a34e0e548220ebd36",
+              "size": 62988062
+            },
             "onnx-fp32": {
               "path": "deim/large/2026-11-25/onnx-fp32.onnx",
               "sha256": "ed59e8eca360c482943e85442531967ee9098e033b923c104b27551beb4cd0b1",
@@ -180,6 +185,11 @@
               "path": "deim/medium/2026-11-25/labels.json",
               "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
               "size": 2451
+            },
+            "onnx-fp16": {
+              "path": "deim/medium/2026-11-25/onnx-fp16.onnx",
+              "sha256": "3859e6267ae2f42ba1a4cd57f9645a480b67287141471fffe4fe6301fd1dd8a0",
+              "size": 39697983
             },
             "onnx-fp32": {
               "path": "deim/medium/2026-11-25/onnx-fp32.onnx",
@@ -251,6 +261,11 @@
               "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
               "size": 2451
             },
+            "onnx-fp16": {
+              "path": "deim/small/2026-11-25/onnx-fp16.onnx",
+              "sha256": "c88661b14c07a5778c5eb3c04925f1da7ac865f7a7a38a1014efb6c8af64c332",
+              "size": 21475163
+            },
             "onnx-fp32": {
               "path": "deim/small/2026-11-25/onnx-fp32.onnx",
               "sha256": "c583d93b33cf22bd7ce8ce7d438181dafeb79d6caa6fa24c09ba32ca3b2539dc",
@@ -286,6 +301,11 @@
               "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
               "size": 2451
             },
+            "onnx-fp16": {
+              "path": "deim/xlarge/2026-11-25/onnx-fp16.onnx",
+              "sha256": "ea6c321285d21ce7d10c7e2cc6ae57e8df976ed9b8920dd06c8387070a5140d3",
+              "size": 125419159
+            },
             "onnx-fp32": {
               "path": "deim/xlarge/2026-11-25/onnx-fp32.onnx",
               "sha256": "33eccdd83c1d59924daadbbe85789958cee27bc40d98a8e78a7716444cd516a1",
@@ -320,6 +340,11 @@
               "path": "deim/xlarge-obj365/2026-11-25/labels.json",
               "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
               "size": 2451
+            },
+            "onnx-fp16": {
+              "path": "deim/xlarge-obj365/2026-11-25/onnx-fp16.onnx",
+              "sha256": "81ef5c6b7baf1a2d321dd8af35d01d459501ae2922115b75c4c3c38307ea08a8",
+              "size": 125055016
             },
             "onnx-fp32": {
               "path": "deim/xlarge-obj365/2026-11-25/onnx-fp32.onnx",

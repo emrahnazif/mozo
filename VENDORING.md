@@ -331,6 +331,9 @@ found traps it had not predicted, and the predicted ones were mostly real.
   `context_length`, `vocab_size` before its own strict load.
 - **Weights that are present and unused.** Name them in PROVENANCE rather than leaving a tensor
   nobody can account for.
+- **`load_state_dict` checks names and shapes, never dtypes.** DEIM's `reg_scale` is an int64
+  parameter in every checkpoint (the YAML says `4`); a module built with `4.0` loads it silently as
+  float and computes in a different dtype. Check dtypes yourself after the strict load.
 - **`mmap=True` makes every tensor a view into one whole-file mapping.** Returning a 4-byte scalar
   from it keeps 1.5–7.5 GB resident for the life of the process. `.clone()` small reads.
 
@@ -364,6 +367,16 @@ Reproduce them, and record them:
 - **Two entry points that disagree.** EasyOCR's array path documents BGR and its path entry decodes
   greyscale with libjpeg directly — 27 and 7 grey levels apart. Hand both sides the same array.
 - **Mutable module globals** (`imgH`) become spec fields when vendored.
+- **A config loader can leak between configs in one process.** DEIM's `YAMLConfig` merges into a
+  module-level registry, so building `nano` then `large` in one process gives `large` nano's
+  `use_lab` and decoder width. Build each reference config in a fresh process, and read the
+  resolved values to write the spec rather than the YAML files.
+- **CPU torch is not reproducible from one process to the next.** MKL's sgemm picks its kernel by
+  buffer alignment, which changes per process: the same DEIM model on the same pixels gave a
+  different encoder attention output in about one process in ten, on an idle machine (logits up
+  to ~5e-4 apart). An exact gate across two processes needs `MKL_CBWR=AVX2,STRICT` set before
+  torch loads, on both sides; it makes the result alignment-independent without favouring either.
+  A gate that passes most runs and fails a few, always at the same matmul, is this.
 
 ---
 

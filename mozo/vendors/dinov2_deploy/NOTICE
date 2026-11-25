@@ -1,0 +1,25 @@
+dinov2_deploy
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+This product includes software derived from DINOv2
+(https://github.com/facebookresearch/dinov2, commit
+7764ea0f912e53c92e82eb78a2a1631e92725fc8), described in "DINOv2: Learning
+Robust Visual Features without Supervision" (Oquab et al., 2023,
+arXiv:2304.07193) and "Vision Transformers Need Registers" (Darcet et al., 2023,
+arXiv:2309.16588), licensed under the Apache License 2.0; see the LICENSE file in
+this directory. The files taken from it keep their copyright headers, and each
+modified one says how it was modified. See PROVENANCE.md.
+
+ON THE WEIGHTS
+--------------
+The project's README states "DINOv2 code and model weights are released under
+the Apache License 2.0" (relicensed from CC-BY-NC on 2023-08-31), its
+MODEL_CARD.md says the same, and every facebook/dinov2-* Hugging Face card
+carries license: apache-2.0, ungated. Nothing here is inferred.
+
+NOT INCLUDED
+------------
+Training, evaluation, the linear classification heads, depth and segmentation
+heads, dino.txt, DINOv3, and Cell-DINO, Channel-Adaptive DINO and XRay-DINO,
+which the same repository publishes under non-commercial terms. The xFormers
+code paths are removed, not merely unused. See PROVENANCE.md.

@@ -46,6 +46,16 @@
   On Apple silicon, with `mozo[coreml]` installed, `auto` runs a Core ML package that changed no
   detection on 301 images, 2.5 to 4.7 times faster than torch MPS. On the CPU,
   `runtime="onnx-fp32"` is faster than torch for most variants and gives the same detections.
+- **New family: Depth Anything 3** (`depth_anything_v3`), ByteDance Seed's 2025 depth model, for
+  relative depth from one photograph: `small`, `base` and `mono-large`, the three checkpoints its
+  authors publish under Apache-2.0 that work from a single image. It returns what Depth Anything
+  V2's relative variants return -- an `HxW` float32 map at the image's size, inverse depth on an
+  arbitrary scale, larger meaning nearer, `unit=None` -- so the two families are interchangeable in
+  code and in workflows (a `depth_anything_v3` node). Bit-identical to the authors' code on every
+  intermediate. On CUDA with TensorRT 11 installed, `auto` runs an fp32 TensorRT engine built from
+  the published ONNX graph, with the same accuracy; `runtime="tensorrt-fp16"` is faster still
+  for `small` and `base`. See the family's page for speeds. The non-commercial sizes, and the
+  metric model (which needs the camera's focal length), are not offered.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a

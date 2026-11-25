@@ -140,5 +140,22 @@ commit above and the Hugging Face snapshots, on the CPU with `MKL_CBWR=AVX2,STRI
   depth, resized and inverted.
 - **Deterministic**, and the precomputed shape inputs give exactly the network's own result.
 
-Results (all three variants, 4 photographs and 7 synthetic inputs each, every image passing every
-stage) and the falsification are in the family's plan and summarised on its documentation page.
+Measured 2026-11-25 on all three variants, over four photographs and seven synthetic inputs each
+(noise, an enlarged 90x60, a 504-wide image that skips the first resize, portrait, a 2000x150 strip,
+a tie in the multiple-of-14 rounding, black): every image passes every stage. The gate is falsified
+by eleven perturbations, each caught at the stage it reaches and not before: LayerNorm eps of a
+block and of the final norm, the position-grid offset, `INTER_AREA` to `INTER_LINEAR` and the
+multiple-of-14 tie rule (at the input), and for `small` and `base` the RoPE frequency, the QK-norm
+eps, swapped camera tokens and the head's UV-embedding ratio x1.0000001; for `mono-large` the
+sky seed and the sky threshold (at the final depth).
+
+## Export
+
+`tools/export/depth_anything_v3.py` publishes `onnx-fp32` and `onnx-fp16` (fp16 autocast, the
+head kept in fp32 as upstream keeps it) with dynamic height and width, 3 to 36 patches a side. Float
+arithmetic on the input's size cannot be traced, so the position grid and the UV embeddings are
+graph inputs (`graph.py`), computed by `shape_inputs` exactly as the network computes them. Four
+places in upstream's code froze the size into a traced graph and were rewritten with the same
+integers (listed above). Measured against torch fp32 on an RTX 3090 over the 654 NYUv2 test images:
+TensorRT fp32 3e-7 to 8e-7 mean relative difference, AbsRel identical; TensorRT fp16 0.08-0.11%,
+AbsRel within 1e-4.

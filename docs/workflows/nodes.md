@@ -1,7 +1,7 @@
 # Every built-in workflow node
 
 <!--
-summary: All 53 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
+summary: All 54 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
 label: Nodes
 keywords: mozo, workflow nodes, node catalogue, workflow editor, pipeline
 -->
@@ -91,6 +91,7 @@ what runs.
 | Node | Inputs → outputs | Parameters | What it does |
 |---|---|---|---|
 | `depth_anything_v2` | image → depth | `variant`=small | Depth Anything V2: how far away everything is, from one photograph. |
+| `depth_anything_v3` | image → depth | `variant`=small | Depth Anything 3: relative depth from one photograph; larger is nearer. |
 
 ## Track
 

@@ -99,6 +99,59 @@ obvious:
   last bits of a float, which was enough to move one box corner across a pixel boundary and put
   one mask pixel on the wrong side of the threshold.
 
+## Video tracking (added 2026-11-25)
+
+**Reference:** `SAM2VideoPredictor` at the commit above, built by `build_sam2_video_predictor`
+with its defaults (dynamic multimask fallback, `binarize_mask_from_pts_for_mem_enc=True`,
+`fill_hole_area=8`), fed a folder of frames.
+
+**Guarantee:** for the same RGB frames and prompts, `Tracker.update` returns, on CPU, logits at
+the video's size equal (`torch.equal`) to what upstream yields from `add_new_points_or_box` and
+`propagate_in_video`. An object prompted on frame *t* equals upstream's predictor given that
+prompt at frame *t* part way through tracking. Measured by `tools/verify/sam2_video.py`:
+GATE_RESULTS
+
+Why a session can be exact: tracking frame *t* reads, per object, its prompted frame, the outputs
+of frames *t-1*…*t-6* (memories) and *t-1*…*t-15* (object pointers), and nothing later. Driving
+upstream's own predictor one frame at a time, with later frames unreadable, gives the same logits
+as its offline run (measured before extraction). Objects are independent in this predictor (batch
+size one each), which is what makes adding an object on a later frame exact.
+
+**Where the chain stops:**
+
+- **Holes.** Upstream fills mask holes of up to 8 low-res pixels only if its optional CUDA
+  extension `sam2._C` was built; otherwise it catches the ImportError and skips. This package
+  reproduces the skip. Upstream installs that built the extension fill holes and differ from it.
+- **Clips shorter than 16 frames.** Upstream normalises the object-pointer temporal encoding by
+  `min(num_frames, 16) - 1`, so its offline answer on a short clip depends on the clip's length.
+  A stream has none: the session behaves as a video of 16 frames or more. `Segmenter.tracker`
+  takes `num_frames` so the gate can check short clips (equal when given).
+- **The mp4 path.** Upstream's `.mp4` loader resizes inside `decord`/ffmpeg. The guarantee is
+  against the folder-of-frames path, upstream's documented route; mozo decodes video with
+  PixelFlow and applies that path's resize to the decoded frame.
+- **The video loader is not the image predictor's preprocessing.** PIL's default (bicubic) resize
+  of the 8-bit frame, `/ 255.0` in float64, stored as float32, normalised in float32 -- against
+  `SAM2ImagePredictor`'s antialiased bilinear resize. Upstream's two predictors therefore give
+  slightly different first masks for the same prompt on the same frame (95 pixels on a box,
+  measured). Both are kept as upstream has them.
+- **Mask memories are stored in bfloat16** on every device, as upstream does, and read back into
+  float32 attention.
+
+**The decoder's stability fallback.** Upstream's `build_sam2` and `build_sam2_video_predictor`
+both switch on `dynamic_multimask_via_stability` (with delta 0.05, threshold 0.98) by Hydra
+override: on a single-mask call, when the single mask is unstable, take the best of the three
+candidates instead. It carries no weights and is not in the YAML, so the strict load could not
+notice it missing, and the image path built before 2026-11-25 lacked it. `config.STABILITY` now
+sets it for both paths; the gate checks single-mask image calls against `SAM2ImagePredictor`.
+
+**Runtimes for tracking:** torch only. Memory attention -- the cost per object per frame, the
+same in every size -- does not export to ONNX: its rotary encoding multiplies complex tensors
+(`torch.view_as_complex`), which neither ONNX exporter accepts ("ScalarType ComplexFloat is an
+unexpected tensor scalar type"; dynamo: conversion error), and a real-arithmetic rewrite would
+be a different float function. So no TensorRT for it either. TensorRT fp32 on the image encoder
+alone (from the published ONNX graph) saves 24 ms of a 314 ms `tiny` frame on an RTX 3060 (8%),
+not worth a split-graph runner. Reduced precision is measured but not published; see the plan.
+
 ## Runtimes
 
 `torch-fp32` and `onnx-fp32` are exported here. **CoreML is not: Apple publishes it.**

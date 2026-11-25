@@ -112,12 +112,9 @@ def tiny():
 
 
 @pytest.fixture(scope="module")
-def frames():
+def frames(image):
     """A few frames of a scene moving right: the fixture photograph, shifted a little each time."""
-    from conftest import FIXTURE
-    from mozo.image import load_image
-
-    photo = load_image(str(FIXTURE))[::4, ::4].copy()
+    photo = image[::4, ::4]
     return [np.ascontiguousarray(np.roll(photo, 6 * i, axis=1)) for i in range(4)]
 
 

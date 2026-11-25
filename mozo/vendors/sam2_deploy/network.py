@@ -21,7 +21,7 @@ from torch import nn
 
 from .backbones.hieradet import Hiera
 from .backbones.image_encoder import FpnNeck, ImageEncoder
-from .config import DECODER, SHARED, TRACKER, Spec
+from .config import SHARED, STABILITY, TRACKER, Spec
 from .memory_attention import MemoryAttention, MemoryAttentionLayer
 from .memory_encoder import CXBlock, Fuser, MaskDownSampler, MemoryEncoder
 from .position_encoding import PositionEmbeddingSine
@@ -93,7 +93,7 @@ class Sam2(TrackingStep, nn.Module):
             pred_obj_scores=True,
             pred_obj_scores_mlp=True,
             use_multimask_token_for_obj_ptr=True,
-            **DECODER,
+            **STABILITY,
         )
 
         # Trained as "there is no memory to attend to", which is exactly the situation a single
@@ -113,15 +113,12 @@ class Sam2(TrackingStep, nn.Module):
         mem_dim = TRACKER["mem_dim"]
         self.hidden_dim = hidden
         self.mem_dim = mem_dim
-        self.backbone_stride = SHARED["backbone_stride"]
-        self.sam_prompt_embed_dim = hidden
-        self.sam_image_embedding_size = self.image_size // self.backbone_stride
         for name in ("num_maskmem", "sigmoid_scale_for_mem_enc", "sigmoid_bias_for_mem_enc",
-                     "binarize_mask_from_pts_for_mem_enc", "directly_add_no_mem_embed",
+                     "binarize_mask_from_pts_for_mem_enc",
                      "multimask_output_in_sam", "multimask_output_for_tracking",
                      "multimask_min_pt_num", "multimask_max_pt_num", "max_obj_ptrs_in_encoder",
                      "max_cond_frames_in_attn", "memory_temporal_stride_for_eval",
-                     "use_signed_tpos_enc_to_obj_ptrs", "only_obj_ptrs_in_the_past_for_eval"):
+                     "use_signed_tpos_enc_to_obj_ptrs"):
             setattr(self, name, TRACKER[name])
 
         def rope(**extra):

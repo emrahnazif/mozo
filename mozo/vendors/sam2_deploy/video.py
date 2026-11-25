@@ -50,10 +50,13 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
-from .image import MEAN, STD
+from .image import MASK_THRESHOLD, MEAN, STD, to_original
 from .predictor import BOX_BOTTOM_RIGHT, BOX_TOP_LEFT
 
 __all__ = ["Frame", "Tracker", "load_frame", "split_prompts"]
+
+_MEAN = torch.tensor(MEAN, dtype=torch.float32)[:, None, None]
+_STD = torch.tensor(STD, dtype=torch.float32)[:, None, None]
 
 
 def load_frame(image: np.ndarray, size: int) -> torch.Tensor:
@@ -72,12 +75,11 @@ def load_frame(image: np.ndarray, size: int) -> torch.Tensor:
     if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
         raise ValueError(f"expected an HxWx3 RGB uint8 array, got {image.dtype} {image.shape}")
     resized = np.array(Image.fromarray(image).convert("RGB").resize((size, size)))
-    # float64, as upstream's ``img_np / 255.0`` is, then cast on the way into float32 storage.
-    frame = torch.from_numpy(resized / 255.0).permute(2, 0, 1).to(torch.float32)
-    mean = torch.tensor(MEAN, dtype=torch.float32)[:, None, None]
-    std = torch.tensor(STD, dtype=torch.float32)[:, None, None]
-    frame -= mean
-    frame /= std
+    # float64, as upstream's ``img_np / 255.0`` is, then cast into contiguous float32 storage, as
+    # upstream's preallocated frame buffer is (a bare ``.to`` would keep the permuted strides).
+    frame = torch.from_numpy(resized / 255.0).permute(2, 0, 1).to(torch.float32).contiguous()
+    frame -= _MEAN
+    frame /= _STD
     return frame.unsqueeze(0)
 
 
@@ -121,20 +123,19 @@ class Frame:
     """What one frame of tracking returns, for every object the session holds.
 
     Attributes:
-        object_ids: The objects, in the order they were prompted.
         logits: ``(N, H, W)`` float32 mask logits at the frame's own size. An object the model
-            says is absent has every logit at -1024 (upstream's placeholder).
+            says is absent has every logit at -1024 (upstream's placeholder). Row *i* is object
+            *i*, in the order objects were prompted.
         object_scores: ``(N,)`` the model's visibility logit for each object; > 0 means present.
     """
 
-    object_ids: list[int]
     logits: torch.Tensor
     object_scores: torch.Tensor
 
     @property
     def masks(self) -> np.ndarray:
         """``(N, H, W)`` bool, logits above zero, as upstream's ``video_res_masks > 0``."""
-        return (self.logits > 0).cpu().numpy()
+        return (self.logits > MASK_THRESHOLD).cpu().numpy()
 
 
 class Tracker:
@@ -148,24 +149,20 @@ class Tracker:
         num_frames: The video's length, if known. Only the gate passes it (see the module text).
     """
 
-    #: How many frames back a frame reads, besides its prompted frame: the larger of the memory
-    #: window (``num_maskmem - 1``) and the pointer window (``max_obj_ptrs_in_encoder - 1``).
     def __init__(self, network, device, num_frames: int | None = None):
         self.network = network
         self.device = device
         self.num_frames = num_frames
-        self.reach = max(network.num_maskmem - 1, network.max_obj_ptrs_in_encoder - 1)
+        #: How many frames back a frame reads its mask memories (``num_maskmem - 1``), and its
+        #: object pointers (``max_obj_ptrs_in_encoder - 1``), besides its prompted frame.
+        self.memory_reach = network.num_maskmem - 1
+        self.reach = max(self.memory_reach, network.max_obj_ptrs_in_encoder - 1)
         self.frame_idx = -1
         self.shape: tuple[int, int] | None = None
         #: Per object: its prompted frame's output and the recent frames' outputs, keyed by frame.
         self.outputs: list[dict[str, dict[int, dict]]] = []
         #: ``maskmem_pos_enc`` is the same for every frame and object; upstream keeps one copy.
         self._maskmem_pos_enc: list[torch.Tensor] | None = None
-
-    @property
-    def objects(self) -> int:
-        """How many objects the session has been given."""
-        return len(self.outputs)
 
     @torch.inference_mode()
     def update(self, image: np.ndarray, prompts: list[dict] | None = None) -> Frame:
@@ -230,13 +227,15 @@ class Tracker:
                 output["non_cond_frame_outputs"][t] = current
             masks.append(current["pred_masks"])
             scores.append(current["object_score_logits"])
-            # Forget what no later frame will read.
-            output["non_cond_frame_outputs"].pop(t - self.reach, None)
+            # Forget what no later frame will read: past the memory window only the pointer is
+            # read, and past the pointer window nothing.
+            recent = output["non_cond_frame_outputs"]
+            recent.pop(t - self.reach, None)
+            if t - self.memory_reach in recent:
+                recent[t - self.memory_reach] = {"obj_ptr": recent[t - self.memory_reach]["obj_ptr"]}
 
-        logits = torch.cat(masks, dim=0) if len(masks) > 1 else masks[0]
-        logits = F.interpolate(logits, size=self.shape, mode="bilinear", align_corners=False)
+        logits = to_original(torch.cat(masks, dim=0), self.shape)
         return Frame(
-            object_ids=list(range(len(self.outputs))),
             logits=logits[:, 0],
             object_scores=torch.cat(scores, dim=0)[:, 0],
         )

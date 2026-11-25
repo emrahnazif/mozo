@@ -57,6 +57,7 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+import PIL
 import torch
 from PIL import Image
 
@@ -94,8 +95,8 @@ FALSIFIERS = {
     "short-reach": "forget frames older than 6 instead of 15 (fails at: memory attention, frame 8)",
     "memory-from-high-res": "store the prompted frame's logits round-tripped through the "
                             "decoder's high-res masks (fails at: frame 0 logits)",
-    "no-stability-fallback": "decoder without the dynamic multimask fallback (fails at: decoder "
-                             "logits, on a box)",
+    "no-stability-fallback": "decoder without the dynamic multimask fallback (fails at: an "
+                             "unstable single-mask image click, if no tracking frame reaches it)",
 }
 
 
@@ -114,11 +115,20 @@ def published(variant: str) -> Path:
     return Path(resolve(FAMILY, variant, "torch-fp32"))
 
 
-class Comparison:
-    """Collects exact comparisons and reports the first failure of each stage."""
+class Caught(Exception):
+    """Raised by a :class:`Comparison` that stops at its first failure (falsification)."""
 
-    def __init__(self, quiet: bool = False):
+
+class Comparison:
+    """Collects exact comparisons and reports each failure.
+
+    With *stop*, the first failure raises :class:`Caught`: a falsifier needs only to be caught,
+    and the run that catches it then costs minutes instead of the whole gate.
+    """
+
+    def __init__(self, quiet: bool = False, stop: bool = False):
         self.quiet = quiet
+        self.stop = stop
         self.checked = 0
         self.failed: list[str] = []
 
@@ -133,6 +143,8 @@ class Comparison:
             else:
                 delta = f"{tuple(got.shape)} {got.dtype} vs {tuple(want.shape)} {want.dtype}"
             self.failed.append(f"{stage} ({delta})")
+            if self.stop:
+                raise Caught(stage)
             if not self.quiet:
                 print(f"  FAIL {stage}: {delta}")
 
@@ -152,12 +164,15 @@ def frame_folder(frames: np.ndarray):
     content -- so both sides see the same pixels rather than two JPEG decoders' opinions.
     """
     folder = Path(tempfile.mkdtemp(prefix="sam2_video_gate_"))
-    try:
-        for index, frame in enumerate(frames):
-            Image.fromarray(frame).save(folder / f"{index:05d}.jpg", format="PNG")
-        yield str(folder)
-    finally:
-        shutil.rmtree(folder)
+    # Upstream warns on every frame that its hole-filling extension is missing (it is, by design).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            for index, frame in enumerate(frames):
+                Image.fromarray(frame).save(folder / f"{index:05d}.jpg", format="PNG")
+            yield str(folder)
+        finally:
+            shutil.rmtree(folder)
 
 
 class Recorder:
@@ -165,7 +180,6 @@ class Recorder:
 
     def __init__(self, net):
         self.pixels, self.features, self.conditioned = [], [], []
-        self._undo = []
         forward_image, attention = net.forward_image, net.memory_attention.forward
 
         def record_image(batch):
@@ -254,6 +268,12 @@ def reference_streamed(video, folder: str, count: int, prompts: dict[int, list[t
     return state, logits
 
 
+def frame_output(per_obj: dict, frame_idx: int) -> dict:
+    """An object's stored output for a frame, prompted or tracked."""
+    return (per_obj["cond_frame_outputs"].get(frame_idx)
+            or per_obj["non_cond_frame_outputs"][frame_idx])
+
+
 def run_vendor(segmenter, frames: np.ndarray, prompts: dict[int, list[dict]],
                num_frames: int | None = None):
     """The vendored session over *frames*; returns per-frame logits and each frame's outputs."""
@@ -262,29 +282,20 @@ def run_vendor(segmenter, frames: np.ndarray, prompts: dict[int, list[dict]],
     for index, frame in enumerate(frames):
         result = tracker.update(frame, prompts.get(index))
         logits.append(result.logits.clone())
-        outputs.append([
-            output["cond_frame_outputs"].get(index) or output["non_cond_frame_outputs"][index]
-            for output in tracker.outputs
-        ])
-    return logits, outputs, tracker
+        outputs.append([frame_output(output, index) for output in tracker.outputs])
+    return logits, outputs
 
 
 def compare_frames(same: Comparison, label: str, got_logits, want_logits, order,
-                   got_outputs=None, want_state=None, obj_index=None):
+                   got_outputs=None, want_state=None):
     """Logits (and stored outputs) per frame. *order*: vendor frame i -> upstream frame index."""
     keys = ("pred_masks", "obj_ptr", "object_score_logits", "maskmem_features")
     for i, frame_idx in enumerate(order):
-        want = want_logits[frame_idx]
-        got = got_logits[i]
-        if obj_index is not None:
-            got = got[obj_index]
-        same(f"{label}: frame {i} logits at video size", got, want)
+        same(f"{label}: frame {i} logits at video size", got_logits[i], want_logits[frame_idx])
         if got_outputs is None:
             continue
         for obj, got_out in enumerate(got_outputs[i]):
-            per_obj = want_state["output_dict_per_obj"][obj]
-            want_out = (per_obj["cond_frame_outputs"].get(frame_idx)
-                        or per_obj["non_cond_frame_outputs"][frame_idx])
+            want_out = frame_output(want_state["output_dict_per_obj"][obj], frame_idx)
             for key in keys:
                 same(f"{label}: frame {i} object {obj} {key}", got_out[key], want_out[key])
 
@@ -314,13 +325,12 @@ def check_variant(upstream: Path, variant: str, checkpoint: Path, frames: np.nda
     count = len(frames)
 
     # three objects, offline
-    with frame_folder(frames) as folder, warnings.catch_warnings():
-        warnings.simplefilter("ignore")
+    with frame_folder(frames) as folder:
         want_rec = Recorder(video)
         state, want = reference_offline(video, folder, {0: [(1, CLICK), (2, BOX), (3, PAIR)]})
         want_rec.close()
     got_rec = Recorder(segmenter.network)
-    got, outputs, _ = run_vendor(segmenter, frames, {0: [CLICK, BOX, PAIR]})
+    got, outputs = run_vendor(segmenter, frames, {0: [CLICK, BOX, PAIR]})
     got_rec.close()
     compare_recorders(same, "three objects", got_rec, want_rec)
     compare_frames(same, "three objects", got, want, range(count), outputs, state)
@@ -328,47 +338,45 @@ def check_variant(upstream: Path, variant: str, checkpoint: Path, frames: np.nda
 
     # added later: frame 0 a box, frame `later` a click, streamed on both sides
     later = min(8, count - 1)
-    with frame_folder(frames) as folder, warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        state, want = reference_streamed(video, folder, count, {0: [(1, BOX)], later: [(2, CLICK)]})
-    got, outputs, _ = run_vendor(segmenter, frames, {0: [BOX], later: [CLICK]})
+    with frame_folder(frames) as folder:
+        _, want = reference_streamed(video, folder, count, {0: [(1, BOX)], later: [(2, CLICK)]})
+    got, _ = run_vendor(segmenter, frames, {0: [BOX], later: [CLICK]})
     for i in range(count):
         same(f"added later: frame {i} object count", torch.tensor(got[i].shape[0]),
              torch.tensor(want[i].shape[0]))
-    compare_frames(same, "added later", [g for g in got], want, range(count))
+    compare_frames(same, "added later", got, want, range(count))
     print(f"  added later (object 2 from frame {later}): done")
 
     # short clip: 10 frames, the vendor told the length
     short = frames[:10]
-    with frame_folder(short) as folder, warnings.catch_warnings():
-        warnings.simplefilter("ignore")
+    with frame_folder(short) as folder:
         state, want = reference_offline(video, folder, {0: [(1, CLICK), (2, BOX)]})
-    got, outputs, _ = run_vendor(segmenter, short, {0: [CLICK, BOX]}, num_frames=len(short))
+    got, outputs = run_vendor(segmenter, short, {0: [CLICK, BOX]}, num_frames=len(short))
     compare_frames(same, "short clip", got, want, range(len(short)), outputs, state)
     print("  short clip (10 frames, length given): done")
 
     # reversed: prompt the middle frame, upstream reverse=True vs frames fed backwards
     middle = count // 2
-    with frame_folder(frames) as folder, warnings.catch_warnings():
-        warnings.simplefilter("ignore")
+    with frame_folder(frames) as folder:
         _, want = reference_offline(video, folder, {middle: [(1, BOX), (2, CLICK)]},
                                     reverse_from=middle)
     backwards = frames[middle::-1]
-    got, _, _ = run_vendor(segmenter, backwards, {0: [BOX, CLICK]})
+    got, _ = run_vendor(segmenter, backwards, {0: [BOX, CLICK]})
     compare_frames(same, "reversed", got, want, range(middle, -1, -1))
     print(f"  reversed (from frame {middle} to 0): done")
 
     # image path, including single-mask calls
     photo = frames[0]
     image_predictor.set_image(photo)
-    for label, kw in (("click, three masks", dict(point_coords=np.array([[210, 350]]),
-                                                    point_labels=np.array([1]),
-                                                    multimask_output=True)),
-                      ("click, single mask", dict(point_coords=np.array([[210, 350]]),
-                                                   point_labels=np.array([1]),
-                                                   multimask_output=False)),
-                      ("box, single mask", dict(box=np.array([300, 0, 500, 400]),
-                                                 multimask_output=False))):
+    click = dict(point_coords=np.array(CLICK["points"]), point_labels=np.array(CLICK["labels"]))
+    for label, kw in (("click, three masks", dict(click, multimask_output=True)),
+                      ("click, single mask", dict(click, multimask_output=False)),
+                      # A click whose single mask is unstable, so the decoder's fallback fires
+                      # (it changes the mask by 1,252 pixels here; 21 of 40 random clicks).
+                      ("unstable click, single mask", dict(point_coords=np.array(PAIR["points"][:1]),
+                                                           point_labels=np.array([1]),
+                                                           multimask_output=False)),
+                      ("box, single mask", dict(box=np.array(BOX["box"]), multimask_output=False))):
         masks, scores, low_res = image_predictor.predict(return_logits=True, **kw)
         found = segmenter.predict(
             photo, points=kw.get("point_coords"), labels=kw.get("point_labels"),
@@ -392,17 +400,15 @@ def check_end_to_end(variant: str, frames: np.ndarray, same: Comparison, video) 
     import mozo
 
     tracker = mozo.get_model(f"{FAMILY}/{variant}", device="cpu").tracker()
-    with frame_folder(frames) as folder, warnings.catch_warnings():
-        warnings.simplefilter("ignore")
+    with frame_folder(frames) as folder:
         state, want = reference_offline(video, folder, {0: [(1, BOX), (2, SECOND_BOX)]})
     for index, frame in enumerate(frames):
         found = (tracker.update(frame, boxes=[BOX["box"], SECOND_BOX["box"]],
                                 name=["first", "second"]) if index == 0 else tracker.update(frame))
         rows = {row.tracker_id: row for row in found}
         for obj, label in ((0, "first"), (1, "second")):
-            per = state["output_dict_per_obj"][obj]
-            out = per["cond_frame_outputs"].get(index) or per["non_cond_frame_outputs"][index]
-            score = out["object_score_logits"].reshape(())
+            score = frame_output(state["output_dict_per_obj"][obj], index)[
+                "object_score_logits"].reshape(())
             mask = want[index][obj] > 0
             expected = bool(score > 0) and bool(mask.any())
             same(f"end to end: frame {index} object {obj} has a row",
@@ -503,17 +509,20 @@ def perturbed(name: str):
 _MISSING = object()
 
 
-def falsify(upstream: Path, variant: str, checkpoint: Path, frames: np.ndarray) -> int:
-    """Run the gate under each perturbation; every one must fail."""
+def falsify(upstream: Path, variant: str, checkpoint: Path, frames: np.ndarray,
+            names: list[str] | None = None) -> int:
+    """Run the gate under each perturbation (or the *names* given); every one must fail."""
     caught, missed = [], []
     for name, what in FALSIFIERS.items():
-        same = Comparison(quiet=True)
-        with perturbed(name), contextlib.redirect_stdout(None):
+        if names and name not in names:
+            continue
+        same = Comparison(quiet=True, stop=True)
+        with perturbed(name), contextlib.redirect_stdout(None), contextlib.suppress(Caught):
             check_variant(upstream, variant, checkpoint, frames, same, end_to_end=False)
         (caught if same.failed else missed).append(name)
         first = same.failed[0] if same.failed else "-"
         print(f"  {'caught' if same.failed else 'MISSED':<7} {name:<22} "
-              f"{len(same.failed):>4}/{same.checked} comparisons fail; first: {first}")
+              f"after {same.checked} comparisons; first failure: {first}", flush=True)
         print(f"          {what}")
     print()
     if missed:
@@ -538,6 +547,8 @@ def main() -> int:
                         help="a checkpoint to check instead of the published one (one variant)")
     parser.add_argument("--falsify", action="store_true",
                         help="run each deliberate perturbation; every one must fail")
+    parser.add_argument("--falsifier", action="append", choices=sorted(FALSIFIERS),
+                        help="with --falsify, run only this perturbation (repeatable)")
     parser.add_argument("--allow-commit-drift", action="store_true",
                         help="run against an upstream other than the extracted commit")
     arguments = parser.parse_args()
@@ -561,8 +572,6 @@ def main() -> int:
         raise SystemExit(f"upstream is at {head[:12]}, PROVENANCE.md records {pinned[:12]}.\n"
                          "Check it out, or pass --allow-commit-drift.")
 
-    import PIL
-
     torch.set_grad_enabled(False)
     print(f"upstream   {upstream} @ {head[:12]}")
     print(f"versions   torch {torch.__version__}, Pillow {PIL.__version__}, numpy {np.__version__}; "
@@ -572,7 +581,7 @@ def main() -> int:
 
     if arguments.falsify:
         variant = arguments.variants[0]
-        return falsify(upstream, variant, checkpoints[variant], frames)
+        return falsify(upstream, variant, checkpoints[variant], frames, arguments.falsifier)
 
     same = Comparison()
     for variant in arguments.variants:

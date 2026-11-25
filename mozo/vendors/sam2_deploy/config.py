@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["SPECS", "Spec", "SHARED", "DECODER", "TRACKER"]
+__all__ = ["SPECS", "Spec", "SHARED", "STABILITY", "TRACKER"]
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ SHARED = {
 #: ``build_sam2`` and ``build_sam2_video_predictor`` both add it as Hydra overrides when
 #: ``apply_postprocessing`` is left at its default. It decides what a single-mask call returns when
 #: that mask is unstable, so a strict load cannot check it -- only the gate can.
-DECODER = {
+STABILITY = {
     "dynamic_multimask_via_stability": True,
     "dynamic_multimask_stability_delta": 0.05,
     "dynamic_multimask_stability_thresh": 0.98,
@@ -74,7 +74,7 @@ TRACKER = {
     "sigmoid_scale_for_mem_enc": 20.0,
     "sigmoid_bias_for_mem_enc": -10.0,
     "binarize_mask_from_pts_for_mem_enc": True,
-    "directly_add_no_mem_embed": True,
+    "directly_add_no_mem_embed": True,  # documentary: folded in tracking.py
     "multimask_output_in_sam": True,
     "multimask_output_for_tracking": True,
     "multimask_min_pt_num": 0,
@@ -83,6 +83,7 @@ TRACKER = {
     "max_cond_frames_in_attn": -1,
     "memory_temporal_stride_for_eval": 1,
     "use_signed_tpos_enc_to_obj_ptrs": True,
+    # Documentary, like ``fill_hole_area``: ``tracking.py`` folds these two in (always true).
     "only_obj_ptrs_in_the_past_for_eval": True,
     "memory_attention_layers": 4,
     "fill_hole_area": 0,

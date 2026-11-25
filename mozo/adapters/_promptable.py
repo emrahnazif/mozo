@@ -41,7 +41,7 @@ try:
 except ImportError:  # pragma: no cover - depends on the install
     raise ImportError("PixelFlow is not installed. Install it with: pip install pixelflow") from None
 
-__all__ = ["PromptablePredictor", "candidates"]
+__all__ = ["PromptablePredictor", "candidates", "names_for"]
 
 
 _log = logging.getLogger(__name__)
@@ -70,6 +70,20 @@ def bounds(masks: np.ndarray) -> np.ndarray:
     return boxes
 
 
+def names_for(name: Union[str, Sequence[str], None], prompts: int) -> list:
+    """One name per prompt from what a caller passed: one name for all, one each, or none.
+
+    Raises:
+        ValueError: If *name* is a sequence whose length is not *prompts*.
+    """
+    if name is None or isinstance(name, str):
+        return [name] * prompts
+    names = list(name)
+    if len(names) != prompts:
+        raise ValueError(f"{len(names)} names for {prompts} prompt(s); give one each or none")
+    return names
+
+
 def candidates(masks: np.ndarray, scores: np.ndarray, name: Union[str, Sequence[str], None],
                device: str) -> "pf.detections.Detections":
     """What a click returns, from any model's answer to one: every candidate mask as a row.
@@ -92,9 +106,7 @@ def candidates(masks: np.ndarray, scores: np.ndarray, name: Union[str, Sequence[
         ValueError: If *name* is a sequence whose length is not the number of prompts.
     """
     prompts, count = masks.shape[:2]
-    names = [name] if isinstance(name, str) else (list(name) if name is not None else None)
-    if names is not None and len(names) != prompts:
-        raise ValueError(f"{len(names)} names for {prompts} prompt(s); give one each or none")
+    names = None if name is None else names_for(name, prompts)
 
     # Each prompt's candidates, best first. The model emits them in its own order -- the
     # mask tokens are trained to specialise towards whole, part and subpart -- which means

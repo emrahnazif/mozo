@@ -24,7 +24,7 @@ from .. import registry
 from ..image import load_image
 from ..vendors import sam2_deploy
 from ..vendors.sam2_deploy.video import split_prompts
-from ._promptable import PromptablePredictor, bounds
+from ._promptable import PromptablePredictor, bounds, names_for
 
 __all__ = ["Sam2Predictor", "Sam2Tracker"]
 
@@ -61,7 +61,7 @@ class Sam2Predictor(PromptablePredictor):
             >>> for i, frame in enumerate(pf.VideoReader("street.mp4")):  # doctest: +SKIP
             ...     found = tracker.update(frame, boxes=[40, 60, 300, 480] if i == 0 else None)
         """
-        return Sam2Tracker(self._segmenter.tracker(), self.device)
+        return Sam2Tracker(self._segmenter.tracker())
 
 
 class Sam2Tracker:
@@ -72,9 +72,8 @@ class Sam2Tracker:
     forward: SAM 2 reads the frames before, never after.
     """
 
-    def __init__(self, session: Any, device: str) -> None:
+    def __init__(self, session: Any) -> None:
         self._session = session
-        self._device = device
         #: What to call each object, by object id; ``None`` where no name was given.
         self._names: list[str | None] = []
 
@@ -116,27 +115,22 @@ class Sam2Tracker:
         """
         pixels = load_image(image)
         prompts = split_prompts(points, labels, boxes)
-        names = [name] * len(prompts) if isinstance(name, str) else (
-            list(name) if name is not None else [None] * len(prompts))
-        if len(names) != len(prompts):
-            raise ValueError(f"{len(names)} names for {len(prompts)} prompt(s); give one each or none")
+        names = names_for(name, len(prompts))
         frame = self._session.update(pixels, prompts)
         self._names.extend(names)
 
-        visible = (frame.object_scores > 0).cpu().numpy()
-        masks = frame.masks
-        confidence = torch.sigmoid(frame.object_scores).cpu().numpy()
+        scores = frame.object_scores.cpu()
+        visible = torch.nonzero(scores > 0).flatten()
+        masks = (frame.logits[visible.to(frame.logits.device)] > 0).cpu().numpy()
+        confidence = torch.sigmoid(scores)
         found = pf.Detections()
-        for index in np.flatnonzero(visible):
-            mask = masks[index]
+        for index, mask in zip(visible.tolist(), masks):
             found.add_detection(pf.Detection(
                 bbox=bounds(mask[None])[0].tolist(),
                 masks=[mask],
-                class_id=int(index),
+                class_id=index,
                 class_name=self._names[index],
                 confidence=float(confidence[index]),
-                tracker_id=int(index),
+                tracker_id=index,
             ))
-        if self._device == "mps":
-            torch.mps.empty_cache()
         return found

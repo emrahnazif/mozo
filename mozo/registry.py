@@ -127,6 +127,12 @@ DERIVES: dict[str, dict[str, str]] = {
     # (``seg-nano``) torch fp32 -- RF-DETR is launch-bound at batch 1. fp16 only where an fp16
     # graph is published (the detection variants), and only on request.
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # ``tensorrt-fp32`` from the published graph, chosen by ``auto`` on CUDA: on an RTX 3090,
+    # 500 COCO images per variant, not one person changed, AP identical and joints within
+    # 0.003 px of torch fp32 on the CPU, at 1.5x (``large``) to 4.1x (``tiny``) torch fp32's graph
+    # speed. No fp16: it moves visible joints by up to 1.0 px at p99 and shortens a whole call
+    # only on ``medium`` and ``large``, by 5% and 21%.
+    "rtmo": {"tensorrt-fp32": "onnx-fp32"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -146,6 +152,9 @@ NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
        for family in ("yolov8", "yolov11", "yolov12", "yolov26")},
     "rfdetr": {"*": ("labels",)},
     "vitpose": {"*": ("labels",)},
+    # RTMO's graphs stop before the DCC, which runs on the people NMS kept and so has no fixed
+    # shape to export: it runs in torch from the checkpoint, on every runtime.
+    "rtmo": {"*": ("labels",), "onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
     "sam3": {"onnx": ("torch-fp32",), "coreml": ("torch-fp32",)},
     "owlv2": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
 }
@@ -359,6 +368,19 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'database of your own. Code and weights are both Apache-2.0.'
         ),
         'variants': ['base-224', 'base-256', 'so400m-384', 'so400m16-256', 'giant-384'],
+    },
+
+    'rtmo': {
+        'adapter_class': 'RTMOPredictor',
+        'module': 'mozo.adapters.rtmo',
+        'task_type': 'object_detection',
+        'description': (
+            'RTMO by OpenMMLab -- one-stage multi-person pose estimation. Give it a frame and it '
+            "finds the people itself and returns each one's box with COCO's 17 joints attached; "
+            'no detector needed. 4 variants (tiny/small/medium/large). Code and weights are both '
+            'Apache-2.0.'
+        ),
+        'variants': ['tiny', 'small', 'medium', 'large'],
     },
 
     'vitpose': {

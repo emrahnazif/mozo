@@ -1126,6 +1126,146 @@
         }
       }
     },
+    "rtmo/large": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "rtmo/large/2026-11-25/LICENSE",
+              "sha256": "aa2c6f3408169b96e5547c875deb481c91502514c1885fa0acb4b596c8909cb9",
+              "size": 11400
+            },
+            "NOTICE": {
+              "path": "rtmo/large/2026-11-25/NOTICE",
+              "sha256": "27c5bd4a98793ccddf7cbf96b25048092ffa7383a2a6cf1748597fd06b766d1a",
+              "size": 1537
+            },
+            "labels": {
+              "path": "rtmo/large/2026-11-25/labels.json",
+              "sha256": "48e099532763ff61aef18dc55169b54f639f1eb6a75f6668fd01a4f8d175048a",
+              "size": 847
+            },
+            "onnx-fp32": {
+              "path": "rtmo/large/2026-11-25/onnx-fp32.onnx",
+              "sha256": "3c96c81c44f3969a4d60abcda4f7eb6ca41eb5a644fbeafef408195665d8e291",
+              "size": 173805905
+            },
+            "torch-fp32": {
+              "path": "rtmo/large/2026-11-25/torch-fp32.pth",
+              "sha256": "28cc5e824eb7e67b4d5e5def91a369d0ae45304173355accf44c1e12aee353c5",
+              "size": 179299675
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "rtmo/medium": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "rtmo/medium/2026-11-25/LICENSE",
+              "sha256": "aa2c6f3408169b96e5547c875deb481c91502514c1885fa0acb4b596c8909cb9",
+              "size": 11400
+            },
+            "NOTICE": {
+              "path": "rtmo/medium/2026-11-25/NOTICE",
+              "sha256": "ae747a1e4e0c742854de28d9fd1126029286950f71b3376162d57d3c10ad1d31",
+              "size": 1538
+            },
+            "labels": {
+              "path": "rtmo/medium/2026-11-25/labels.json",
+              "sha256": "48e099532763ff61aef18dc55169b54f639f1eb6a75f6668fd01a4f8d175048a",
+              "size": 847
+            },
+            "onnx-fp32": {
+              "path": "rtmo/medium/2026-11-25/onnx-fp32.onnx",
+              "sha256": "39948453b0f8ad7a8d26aac237c016d58b78b402bfb8dfdc9ddc28d49a05fb2c",
+              "size": 86301787
+            },
+            "torch-fp32": {
+              "path": "rtmo/medium/2026-11-25/torch-fp32.pth",
+              "sha256": "85b21454caa985d09dfffebcad622c60d5ff93c6bdc35b982c41b7d4683d2bfd",
+              "size": 90504995
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "rtmo/small": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "rtmo/small/2026-11-25/LICENSE",
+              "sha256": "aa2c6f3408169b96e5547c875deb481c91502514c1885fa0acb4b596c8909cb9",
+              "size": 11400
+            },
+            "NOTICE": {
+              "path": "rtmo/small/2026-11-25/NOTICE",
+              "sha256": "e9af46d2ff4b1872306f738b5cb0d55a1bcbea5331453caf1b8fe6a9adf98531",
+              "size": 1535
+            },
+            "labels": {
+              "path": "rtmo/small/2026-11-25/labels.json",
+              "sha256": "48e099532763ff61aef18dc55169b54f639f1eb6a75f6668fd01a4f8d175048a",
+              "size": 847
+            },
+            "onnx-fp32": {
+              "path": "rtmo/small/2026-11-25/onnx-fp32.onnx",
+              "sha256": "cefb9446ae9088b5c53d0167aaea7bc6c28a1f45d556059489818652e3d44ace",
+              "size": 36826568
+            },
+            "torch-fp32": {
+              "path": "rtmo/small/2026-11-25/torch-fp32.pth",
+              "sha256": "4e3858b7b5ce3831108c233784b29004937f16c2937fb4a70df0d0d64e533e03",
+              "size": 39758291
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "rtmo/tiny": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "rtmo/tiny/2026-11-25/LICENSE",
+              "sha256": "aa2c6f3408169b96e5547c875deb481c91502514c1885fa0acb4b596c8909cb9",
+              "size": 11400
+            },
+            "NOTICE": {
+              "path": "rtmo/tiny/2026-11-25/NOTICE",
+              "sha256": "c96d15f0057bf7ebfc7c88ce69526807d3c7ab46ed4b4db0ed7854f3ef9cb04f",
+              "size": 1534
+            },
+            "labels": {
+              "path": "rtmo/tiny/2026-11-25/labels.json",
+              "sha256": "48e099532763ff61aef18dc55169b54f639f1eb6a75f6668fd01a4f8d175048a",
+              "size": 847
+            },
+            "onnx-fp32": {
+              "path": "rtmo/tiny/2026-11-25/onnx-fp32.onnx",
+              "sha256": "1e669258ff6d93695b900e1cff7ac40db21b2e66f6fdd0e2f7961e7ceaf9ba71",
+              "size": 25129317
+            },
+            "torch-fp32": {
+              "path": "rtmo/tiny/2026-11-25/torch-fp32.pth",
+              "sha256": "5bc1f940e078fc03ffda7d65dc0fd204d2afdb0eec9287b620015843f6be0f0c",
+              "size": 27580627
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
     "sam2/base_plus": {
       "latest": "2026-08-20",
       "revisions": {

@@ -280,6 +280,13 @@ def vitpose(image: Image, detections: Detections, models: Models,
     return models("vitpose", variant).predict(image, detections)
 
 
+@node(category="Pose", exclusive=True)
+def rtmo(image: Image, models: Models, variant: variants("rtmo") = "small",
+         threshold: float = 0.5) -> Detections:
+    """RTMO by OpenMMLab -- everyone's joints in one pass, no detector needed."""
+    return models("rtmo", variant).predict(image, threshold=threshold)
+
+
 # --- Classification ------------------------------------------------------------------------------
 
 @node(category="Classify", exclusive=True)

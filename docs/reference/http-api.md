@@ -27,7 +27,7 @@ parameter. Repeat a parameter to give several values.
 | Parameter | For | Description |
 |---|---|---|
 | `file` | all | The image. Leave it out only when naming a prepared image by `sha256`. |
-| `threshold` | detectors, prompted models | Confidence floor. Omitted, the family's own default applies. |
+| `threshold` | detectors, prompted models, EoMT panoptic | Confidence floor. Omitted, the family's own default applies. A semantic EoMT variant answers `400`: it labels every pixel. |
 | `labels` | detectors | Comma-separated class names replacing the model's own, such as `hardhat,vest`. |
 | `text` | prompted models | A phrase to look for. Repeat it for several: `?text=car&text=person`. Not comma-separated, so a phrase may contain a comma. |
 | `point` | SAM 2, EdgeTAM, SAM 3 | A click as `x,y` in the image's pixels. Each needs a `label`. On SAM 3, a click or `text`, not both. |
@@ -42,7 +42,7 @@ Responses by task:
 
 | Models | Response |
 |---|---|
-| Detection, segmentation, keypoints, detection from words, click segmentation, OCR | `application/json`: a list of detections with every PixelFlow field. |
+| Detection, segmentation, keypoints, detection from words, click segmentation, OCR, EoMT | `application/json`: a list of detections with every PixelFlow field. EoMT's masks never overlap. |
 | CLIP, SigLIP 2 | `application/json`: a list of `{class_id, class_name, confidence, metadata}`. |
 | Depth Anything V2 | `image/png`, 16-bit. Headers `x-depth-unit` (`metres` or `none`), `x-depth-min` and `x-depth-max`: `depth = min + png / 65535 * (max - min)`. |
 | BEN2 | `image/png`: the photograph as RGBA, background transparent. |

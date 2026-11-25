@@ -1,4 +1,4 @@
-# All 82 models, by task
+# All 87 models, by task
 
 <!--
 summary: Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size.
@@ -6,7 +6,7 @@ label: All models
 keywords: mozo, model catalogue, computer vision models, licences, runtimes
 -->
 
-Mozo serves 82 variants across 18 families. A model is named `family/variant`, the same in Python
+Mozo serves 87 variants across 19 families. A model is named `family/variant`, the same in Python
 (`mozo.get_model("rfdetr/medium")`) and over HTTP (`/predict/rfdetr/medium`). Each family's page
 has examples, every parameter, and how the model behaves.
 
@@ -65,6 +65,16 @@ Point at something and get a mask of the thing you pointed at.
 | [SAM 2](/docs/models/sam2.md) | `tiny` `small` `base_plus` `large` | Apache-2.0 | torch | 156–898 MB |
 | [EdgeTAM](/docs/models/edgetam.md) | `edgetam` | Apache-2.0 | torch | 56 MB |
 | [SAM 3](/docs/models/sam3.md) | `sam3` | SAM License | torch, coreml | 3.5 GB |
+
+## Scene segmentation
+
+Every pixel gets a class from a fixed vocabulary, one mask per segment, masks never overlapping.
+Panoptic variants also give each countable thing its own segment.
+
+| Family | Variants | Licence | Runtimes | Size |
+|---|---|---|---|---|
+| [EoMT](/docs/models/eomt.md) | `coco-panoptic-small` `coco-panoptic-base` `coco-panoptic-large` `coco-panoptic-large-1280` | MIT | torch | 96 MB–1.3 GB |
+| | `ade20k-semantic-large` | MIT | torch | 1.3 GB |
 
 ## Classification from words, and image embeddings
 

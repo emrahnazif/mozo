@@ -1,7 +1,7 @@
 # Every built-in workflow node
 
 <!--
-summary: All 50 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
+summary: All 51 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
 label: Nodes
 keywords: mozo, workflow nodes, node catalogue, workflow editor, pipeline
 -->
@@ -56,6 +56,7 @@ what runs.
 | `sam2_boxes` | image, detections → detections | `variant`=tiny | SAM 2 by Meta: a mask for each box it is given, the rows otherwise unchanged. |
 | `edgetam_boxes` | image, detections → detections | `variant`=edgetam | EdgeTAM: SAM 2 made small: a mask for each box it is given, the rows otherwise unchanged. |
 | `sam3_boxes` | image, detections → detections | `variant`=sam3 | SAM 3 by Meta: a mask for each box it is given, the rows otherwise unchanged. |
+| `eomt` | image → detections | `variant`=coco-panoptic-small | EoMT: every pixel a class, one mask per segment: semantic or panoptic segmentation. |
 
 ## Edit
 

@@ -33,7 +33,7 @@ WITHOUT_A_NODE = {
     "granite_embedding_r2": "embeds text and answers nothing about an image; not in v1",
 }
 
-#: What a family's task implies it produces. Seven rules rather than one row per family -- the same
+#: What a family's task implies it produces. Rules rather than one row per family -- the same
 #: fact ``mozo/server.py`` dispatches on. Registry data, independent of the node under test, so a
 #: node that returns the wrong thing still fails.
 PRODUCES = {
@@ -42,6 +42,8 @@ PRODUCES = {
     "concept_segmentation": PortType.DETECTIONS,
     "promptable_segmentation": PortType.DETECTIONS,
     "text_recognition": PortType.DETECTIONS,
+    # A partition into classed segments: one detection per segment, masks never overlapping.
+    "semantic_segmentation": PortType.DETECTIONS,
     "zero_shot_classification": PortType.CLASSIFICATIONS,
     "depth_estimation": PortType.DEPTH,
     "pose_estimation": PortType.DETECTIONS,

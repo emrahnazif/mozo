@@ -312,6 +312,13 @@ def easyocr(image: Image, models: Models, variant: variants("easyocr") = "englis
     return models("easyocr", variant).predict(image)
 
 
+@node(category="Segment", exclusive=True)
+def eomt(image: Image, models: Models,
+         variant: variants("eomt") = "coco-panoptic-small") -> Detections:
+    """EoMT -- every pixel a class, one mask per segment: semantic or panoptic segmentation."""
+    return models("eomt", variant).predict(image)
+
+
 # --- Depth ---------------------------------------------------------------------------------------
 
 @node(category="Depth", exclusive=True)

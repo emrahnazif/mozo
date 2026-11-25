@@ -501,6 +501,156 @@
         }
       }
     },
+    "eomt/ade20k-semantic-large": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "eomt/ade20k-semantic-large/2026-11-25/LICENSE",
+              "sha256": "0299d15a2f1a7f03c2577fecb7bac793ac558a29e89bec9f6bddf29c850a2812",
+              "size": 1094
+            },
+            "NOTICE": {
+              "path": "eomt/ade20k-semantic-large/2026-11-25/NOTICE",
+              "sha256": "86cfe4ca18534ddc797599dfdf0e6cb5a5f1f31c888466b845300d95c6d5afa3",
+              "size": 1785
+            },
+            "labels": {
+              "path": "eomt/ade20k-semantic-large/2026-11-25/labels.json",
+              "sha256": "260052775b497354addbc59423dc66f7da27a5e89daf7598f393712022eae133",
+              "size": 6714
+            },
+            "torch-fp32": {
+              "path": "eomt/ade20k-semantic-large/2026-11-25/torch-fp32.pth",
+              "sha256": "14ad6488fcebac2d8ec6d6e8265e5fae8fc4e7ca42875190a0363fbd382baff7",
+              "size": 1264199614
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    "eomt/coco-panoptic-base": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "eomt/coco-panoptic-base/2026-11-25/LICENSE",
+              "sha256": "0299d15a2f1a7f03c2577fecb7bac793ac558a29e89bec9f6bddf29c850a2812",
+              "size": 1094
+            },
+            "NOTICE": {
+              "path": "eomt/coco-panoptic-base/2026-11-25/NOTICE",
+              "sha256": "5899c142e563428a244921d43fe8bca19024c856f9127095866c8bad6ebc3dec",
+              "size": 1570
+            },
+            "labels": {
+              "path": "eomt/coco-panoptic-base/2026-11-25/labels.json",
+              "sha256": "75d87019910678d804832dfb975a1b81c99f49777415adb063a2dd9bb23a4b6e",
+              "size": 6114
+            },
+            "torch-fp32": {
+              "path": "eomt/coco-panoptic-base/2026-11-25/torch-fp32.pth",
+              "sha256": "d5a2588c1c94c578b2a672033e9d96ddb4cba25045814805e2a7b5cbda7e5fc8",
+              "size": 374715030
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    "eomt/coco-panoptic-large": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "eomt/coco-panoptic-large/2026-11-25/LICENSE",
+              "sha256": "0299d15a2f1a7f03c2577fecb7bac793ac558a29e89bec9f6bddf29c850a2812",
+              "size": 1094
+            },
+            "NOTICE": {
+              "path": "eomt/coco-panoptic-large/2026-11-25/NOTICE",
+              "sha256": "af2780e378c5b93e7341a81721b3a99441731ae079429aa7d1c6da8da838d044",
+              "size": 1565
+            },
+            "labels": {
+              "path": "eomt/coco-panoptic-large/2026-11-25/labels.json",
+              "sha256": "75d87019910678d804832dfb975a1b81c99f49777415adb063a2dd9bb23a4b6e",
+              "size": 6114
+            },
+            "torch-fp32": {
+              "path": "eomt/coco-panoptic-large/2026-11-25/torch-fp32.pth",
+              "sha256": "8f51efd5fa4171c3fb0cb37c10c2fdfdf886c97f342aeeb5035d925806f15fd3",
+              "size": 1266898814
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    "eomt/coco-panoptic-large-1280": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "eomt/coco-panoptic-large-1280/2026-11-25/LICENSE",
+              "sha256": "0299d15a2f1a7f03c2577fecb7bac793ac558a29e89bec9f6bddf29c850a2812",
+              "size": 1094
+            },
+            "NOTICE": {
+              "path": "eomt/coco-panoptic-large-1280/2026-11-25/NOTICE",
+              "sha256": "62e2c92f00d26149f72198a09947da244537f7a1156ba2910363dad0c24e8616",
+              "size": 1573
+            },
+            "labels": {
+              "path": "eomt/coco-panoptic-large-1280/2026-11-25/labels.json",
+              "sha256": "75d87019910678d804832dfb975a1b81c99f49777415adb063a2dd9bb23a4b6e",
+              "size": 6114
+            },
+            "torch-fp32": {
+              "path": "eomt/coco-panoptic-large-1280/2026-11-25/torch-fp32.pth",
+              "sha256": "f00af5b873445eb8372013a369a7ce8feadf9c8e4f658643c78b5f89553b8a6e",
+              "size": 1286559614
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    "eomt/coco-panoptic-small": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "eomt/coco-panoptic-small/2026-11-25/LICENSE",
+              "sha256": "0299d15a2f1a7f03c2577fecb7bac793ac558a29e89bec9f6bddf29c850a2812",
+              "size": 1094
+            },
+            "NOTICE": {
+              "path": "eomt/coco-panoptic-small/2026-11-25/NOTICE",
+              "sha256": "74071c40f003d2a9b6eb9e7068c36f0462bfad14e5b259553357587d2cf44082",
+              "size": 1574
+            },
+            "labels": {
+              "path": "eomt/coco-panoptic-small/2026-11-25/labels.json",
+              "sha256": "75d87019910678d804832dfb975a1b81c99f49777415adb063a2dd9bb23a4b6e",
+              "size": 6114
+            },
+            "torch-fp32": {
+              "path": "eomt/coco-panoptic-small/2026-11-25/torch-fp32.pth",
+              "sha256": "f74ce93bd9e575d3e57a58ec38a337709832bd7a4e73b7811b2717ebb0e6199a",
+              "size": 95966358
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
     "granite_embedding_r2/small": {
       "latest": "2026-11-24",
       "revisions": {

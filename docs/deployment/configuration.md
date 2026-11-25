@@ -50,7 +50,7 @@ weights.remove("sam3", "sam3")                         # delete it, returns the 
 
 ## Choose what a server offers
 
-`MOZO_ENABLE` is an allow-list. Unset, the server offers all 82 models. Set, it offers only what it
+`MOZO_ENABLE` is an allow-list. Unset, the server offers all 87 models. Set, it offers only what it
 names:
 
 ```bash

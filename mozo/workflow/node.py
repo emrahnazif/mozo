@@ -74,7 +74,7 @@ class PortType(Enum):
     Five, because mozo's seventeen families return exactly five kinds of thing. Ten of them return
     ``pf.Detections`` -- including EasyOCR, whose read text is a detection with a string, and the
     promptable segmenters, whose masks are detections with no class. CLIP and SigLIP2 return
-    ``pf.Classifications``. Depth Anything V2 returns an array, and the two embedding models return
+    ``pf.Classifications``. EoMT's scene segments are detections too, whose masks never overlap. Depth Anything V2 returns an array, and the two embedding models return
     a different kind of array.
 
     ``CLASSIFICATIONS`` is separate from ``DETECTIONS`` although both are PixelFlow types, because

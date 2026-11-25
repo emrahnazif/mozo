@@ -505,7 +505,8 @@ def predict(
             to it, and is kept for the clicks after.
         threshold: Confidence floor, for detection models. Omitted, each family's own default
             applies -- these differ, and this endpoint does not have an opinion about which is
-            right for a model it is only routing to.
+            right for a model it is only routing to. For a panoptic segmenter it is the class
+            probability a segment needs before the merge; a semantic one refuses it with a 400.
         labels: Comma-separated class names overriding the model's own, e.g. ``hardhat,vest``.
         text: The concept to look for, for prompted models -- ``cow``, ``yellow school bus``.
             Repeat the parameter to ask for several in one request; they share the image encode.
@@ -672,6 +673,10 @@ def predict(
             return JSONResponse(content=model.predict(image).to_dict())
         if task == "depth_estimation":
             return _depth_response(model.predict(image), model.unit)
+        if task == "semantic_segmentation":
+            # One detection per segment, masks never overlapping. ``threshold`` is the panoptic
+            # merge's floor; a semantic variant refuses it (ValueError, so a 400 below).
+            return JSONResponse(content=model.predict(image, **floor).to_dict())
     except HTTPException:
         raise  # already carries the status it wants; do not re-wrap it as a 500
     except ValueError as e:

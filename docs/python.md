@@ -64,6 +64,7 @@ What `predict` returns depends on what the model does:
 | Models | `predict` returns |
 |---|---|
 | Detection, segmentation, keypoints, detection from words, click segmentation, OCR | a PixelFlow `Detections` |
+| EoMT (scene segmentation) | a PixelFlow `Detections`, one per segment, masks never overlapping |
 | CLIP, SigLIP 2 | a PixelFlow `Classifications`, one score per phrase |
 | Depth Anything V2 | an `HxW` float32 depth map |
 | BEN2 | an `HxW` uint8 alpha matte |

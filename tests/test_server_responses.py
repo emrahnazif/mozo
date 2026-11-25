@@ -159,6 +159,30 @@ class TestDetectionResponse:
         assert body and all("bbox" in d and "confidence" in d for d in body)
 
 
+class TestSceneSegmentation:
+    """A partition comes back as detections; a semantic variant refuses a threshold with a 400."""
+
+    def test_segments_come_back_as_json_with_masks(self, client, payload):
+        response = post(client, payload, "eomt", "coco-panoptic-small")
+        body = response.json()
+        assert body and all(d["masks"] and d["masks"][0]["format"] == "png" for d in body)
+        assert all(d["confidence"] is not None for d in body)
+
+    def test_a_threshold_changes_a_panoptic_answer(self, client, payload):
+        require_weights("eomt", "coco-panoptic-small")
+        strict = client.post("/predict/eomt/coco-panoptic-small?threshold=0.999",
+                             files={"file": ("image.jpg", payload, "image/jpeg")})
+        assert strict.status_code == 200
+        assert len(strict.json()) < len(post(client, payload, "eomt", "coco-panoptic-small").json())
+
+    def test_a_semantic_variant_refuses_a_threshold(self, client, payload):
+        require_weights("eomt", "ade20k-semantic-large")
+        response = client.post("/predict/eomt/ade20k-semantic-large?threshold=0.5",
+                               files={"file": ("image.jpg", payload, "image/jpeg")})
+        assert response.status_code == 400
+        assert "no threshold" in response.json()["detail"]
+
+
 def test_every_registered_task_type_has_a_dispatch_arm():
     """The endpoint encodes one task per arm, and a task with no arm returns 501 at request
     time. Nothing else holds the two in step: a family can be registered, tested and shipped

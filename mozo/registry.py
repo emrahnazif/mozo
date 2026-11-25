@@ -93,7 +93,7 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 #: The adapters read it from here, so there is one statement of it.
 EXECUTES: dict[str, tuple[str, ...]] = {
     **{family: ("torch",)
-       for family in ("ben2", "clip", "easyocr", "edgetam", "moebius", "sam2", "siglip2")},
+       for family in ("ben2", "clip", "easyocr", "edgetam", "eomt", "moebius", "sam2", "siglip2")},
     # A TensorRT engine exported from the checkpoint at the input size the user picks.
     "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
@@ -145,6 +145,7 @@ NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
     **{family: {"onnx": ("labels",), "coreml": ("labels",)}
        for family in ("yolov8", "yolov11", "yolov12", "yolov26")},
     "rfdetr": {"*": ("labels",)},
+    "eomt": {"*": ("labels",)},
     "vitpose": {"*": ("labels",)},
     "sam3": {"onnx": ("torch-fp32",), "coreml": ("torch-fp32",)},
     "owlv2": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
@@ -203,6 +204,21 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'indoor-small', 'indoor-base', 'indoor-large',
             'outdoor-small', 'outdoor-base', 'outdoor-large',
         ],
+    },
+
+    'eomt': {
+        'adapter_class': 'EomtPredictor',
+        'module': 'mozo.adapters.eomt',
+        'task_type': 'semantic_segmentation',
+        'description': (
+            'EoMT by TU Eindhoven — semantic and panoptic segmentation from a plain DINOv2 ViT. '
+            'Every pixel gets a class, returned as one mask per segment, never overlapping. '
+            'Four COCO panoptic variants (coco-panoptic-small/base/large at 640, -large-1280), '
+            'which also split countable things into one segment per instance, and one ADE20K '
+            'semantic variant (150 scene classes). Code and weights MIT.'
+        ),
+        'variants': ['coco-panoptic-small', 'coco-panoptic-base', 'coco-panoptic-large',
+                     'coco-panoptic-large-1280', 'ade20k-semantic-large'],
     },
 
     'easyocr': {

@@ -1,5 +1,18 @@
 ## Unreleased
 
+- **New: EoMT, semantic and panoptic segmentation (`eomt`).** Every pixel of a picture gets a class
+  -- the people and the cups, and also the wall, the floor and the sky -- returned as a PixelFlow
+  `Detections` with one mask per segment, masks never overlapping. The four COCO panoptic variants
+  (`coco-panoptic-small`, `-base`, `-large` at 640, `-large-1280`; 133 classes) also give each
+  countable thing its own segment, so five people are five detections while all the wall is one;
+  `confidence` is the segment's class probability, and `threshold` (default 0.8) is how confident a
+  segment must be before segments are merged. `ade20k-semantic-large` labels 150 scene classes
+  without splitting instances; its detections have `confidence=None`, and a `threshold` is refused
+  (`400` over HTTP). A new task type, `semantic_segmentation`, served by `POST /predict/eomt/<variant>`
+  as JSON, and a workflow node, `eomt`, on the existing Detections port. Bit-identical to the
+  authors' own code. Code and weights are MIT; ADE20K's *images* are licensed for non-commercial
+  research and education, which the NOTICE and the docs state for that variant.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

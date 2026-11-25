@@ -16,7 +16,7 @@ on mozo.
 | Licence | Variants | Families |
 |---|---|---|
 | Apache-2.0 | 44 | RF-DETR, ViTPose, OWLv2, Grounding DINO, SAM 2, EdgeTAM, SigLIP 2, EasyOCR, Granite Embedding R2, Moebius, Depth Anything V2 (7 of its 9) |
-| MIT | 5 | CLIP, BEN2 |
+| MIT | 10 | CLIP, BEN2, EoMT |
 | AGPL-3.0 | 30 | YOLOv8, YOLO11, YOLO12, YOLO26 |
 | CC-BY-NC-4.0 | 2 | Depth Anything V2 `base` and `large` |
 | SAM License | 1 | SAM 3 |
@@ -53,15 +53,15 @@ runs it.
 `MOZO_ENABLE` decides what a server offers. Set it to this list in the server's environment:
 
 ```bash
-MOZO_ENABLE=ben2,clip,easyocr,edgetam,granite_embedding_r2,grounding_dino,moebius,owlv2,\
+MOZO_ENABLE=ben2,clip,easyocr,edgetam,eomt,granite_embedding_r2,grounding_dino,moebius,owlv2,\
 rfdetr,sam2,siglip2,vitpose,depth_anything_v2/small,depth_anything_v2/indoor-small,\
 depth_anything_v2/indoor-base,depth_anything_v2/indoor-large,depth_anything_v2/outdoor-small,\
 depth_anything_v2/outdoor-base,depth_anything_v2/outdoor-large
 ```
 
-That is the 49 Apache-2.0 and MIT variants. Depth Anything V2 is named variant by variant because
+That is the 54 Apache-2.0 and MIT variants. Depth Anything V2 is named variant by variant because
 it is the one family whose licence is not the same for every variant. Because the list names what
-to offer rather than what to leave out, it still offers 49 after an upgrade that adds a family.
+to offer rather than what to leave out, it still offers 54 after an upgrade that adds a family.
 
 A server set this way never downloads or serves the weights it leaves out, through any route:
 a workflow that names one fails at that node instead of loading it.

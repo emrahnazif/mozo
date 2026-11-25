@@ -1,0 +1,21 @@
+Depth Anything 3
+Copyright (c) 2025 ByteDance Ltd. and/or its affiliates.
+
+Haotong Lin, Sili Chen, Jun Hao Liew, Donny Y. Chen, Zhenyu Li, Guang Shi, Jiashi Feng,
+Bingyi Kang. "Depth Anything 3: Recovering the Visual Space from Any Views",
+arXiv:2511.10647.
+
+This product includes a deployment-only extraction of software developed at
+https://github.com/ByteDance-Seed/Depth-Anything-3, licensed under the Apache
+License 2.0. See LICENSE for the full text and PROVENANCE.md for what was taken
+and what was changed.
+
+The DINOv2 backbone under dinov2/ originates with Meta Platforms, Inc.
+(https://github.com/facebookresearch/dinov2), also Apache 2.0, and reaches this
+package through Depth Anything 3's own copy of it.
+
+The model weights are licensed separately from this code. The three checkpoints
+this package builds (DA3-SMALL, DA3-BASE, DA3MONO-LARGE) are Apache-2.0 on their
+model cards and in the authors' model table; other Depth Anything 3 checkpoints
+are CC-BY-NC-4.0 and are not used. Each published artifact carries its own
+LICENSE and NOTICE alongside it.

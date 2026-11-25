@@ -3,12 +3,13 @@
 <!--
 summary: Meta's Segment Anything 2 in mozo: a click or a box in, the mask of what you pointed at out, Apache-2.0 code and weights.
 label: SAM 2
-keywords: mozo, sam 2, segment anything, promptable segmentation, interactive segmentation
+keywords: mozo, sam 2, segment anything, promptable segmentation, interactive segmentation, video object tracking
 -->
 
 SAM 2 segments the thing you point at. Give it a click, a box, or both, and it returns a mask with
 its box and the model's own estimate of how good the mask is. It does not know what it segmented:
-the mask is unnamed unless you name it. For masks of everything matching a phrase, see
+the mask is unnamed unless you name it. Mark objects on one frame of a video and it follows them
+through the frames after, a mask per object per frame ([tracking](#tracking-objects-through-a-video)). For masks of everything matching a phrase, see
 [SAM 3](/docs/models/sam3.md); for a smaller, faster model with the same prompts, see
 [EdgeTAM](/docs/models/edgetam.md).
 
@@ -184,8 +185,60 @@ sends `?sha256=` is answered exactly as before.
 [EdgeTAM](/docs/models/edgetam.md), [SAM 3](/docs/models/sam3.md) and
 [OWLv2](/docs/models/owlv2.md) can be prepared too; `GET /models` says which families can.
 
+## Tracking objects through a video
+
+`tracker()` starts a session that follows the objects you mark through a video, one frame at a time:
+
+```python
+import mozo
+import pixelflow as pf
+
+model = mozo.get_model("sam2/tiny")
+tracker = model.tracker()
+
+for index, frame in enumerate(pf.VideoReader("street.mp4")):
+    if index == 0:
+        found = tracker.update(frame, boxes=[[40, 60, 300, 480], [520, 90, 700, 400]],
+                               name=["cyclist", "bus"])
+    else:
+        found = tracker.update(frame)
+    for row in found:
+        print(index, row.tracker_id, row.class_name, round(row.confidence, 3), row.bbox)
+```
+
+- **Prompts start objects.** `update` takes the same `points`, `labels`, `boxes` and `name` as
+  `predict`, and each prompt (a box, a set of clicks, or a box with clicks) starts one object on
+  the frame it comes with. The first frame needs at least one; any later frame may start more.
+- **One row per object in view.** `tracker_id` (and `class_id`) is the object's id, 0, 1, 2… in
+  the order objects were started; `class_name` is the name you gave it; `confidence` is SAM 2's
+  probability that the object is visible in this frame (PixelFlow keeps three decimals, so a
+  confident object reads `1.0`); the mask is at the frame's own size. An object out of view has no
+  row, and comes back under the same id when SAM 2 sees it again. (So has one SAM 2 judges present
+  but whose mask is empty, which is rare: PixelFlow keeps no detection with an empty box.)
+- **Constant memory.** The tracker keeps each object's prompted frame and the last 15 frames, all
+  a later frame can read, so a long video or a camera runs in the same memory as a short clip. Any
+  number of trackers can share one model, one per stream.
+- **Forward only.** SAM 2 reads the frames before a frame, never after. To track backwards from a
+  marked frame, give the tracker the frames in reverse order: that is exactly what Meta's
+  predictor computes with `reverse=True`.
+- **Cost grows with objects.** Every object costs a pass of SAM 2's memory attention per frame, the
+  same in every size. On an RTX 3060, in fp32, a frame takes 314 ms for `tiny` with one object
+  and 751 ms with three (646 and 1,087 ms for `large`); on a 6-thread CPU, about 2.2 s for `tiny`
+  with one object. Tracking is offline work at these speeds, not live video.
+
+In a workflow, the `sam2_track` node takes a detector's boxes on the first frame that has any and
+follows those objects through the video, each keeping the class of the detection that started it.
+Over HTTP, that workflow runs on an uploaded video through `/workflow/process`.
+
+**What it matches.** The tracker is Meta's `SAM2VideoPredictor` frame by frame, bit for bit on CPU,
+fed the same frames. Two differences are Meta's own: it preprocesses a frame slightly differently
+from its image predictor, so the first mask can differ from `predict`'s by a few pixels; and on a
+clip shorter than 16 frames its answer depends on the clip's length, which a stream does not have
+(the tracker behaves as a video of 16 frames or more). Meta's predictor fills small holes in masks
+only when its optional CUDA extension is compiled; the tracker matches it without that extension.
+
 ## Weights and licence
 
-Code and weights are Apache-2.0. Mozo's code is an extraction of `facebookresearch/sam2`, reduced to
-the image path, and `mozo/vendors/sam2_deploy/PROVENANCE.md` records the upstream commit it was built
+Code and weights are Apache-2.0. Mozo's code is an extraction of `facebookresearch/sam2`'s image predictor
+and video tracker, and `mozo/vendors/sam2_deploy/PROVENANCE.md` records the upstream commit it was built
 from. Every variant ships with its licence and a NOTICE naming the exact upstream release.

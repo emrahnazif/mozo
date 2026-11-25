@@ -1,5 +1,21 @@
 ## Unreleased
 
+- **SAM 2 tracks objects through a video.** `mozo.get_model("sam2/tiny").tracker()` starts a
+  session; give it frames in order with `tracker.update(frame)`, and mark objects with the same
+  `points`, `labels`, `boxes` and `name` that `predict` takes, on the first frame or any later one.
+  Each frame returns PixelFlow detections, one per object in view, with a `tracker_id` that stays
+  with the object, its mask at the frame's size, and SAM 2's probability that it is visible. The
+  tracker keeps only the last 15 frames, so a long video or a camera runs in constant memory. It is
+  Meta's video predictor frame by frame, bit for bit on CPU. Nothing new to download: the published
+  SAM 2 files already held the tracker's weights. A new workflow node, `sam2_track`, follows the
+  objects a detector finds on the first frame. Tracking on CPU is slow (about 2 s a frame for
+  `tiny` with one object); every object costs a pass of SAM 2's memory attention per frame.
+- **SAM 2 single-mask calls now match Meta's predictor** (`multimask_output=False`, which the
+  `sam2_boxes` node uses). mozo's decoder lacked the fallback Meta's builder switches on: when the
+  single mask is unstable, take the best of the three candidates instead. It fires often for a
+  single click (21 of 40 random clicks on one test frame, changing those masks); a box or several
+  clicks are usually stable. Calls with three candidates (the default) are unchanged.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

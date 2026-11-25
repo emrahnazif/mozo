@@ -347,6 +347,34 @@ found traps it had not predicted, and the predicted ones were mostly real.
 - **Second passes are part of the model.** EasyOCR re-runs low-contrast crops and keeps the better
   read.
 
+### Stateful models (video)
+
+- **One upstream, two preprocessings.** SAM 2's image predictor resizes with an antialiased
+  bilinear `Resize`; its video loader with PIL's default bicubic on the 8-bit frame, divided by
+  255 in **float64**. Same weights, same frame, 0.31 apart on pixels and 95 mask pixels on a box.
+  Reproduce the one the entry point you claim uses, on that path only.
+- **State stored at a lower precision than it is computed.** SAM 2 keeps mask memories in
+  bfloat16 on every device, CPU included, and reads them back into float32 attention. Dropping
+  the cast looks like a cleanup and moves every frame after the first.
+- **Length can be an input.** SAM 2 normalises its pointer encoding by `min(num_frames, 16) - 1`:
+  on a clip under 16 frames the answer depends on the clip's length, which a stream does not
+  have. Check whether a whole-video reference reads the total length before claiming a streaming
+  extraction matches it, and let the gate pass it.
+- **Drive the reference the way the extraction will run.** Before writing a frame-by-frame
+  session, drive upstream's own predictor one frame at a time with later frames unreadable (a
+  frame buffer that raises). If that equals its offline run, the session can be exact; if not,
+  the reference is not causal (SAM 3 video's default `hotstart_delay=15` is not).
+- **A post-processing step that silently depends on a compiled extension.** SAM 2 fills mask holes
+  only if its optional CUDA extension built; otherwise it catches the ImportError and skips.
+  "Upstream" is then two functions; name which one the gate ran.
+- **Post-processing configured by the builder, not the config file.** `build_sam2(...,
+  apply_postprocessing=True)` adds the decoder's dynamic-multimask fallback as Hydra overrides.
+  No weights, not in the YAML, so a strict load cannot see it missing; mozo's SAM 2 image path
+  missed it for months, on single-mask calls only.
+- **A container that drops rows.** PixelFlow 0.11's `add_detection` (and so `from_arrays`) drops a
+  detection whose box has zero area. An empty mask has a zero box, so it disappears; a contract
+  that promises "a row per prompt" must account for that.
+
 ### Things that are upstream's behaviour, not bugs to fix
 
 Reproduce them, and record them:

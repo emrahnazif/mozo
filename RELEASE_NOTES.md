@@ -1,5 +1,19 @@
 ## Unreleased
 
+- **New family: PP-OCRv6, PaddlePaddle's text detection and recognition** (`ppocrv6`, sizes
+  `medium`, `small` and `tiny`). One model reads about 50 languages at once — Chinese, Japanese,
+  Korean, English and other Latin scripts, Cyrillic, Greek, Arabic and more — so there is no
+  language to choose, only a size; `tiny` leaves out Japanese kana. Each line comes back like
+  EasyOCR's: the string in `text`, the four corners in `segments`. Checked against PaddleOCR 3.7.0
+  stage by stage with no tolerance. No new dependency: the box expansion PaddleOCR does with
+  `pyclipper` is carried in mozo, exactly. A `ppocrv6` workflow node reads text like `easyocr`.
+  Code and weights are Apache-2.0; 6 MB (`tiny`) to 165 MB (`medium`).
+- PP-OCRv6 publishes ONNX graphs. On the CPU, `runtime="onnx-fp32"` runs the detector about
+  1.4 to 2 times faster than torch and reads the same text; `auto` stays on torch. `medium` can
+  run through TensorRT in fp16 on CUDA with `runtime="tensorrt-fp16"`: the two networks 2.0 times
+  faster than torch, ICDAR 2015 accuracy unchanged, about 10% of lines come out slightly
+  differently, and pages up to 2048 pixels a side.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

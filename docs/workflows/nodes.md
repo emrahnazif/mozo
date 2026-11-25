@@ -82,6 +82,7 @@ what runs.
 | Node | Inputs → outputs | Parameters | What it does |
 |---|---|---|---|
 | `easyocr` | image → detections | `variant`=english | EasyOCR by JaidedAI: find text in an image and read it. |
+| `ppocrv6` | image → detections | `variant`=medium | PP-OCRv6 by PaddlePaddle: find text in an image and read it, in about 50 languages. |
 
 ## Depth
 

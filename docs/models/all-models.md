@@ -87,12 +87,13 @@ not share a space with CLIP's or SigLIP 2's.
 
 ## Text recognition
 
-Every line of text in the image, read. A variant is a script, not a language: `latin` covers 41
-languages.
+Every line of text in the image, read. For EasyOCR a variant is a script, not a language: `latin`
+covers 41 languages. For PP-OCRv6 a variant is a size, and every size reads about 50 languages.
 
 | Family | Variants | Licence | Runtimes | Size |
 |---|---|---|---|---|
 | [EasyOCR](/docs/models/easyocr.md) | `english` `latin` `chinese-simplified` `japanese` `korean` | Apache-2.0 | torch | 98–105 MB |
+| [PP-OCRv6](/docs/models/ppocrv6.md) | `medium` `small` `tiny` | Apache-2.0 | torch, onnx; tensorrt-fp16 (`medium`) | 6–165 MB |
 
 ## Depth
 

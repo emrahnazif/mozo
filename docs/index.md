@@ -93,7 +93,7 @@ size and runtimes. Each family has its own page with examples, parameters and ho
 | Segmentation from a click or box | [SAM 2](/docs/models/sam2.md), [EdgeTAM](/docs/models/edgetam.md), [SAM 3](/docs/models/sam3.md) |
 | Classification from words, image embeddings | [CLIP](/docs/models/clip.md), [SigLIP 2](/docs/models/siglip2.md) |
 | Text embeddings | [Granite Embedding R2](/docs/models/granite-embedding-r2.md) |
-| Text recognition | [EasyOCR](/docs/models/easyocr.md) |
+| Text recognition | [EasyOCR](/docs/models/easyocr.md), [PP-OCRv6](/docs/models/ppocrv6.md) |
 | Depth | [Depth Anything V2](/docs/models/depth-anything-v2.md) |
 | Background removal | [BEN2](/docs/models/ben2.md) |
 | Object removal | [Moebius](/docs/models/moebius.md) |

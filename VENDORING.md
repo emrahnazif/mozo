@@ -346,6 +346,27 @@ found traps it had not predicted, and the predicted ones were mostly real.
   not include it.
 - **Second passes are part of the model.** EasyOCR re-runs low-contrast crops and keeps the better
   read.
+- **`cv2.minAreaRect` depends on where the polygon starts.** The same point set, rotated by one
+  vertex, can come back as the same rectangle described from another corner, 90 degrees apart --
+  and DB's box ordering then differs. Reimplementing a library step that feeds it (PP-OCRv6's
+  pyclipper unclip) means reproducing the library's output *order*, not just its point set:
+  Clipper's union drops repeated and collinear vertices and ends at the lowest-y, largest-x one.
+  Of 20,000 random boxes, every hull agreed and 308 rectangles still differed; with the order
+  reproduced, 0 of 200,000.
+- **A library's float-to-int conversion is part of its arithmetic.** pyclipper truncates float
+  coordinates toward zero before offsetting; rounding moves every grown box.
+
+### Checkpoints across frameworks
+
+- **An author's two releases of "the same" checkpoint can be different training snapshots.**
+  PaddlePaddle publishes each PP-OCRv6 network as a Paddle graph, an ONNX export of it and a
+  safetensors for its own PyTorch port. For five of six they are the same tensors; for the tiny
+  recogniser not one initialiser matches, and the outputs differ by 0.15 in probability. Compare
+  tensors (unfused ones are bit-equal when it is the same snapshot), not only outputs.
+- **One package's two engines can be two pipelines.** PaddleOCR's `engine="transformers"` runs
+  transformers' image processors, not the Paddle pipeline's code: torchvision resizing, a
+  re-derived unclip, every line in a batch stretched to the widest. Gate each stage against the
+  code whose numbers are published, not against the engine that happens to be torch.
 
 ### Things that are upstream's behaviour, not bugs to fix
 

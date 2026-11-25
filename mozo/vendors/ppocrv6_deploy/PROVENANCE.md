@@ -64,7 +64,18 @@ unwarping returns boxes in the unwarped image's frame. Not included.
 mozo's adapter through PixelFlow. Stages: the page tensor and the resize record, the probability
 map, every DB candidate's unclip through both pyclipper and this package, the quads and their
 scores, the sorted order, every crop, every recogniser batch's probabilities, and each line's quad,
-string and confidence from `PaddleOCR.predict`. GATE_SUMMARY
+string and confidence from `PaddleOCR.predict`. Measured 2026-11-25 on the nine text fixtures, the photograph
+and the first ten ICDAR 2015 test pages, for all three sizes: 1,976 comparisons, every one identical,
+including 211 unclips through both implementations, plus 200,000 random boxes through pyclipper and
+`boxes.unclip`, 0 different.
+
+**Falsified** (on `small`), each caught at its own stage and nowhere upstream of it: the blue
+channel's mean 0.485 -> 0.486 (detector input, then the map and the box scores); LayerNorm eps
+1e-6 -> 1e-5 (recogniser probabilities and confidences only, every detector stage still exact);
+Clipper's arc tolerance 0.25 -> 0.3 and the union's output order rotated by one vertex (the
+unclip stage); `max_candidates` 3000 -> 10 (quads, crops, region count); the confidence's mean in
+float64 instead of float32 (confidences only); six lines a batch -> five (recogniser batches and
+confidences; it needs a page with more than five lines).
 
 The networks were also gated alone against transformers at two shapes each, random inputs:
 identical, all six, on the first attempt.
@@ -112,7 +123,12 @@ differences are arithmetic. **The tiny recogniser is a different training snapsh
 -0.0542 in one and -0.0599 in the other), and the Paddle graph agrees with the ONNX. This package
 serves the safetensors snapshot, the one PaddleOCR serves with `engine="transformers"`.
 
-PADDLE_E2E
+**End to end against PaddleOCR as it ships** (`engine="paddle"`, medium, 500 ICDAR 2015 test
+images, CPU): detection hmean 0.4932 and word recall 0.6668, the same as this package's. Line by
+line against this package's fp32 arithmetic (TensorRT fp32, which reads every line exactly as torch
+on the CPU does for tiny and small): 99.95% of 2,218 lines identical, the rest moved by a pixel, no
+string different. `engine="transformers"` against the same Paddle run: 6.9% identical, 30.5% of
+strings different, word recall 0.6495.
 
 ## Runtimes
 

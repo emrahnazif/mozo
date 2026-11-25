@@ -1,6 +1,6 @@
 # Mozo
 
-> Run 82 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers.
+> Run 85 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers.
 
 Mozo is a Python package (`pip install mozo`, Python 3.10+). A model is named `family/variant`, the same in Python and over HTTP:
 
@@ -24,7 +24,7 @@ python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_
 
 ## Start
 
-- [Mozo](https://emrah.fr/mozo/): Run 82 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers. File: `index.md`
+- [Mozo](https://emrah.fr/mozo/): Run 85 computer vision models, and workflows built from them, from one pip install, with the original's exact numbers. File: `index.md`
 - [Install mozo on CPU, CUDA or Apple silicon](https://emrah.fr/mozo/installation/): Install mozo with pip, add the optional ONNX or CoreML runtimes, and run it on a CUDA GPU or Apple silicon. File: `installation.md`
 - [Run models from Python](https://emrah.fr/mozo/python/): Load any mozo model with get_model, run it, filter and draw its results with PixelFlow, manage memory, and load your own checkpoints. File: `python.md`
 - [Serve models over HTTP](https://emrah.fr/mozo/server/): Start mozo's HTTP server, send it images from any language, read what comes back, and check which models it serves. File: `server.md`
@@ -39,7 +39,7 @@ python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_
 
 ## Models
 
-- [All 82 models, by task](https://emrah.fr/mozo/models/all-models/): Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size. File: `models/all-models.md`
+- [All 85 models, by task](https://emrah.fr/mozo/models/all-models/): Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size. File: `models/all-models.md`
 - [BEN2: background removal with a soft matte](https://emrah.fr/mozo/models/ben2/): BEN2 in mozo: remove the background of a photograph with a per-pixel opacity matte that keeps hair, or a ready RGBA cut-out. MIT. File: `models/ben2.md`
 - [CLIP: classify from words, embed images and text](https://emrah.fr/mozo/models/clip/): OpenAI's CLIP in mozo: score an image against phrases you write, or get the vectors to search images by text. MIT. File: `models/clip.md`
 - [Depth Anything V2: depth from one photograph](https://emrah.fr/mozo/models/depth-anything-v2/): Depth Anything V2 in mozo: a depth map from a single image, in metres or relative, at the image's resolution. File: `models/depth-anything-v2.md`
@@ -47,6 +47,7 @@ python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_
 - [EdgeTAM: segment what you click, on less hardware](https://emrah.fr/mozo/models/edgetam/): Meta's EdgeTAM in mozo: SAM 2's click-and-box segmentation in a 56 MB model, Apache-2.0 code and weights. File: `models/edgetam.md`
 - [Granite Embedding R2: search text by meaning](https://emrah.fr/mozo/models/granite-embedding-r2/): IBM's Granite Embedding R2 in mozo: English text in, one 384-d vector out, for searching documents by meaning. Apache-2.0. File: `models/granite-embedding-r2.md`
 - [Grounding DINO: detect what you describe](https://emrah.fr/mozo/models/grounding-dino/): IDEA Research's open-vocabulary detector in mozo: boxes for descriptions as well as nouns, Apache-2.0, torch, fp16 and TensorRT on CUDA. File: `models/grounding-dino.md`
+- [MM-Grounding-DINO: LLMDet, detect what you describe](https://emrah.fr/mozo/models/mm-grounding-dino/): LLMDet on OpenMMLab's MM-Grounding-DINO in mozo: open-vocabulary boxes, strongest on rare objects, Apache-2.0, torch and fp16 on CUDA. File: `models/mm-grounding-dino.md`
 - [Moebius: remove an object from a photo](https://emrah.fr/mozo/models/moebius/): Moebius inpainting in mozo: an image and a mask in, the masked object painted out, everything else byte-identical. Apache-2.0. File: `models/moebius.md`
 - [OWLv2: detect anything you can name](https://emrah.fr/mozo/models/owlv2/): Google's open-vocabulary detector in mozo: name things in words and get boxes, no class list, Apache-2.0 code and weights. File: `models/owlv2.md`
 - [RF-DETR: detection, segmentation and keypoints](https://emrah.fr/mozo/models/rfdetr/): Roboflow's real-time transformer detector in mozo: boxes, masks or person joints, Apache-2.0, on torch, ONNX, CoreML and TensorRT. File: `models/rfdetr.md`
@@ -70,7 +71,7 @@ python -c "import importlib.util, os; print(os.path.dirname(importlib.util.find_
 ## Workflows
 
 - [Build a workflow in the editor](https://emrah.fr/mozo/workflows/editor/): Chain models and image operations into a workflow: draw it in mozo's browser editor, keep it as JSON, and embed the editor in your own app. File: `workflows/editor.md`
-- [Every built-in workflow node](https://emrah.fr/mozo/workflows/nodes/): All 50 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults. File: `workflows/nodes.md`
+- [Every built-in workflow node](https://emrah.fr/mozo/workflows/nodes/): All 51 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults. File: `workflows/nodes.md`
 - [Run a workflow from Python or the command line](https://emrah.fr/mozo/workflows/python/): Run a mozo workflow file from Python, the command line or HTTP: override parameters, run it over many images, check it first, and use your own models. File: `workflows/python.md`
 - [Run a workflow over videos and folders](https://emrah.fr/mozo/workflows/video/): Run a mozo workflow over every frame of a video or every image in a folder: sample frames, track objects, and save videos and annotations. File: `workflows/video.md`
 - [Write your own workflow node](https://emrah.fr/mozo/workflows/writing-nodes/): Add a node to mozo's workflows by writing one Python function: its signature declares its ports and parameters, and the editor follows. File: `workflows/writing-nodes.md`

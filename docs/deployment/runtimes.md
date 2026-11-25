@@ -22,6 +22,7 @@ itself; this page says what exists, how the choice is made, and when to override
 | Granite Embedding R2 | yes | none | yes |
 | OWLv2 | yes, and fp16 on CUDA | every variant (the image tower in fp16, to build TensorRT engines from) | none |
 | Grounding DINO | yes, and fp16 on CUDA | none (exported on your machine, to build TensorRT engines from) | none |
+| MM-Grounding-DINO | yes, and fp16 on CUDA | none (measured: no faster than torch; TensorRT moved 3–6% of detections) | none |
 | BEN2, CLIP, Depth Anything V2, EasyOCR, EdgeTAM, Moebius, SAM 2, SigLIP 2 | yes | none | none |
 
 Some of those families publish graphs mozo does not run yet, such as SAM 2's ONNX and CoreML and
@@ -44,8 +45,8 @@ packages can run:
 CoreML needs `pip install 'mozo[coreml]'` and ONNX needs `pip install 'mozo[onnx]'`. Without them,
 `auto` simply never picks those graphs. In practice: on Apple silicon with the CoreML extra, RF-DETR,
 YOLOv8, YOLO12, SAM 3 and Granite Embedding R2 run as CoreML graphs, and everything else runs on
-torch. On CUDA, RF-DETR runs as `tensorrt-fp32` when TensorRT 11 or later is installed, OWLv2 and
-Grounding DINO run as `torch-fp16`, and everything else runs on torch in fp32.
+torch. On CUDA, RF-DETR runs as `tensorrt-fp32` when TensorRT 11 or later is installed, OWLv2,
+Grounding DINO and MM-Grounding-DINO run as `torch-fp16`, and everything else runs on torch in fp32.
 
 ## Choose one yourself
 

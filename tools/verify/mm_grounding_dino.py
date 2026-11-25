@@ -87,7 +87,8 @@ _TOKENIZER_CASES = [
 FALSIFIERS = {
     "swin-norm-eps": "Swin LayerNorm eps 1e-5 -> 1e-6 (swin onwards; bert and text pass)",
     "temperature": "image position temperature 20 -> 21 (memory onwards; swin, bert, text pass)",
-    "no-score-scale": "drop the contrastive 1/sqrt(256) (decoder onwards; memory passes)",
+    "no-score-scale": "drop the contrastive 1/sqrt(256) (logits; query selection ranks by the "
+                      "same score up to a monotone map, so the decoder passes)",
     "shared-box-head": "every decoder layer uses layer 0's box head, as transformers 5 loads it "
                        "(references onwards)",
     "bert-eager": "BERT softmax by hand instead of SDPA (bert onwards)",

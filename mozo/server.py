@@ -597,6 +597,13 @@ def predict(
     # Deliberately the adapter's own rule, not a looser one. A guard that accepted
     # ``?text=car&text=`` would hand the caller the same 400 from the adapter, but only after
     # decoding the image and loading the weights -- which is the cost this exists to avoid.
+    # A model that answers in words is asked one question, where the others are asked for a list of
+    # concepts: the same guard, with the count and the wording that fit each.
+    if task == "image_to_text" and (not text or len(text) > 1 or not text[0].strip()):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{family} answers one question per request: pass it as ?text=..., once"
+                   + (f"; this request has {len(text)}." if text and len(text) > 1 else "."))
     if task in PROMPTED and not clicked and (not text or any(not t.strip() for t in text)):
         raise HTTPException(
             status_code=400,
@@ -605,14 +612,6 @@ def predict(
                    + (" Or point at something: ?point=x,y with a ?label=1, or "
                       "?box=x1,y1,x2,y2." if family in CLICKABLE else ""),
         )
-
-    # One question per request for a model that answers in words: two ?text= would be two answers,
-    # and this endpoint returns one. Refused before the load, like the missing prompt above.
-    if task == "image_to_text" and len(text) > 1:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{family} answers one question per request, and this one has {len(text)} "
-                   "?text= parameters. Send one; ask the next in its own request.")
 
     # Same reasoning as above: settled before the image is decoded and the weights are loaded,
     # because a forgotten prompt should not cost a multi-gigabyte load to be told about. Parsed

@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
+from dataclasses import dataclass
 import random
 import sys
 import time
@@ -54,6 +55,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 
+from common import FIXTURES  # noqa: E402
 from fetch.qwen3_vl import COMMITS, repository  # noqa: E402
 
 from mozo.vendors.qwen3_vl_deploy import (  # noqa: E402
@@ -63,13 +65,15 @@ from mozo.vendors.qwen3_vl_deploy import language as vlanguage  # noqa: E402
 from mozo.vendors.qwen3_vl_deploy import model as vmodel  # noqa: E402
 from mozo.vendors.qwen3_vl_deploy import tokenizer as vtokenizer  # noqa: E402
 from mozo.vendors.qwen3_vl_deploy import vision as vvision  # noqa: E402
+from mozo.image import load_image  # noqa: E402
+from mozo.vendors.qwen3_vl_deploy.config import Tokens  # noqa: E402
 from mozo.weights import WeightsError, resolve  # noqa: E402
 
 #: The versions this family's parity was established against. Printed, not enforced.
 PINNED = {"torch": "2.13.0", "torchvision": "0.28.0", "transformers": "5.24.1",
           "tokenizers": "0.23.3"}
 
-FIXTURE = ROOT / "tests" / "fixtures" / "images" / "example.jpg"
+FIXTURE = FIXTURES / "example.jpg"
 
 
 def versions() -> str:
@@ -82,18 +86,28 @@ def versions() -> str:
                      for k, v in got.items())
 
 
+@dataclass(frozen=True, eq=False)
 class Case:
-    """One fixture: an image, a prompt, a budget, how to choose, how many pixels."""
+    """One fixture: an image, a prompt, a budget, how to choose, how many pixels.
 
-    def __init__(self, name: str, rgb: np.ndarray, prompt: str, steps: int,
-                 sampling: Sampling = Sampling(), max_pixels: int = MAX_PIXELS) -> None:
-        self.name, self.rgb, self.prompt, self.steps = name, rgb, prompt, steps
-        self.sampling, self.max_pixels = sampling, max_pixels
+    ``also_4b`` marks the fixtures the larger variant is checked on too.
+    """
+
+    name: str
+    rgb: np.ndarray
+    prompt: str
+    steps: int
+    sampling: Sampling = Sampling()
+    max_pixels: int = MAX_PIXELS
+    also_4b: bool = False
 
 
-def _load(path: Path, mode: str = "RGB") -> np.ndarray:
-    from PIL import Image
-    return np.array(Image.open(path).convert(mode))
+def stage_names(spec) -> list[str]:
+    """Every stage compared before decoding, in the order the model computes them."""
+    return (["pixel_values", "input_ids", "patch_embed"]
+            + [f"vision_block_{i}" for i in range(spec.vision.depth)]
+            + [f"deepstack_{i}" for i in range(len(spec.vision.deepstack))] + ["merger", "embeds"]
+            + [f"text_layer_{i}" for i in range(spec.text.layers)] + ["final_norm"])
 
 
 def cases(quick: bool) -> list[Case]:
@@ -102,9 +116,7 @@ def cases(quick: bool) -> list[Case]:
 
     from PIL import Image
 
-    from mozo.image import load_image
-
-    photo = _load(FIXTURE)
+    photo = load_image(str(FIXTURE))
     small = np.array(Image.fromarray(photo).resize((640, 427), Image.BICUBIC))
     if quick:
         return [Case("small photo, greedy", small, "Describe this image.", 12)]
@@ -113,12 +125,13 @@ def cases(quick: bool) -> list[Case]:
     Image.fromarray(small).convert("RGBA").save(rgba, "PNG")
     Image.fromarray(small).convert("L").save(grey, "JPEG")
     return [
-        Case("photo, default 2.6 MP budget", photo, "Describe this image.", 32),
+        Case("photo, default 2.6 MP budget", photo, "Describe this image.", 32, also_4b=True),
         Case("photo, sampled (t=0.7, p=0.8, k=20, seed 3)", small, "Describe this image.", 24,
-             Sampling(0.7, 0.8, 20, 3)),
+             Sampling(0.7, 0.8, 20, 3), also_4b=True),
         Case("photo, sampled (t=1.3, seed 11)", small, "What could happen next?", 16,
              Sampling(1.3, 1.0, 0, 11)),
-        Case("stops on its own", small, "How many people are in this picture? Answer with a number.", 40),
+        Case("stops on its own", small, "How many people are in this picture? Answer with a number.", 40,
+             also_4b=True),
         Case("tiny 9x13, scaled up to the pixel floor", photo[:13, :9], "What colour is this?", 12),
         Case("strip 2000x120", np.array(Image.fromarray(photo).resize((2000, 120))),
              "Describe this image.", 12),
@@ -127,7 +140,7 @@ def cases(quick: bool) -> list[Case]:
         Case("RGBA PNG", load_image(rgba.getvalue()), "Describe this image.", 8),
         Case("greyscale JPEG", load_image(grey.getvalue()), "Describe this image.", 8),
         Case("CJK, emoji, combining mark, newline", small,
-             "这张图片里有什么？😀 Café́ 'S\nanswer briefly", 16),
+             "这张图片里有什么？😀 Café\u0301 'S\nanswer briefly", 16),
         Case("long prompt", small, " ".join(["Describe every object you can see, its colour, and "
                                              "where it is in the frame."] * 20), 8),
     ]
@@ -214,11 +227,7 @@ def compare(case: Case, want: dict, vendor: Generator) -> list[str]:
     failures = []
     if record["grid"] != want["grid"]:
         return [f"grid {record['grid']} != {want['grid']}"]
-    order = (["pixel_values", "input_ids", "patch_embed"]
-             + [f"vision_block_{i}" for i in range(vendor.spec.vision.depth)]
-             + [f"deepstack_{i}" for i in range(len(vendor.spec.vision.deepstack))] + ["merger", "embeds"]
-             + [f"text_layer_{i}" for i in range(vendor.spec.text.layers)] + ["final_norm"])
-    for stage in order:
+    for stage in stage_names(vendor.spec):
         a, b = record[stage], want[stage]
         if a.shape != b.shape:
             failures.append(f"{stage}: shape {tuple(a.shape)} != {tuple(b.shape)}")
@@ -252,7 +261,7 @@ def against_mozo(variant: str, case: Case, want: dict) -> list[str]:
         failures.append(f"auto chose {model.runtime} on the CPU")
     if got.text != want["text"]:
         failures.append("the adapter's text differs")
-    finished = "stop" if want["ids"] and want["ids"][-1] in (151645, 151643) else "length"
+    finished = "stop" if want["ids"] and want["ids"][-1] in Tokens().stop else "length"
     if (got.finish_reason, got.generated_tokens, got.prompt_tokens) != (
             finished, len(want["ids"]), want["input_ids"].shape[1]):
         failures.append(f"the adapter reports {got.finish_reason}/{got.generated_tokens}/"
@@ -324,12 +333,6 @@ def _deepstack_shifted():
 
 
 @contextlib.contextmanager
-def _patched(target, name, value):
-    with mock.patch.object(target, name, value):
-        yield
-
-
-@contextlib.contextmanager
 def _warp_order_swapped():
     original = vmodel._warp
 
@@ -360,29 +363,31 @@ def _seed_off_by_one():
 def _no_nfc():
     with mock.patch.object(vtokenizer, "_nfc", lambda text, boundaries: text):
         vtokenizer._word.cache_clear()
-        yield
-    vtokenizer._word.cache_clear()
+        try:
+            yield
+        finally:
+            vtokenizer._word.cache_clear()
 
 
 #: name -> (perturbation, the fixture that exposes it, the stage that must fail first).
 FALSIFICATIONS = {
-    "no-antialias": (lambda: _patched(vimage, "tvF", _no_antialias()), "small", "pixel_values"),
-    "resize-floor": (lambda: _patched(vimage, "smart_resize", _smart_resize_floor), "small", "grid"),
-    "pos-embed-half-pixel": (lambda: _patched(vvision, "_axis_taps", _axis_taps_half_pixel),
+    "no-antialias": (lambda: mock.patch.object(vimage, "tvF", _no_antialias()), "small", "pixel_values"),
+    "resize-floor": (lambda: mock.patch.object(vimage, "smart_resize", _smart_resize_floor), "small", "grid"),
+    "pos-embed-half-pixel": (lambda: mock.patch.object(vvision, "_axis_taps", _axis_taps_half_pixel),
                              "small", "patch_embed"),
-    "vision-gelu-exact": (lambda: _patched(vvision.MLP, "forward", _vision_mlp_exact),
+    "vision-gelu-exact": (lambda: mock.patch.object(vvision.MLP, "forward", _vision_mlp_exact),
                           "small", "vision_block_0"),
-    "merger-norm-eps": (lambda: _patched(vvision.PatchMerger, "forward", _merger_norm_eps),
+    "merger-norm-eps": (lambda: mock.patch.object(vvision.PatchMerger, "forward", _merger_norm_eps),
                         "small", "deepstack_0"),
-    "vision-rope-theta": (lambda: _patched(vvision.VisionTower, "_rotary",
-                                           _scaled_rotary(vvision.VisionTower._rotary)),
+    "vision-rope-positions": (lambda: mock.patch.object(vvision.VisionTower, "_rotary",
+                                                         _scaled_rotary(vvision.VisionTower._rotary)),
                           "small", "vision_block_0"),
-    "mrope-blocks": (lambda: _patched(vlanguage.TextDecoder, "_rotary", _recompose_blocks),
+    "mrope-blocks": (lambda: mock.patch.object(vlanguage.TextDecoder, "_rotary", _recompose_blocks),
                      "small", "text_layer_0"),
     "deepstack-one-layer-late": (_deepstack_shifted, "small", "text_layer_0"),
-    "text-rope-theta": (lambda: _patched(vlanguage.TextDecoder, "_rotary", _text_theta(1_000_000.0)),
+    "text-rope-theta": (lambda: mock.patch.object(vlanguage.TextDecoder, "_rotary", _text_theta(1_000_000.0)),
                         "small", "text_layer_0"),
-    "rmsnorm-eps": (lambda: _patched(vlanguage.RMSNorm, "forward", _rmsnorm_eps(1e-5)),
+    "rmsnorm-eps": (lambda: mock.patch.object(vlanguage.RMSNorm, "forward", _rmsnorm_eps(1e-5)),
                     "small", "text_layer_0"),
     # A sampled token that differs is fed back, so the first difference is a later step's logits.
     "top-p-before-top-k": (_warp_order_swapped, "sampled", "step"),
@@ -407,10 +412,8 @@ def _text_theta(theta):
 
 
 def _scaled_rotary(original):
-    def rotary(self, x, positions):
-        cos, sin = original(self, x, positions * 1.0000001)
-        return cos, sin
-    return rotary
+    """The vision tower's rotary positions scaled by 1 + 1e-7."""
+    return lambda self, x, positions: original(self, x, positions * 1.0000001)
 
 
 def _rmsnorm_eps(eps):
@@ -423,11 +426,11 @@ def _rmsnorm_eps(eps):
     return forward
 
 
-def falsify(names: list[str], reference: Reference, vendor_factory) -> int:
+def falsify(names: list[str], reference: Reference, vendor: Generator) -> int:
     """Each perturbation must make the comparison fail, at the stage it reaches first."""
     from PIL import Image
 
-    photo = _load(FIXTURE)
+    photo = load_image(str(FIXTURE))
     small = np.array(Image.fromarray(photo).resize((320, 214), Image.BICUBIC))
     fixtures = {
         "small": Case("small", small, "Describe this image.", 4),
@@ -435,22 +438,21 @@ def falsify(names: list[str], reference: Reference, vendor_factory) -> int:
         "sampled": Case("sampled", small, "Describe this image.", 12, Sampling(1.5, 0.6, 3, 5)),
         # The whole distribution at a high temperature, so two seeds part within a few tokens.
         "open": Case("open", small, "Describe this image.", 12, Sampling(1.5, 1.0, 0, 5)),
-        "nfc": Case("nfc", small, "Café or café?", 3),
+        "nfc": Case("nfc", small, "Cafe\u0301 or cafe\u0301?", 3),
     }
     needed = {FALSIFICATIONS[name][1] for name in names}
     wanted = {name: reference.run(case) for name, case in fixtures.items() if name in needed}
     missed = 0
     for name in names:
         perturbation, fixture, stage = FALSIFICATIONS[name]
+        # Every perturbation patches a module or class attribute, so the loaded vendor is reused.
         with perturbation():
-            vendor = vendor_factory()
             failures = compare(fixtures[fixture], wanted[fixture], vendor)
         first = failures[0] if failures else "nothing"
         caught = bool(failures) and first.startswith(stage)
         missed += not caught
         print(f"  {'caught' if caught else 'MISSED'} {name:26s} first failure: {first[:90]}"
               + ("" if caught else f"   (expected {stage})"))
-    vtokenizer._word.cache_clear()
     return missed
 
 
@@ -460,8 +462,8 @@ def fuzz(count: int, reference: Reference) -> int:
     ours = vtokenizer.Tokenizer()
     rng = random.Random(0)
     pools = ["abcxyz ABC'sStTmMdDlLreREve", "0123456789٠١٢३४५", " \t\n\r  　\u0085 ",
-             "!?.,;:-_()[]{}\"'`~@#$%^&*+=/\\|<>", "éèêëçàñßſİıǅ", "éäõ̧\U00011d42",
-             "中文字符漢字日本語ひらがなカタカナ한국어", "العربيةעברית", "ελληνικάкириллица", "😀👍🏽🇫🇷❤️‍🔥",
+             "!?.,;:-_()[]{}\"'`~@#$%^&*+=/\\|<>", "éèêëçàñßſİıǅ", "e\u0301a\u0308o\u0303\u0327\U00011d42",
+             "中文字符漢字日本語ひらがなカタカナ한국어", "العربيةעברית", "ελληνικάкириллица", "😀👍🏽🇫🇷❤\ufe0f‍🔥",
              "​‍﻿­", "Kſ'S'T'RE'VE'M'LL'D's't're've'm'll'd"]
 
     def text() -> str:
@@ -515,21 +517,20 @@ def main() -> int:
         if args.falsify:
             names = list(FALSIFICATIONS) if "all" in args.falsify else args.falsify
             print(f"{variant}: falsifying {len(names)}")
-            missed = falsify(names, reference, lambda: vendor)
+            missed = falsify(names, reference, vendor)
             if missed:
                 problems.append(f"[{variant}] {missed} perturbation(s) not caught")
             continue
         chosen = cases(args.quick)
         if variant != "2b" and not args.quick:
-            chosen = [chosen[0], chosen[1], chosen[3]]
+            chosen = [case for case in chosen if case.also_4b]
         for number, case in enumerate(chosen):
             started = time.perf_counter()
             want = reference.run(case)
             failures = compare(case, want, vendor)
             if number == 0 or "sampled" in case.name:
                 failures += [f"mozo: {f}" for f in against_mozo(variant, case, want)]
-            stages = 3 + vendor.spec.vision.depth + len(vendor.spec.vision.deepstack) + 2 \
-                + vendor.spec.text.layers + 1 + len(want["logits"]) + 2
+            stages = len(stage_names(vendor.spec)) + len(want["logits"]) + 2  # + ids + text
             total += stages
             print(f"  {variant} {case.name}: {len(want['input_ids'][0])} prompt tokens, "
                   f"{len(want['ids'])} written, {stages} comparisons, "

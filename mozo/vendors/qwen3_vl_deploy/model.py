@@ -49,6 +49,14 @@ class Sampling:
     top_k: int = 0
     seed: int = 0
 
+    def __post_init__(self) -> None:
+        if not self.temperature >= 0:
+            raise ValueError(f"temperature must be 0 (greedy) or more, got {self.temperature}")
+        if not 0 < self.top_p <= 1:
+            raise ValueError(f"top_p must be above 0 and at most 1, got {self.top_p}")
+        if isinstance(self.top_k, bool) or not isinstance(self.top_k, int) or self.top_k < 0:
+            raise ValueError(f"top_k must be a whole number, 0 to keep every token, got {self.top_k!r}")
+
     @property
     def greedy(self) -> bool:
         return self.temperature == 0
@@ -123,6 +131,8 @@ class Qwen3VL(nn.Module):
             record["positions"] = positions
         cache = Cache(self.spec.text.layers)
         hidden = self.language_model(embeds, positions.to(device), cache, mask, deepstack, record)
+        # Nothing of the prefill but the cache and the last hidden state is needed to decode.
+        del embeds, image, deepstack, mask, pixels
 
         ids: list[int] = []
         stopped = False

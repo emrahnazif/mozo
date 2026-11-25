@@ -5,7 +5,7 @@ Two measurements.
 
 ``latency`` -- one image and one prompt, a fixed number of new tokens, greedy: mozo's runtimes
 against ``transformers`` (when installed) on the same device, the same weights and inputs,
-interleaved across trials so drift moves both sides together, the device synchronised. Prefill
+each loaded, timed and freed in turn (a 12 GB GPU holds one), the device synchronised. Prefill
 (image through to the first token) is reported apart from the per-token decode, because the
 image is most of the cost.
 
@@ -34,16 +34,19 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from common import synchronise  # noqa: E402
+from common import FIXTURES, synchronise  # noqa: E402
 
-FIXTURE = ROOT / "tests" / "fixtures" / "images" / "example.jpg"
+from mozo.image import load_image  # noqa: E402
+from mozo.runtimes import free_device_memory  # noqa: E402
+from mozo.vendors.qwen3_vl_deploy import MAX_PIXELS, MIN_PIXELS  # noqa: E402
+
+FIXTURE = FIXTURES / "example.jpg"
 PROMPT = "Describe this image."
 VQA_PROMPT = "{question}\nAnswer the question using a single word or phrase."
 
@@ -83,7 +86,7 @@ def latency(args) -> None:
     so the sides are not interleaved -- run it on a quiet machine."""
     from PIL import Image
 
-    rgb = np.array(Image.open(FIXTURE).convert("RGB"))
+    rgb = load_image(str(FIXTURE))
 
     def mozo_side(runtime):
         model = _mozo(args.variant, args.device, runtime)
@@ -100,7 +103,7 @@ def latency(args) -> None:
                                                  {"type": "text", "text": PROMPT}]}]
         text = proc.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = proc(text=[text], images=[image], return_tensors="pt",
-                      size={"longest_edge": 2_621_440, "shortest_edge": 65_536}).to(args.device)
+                      size={"longest_edge": MAX_PIXELS, "shortest_edge": MIN_PIXELS}).to(args.device)
 
         def generate(steps):
             with torch.inference_mode():
@@ -114,7 +117,7 @@ def latency(args) -> None:
     print(f"{args.variant} on {args.device}, {args.tokens} new tokens, median of {args.trials}:")
     for name, build in sides:
         if args.device.startswith("cuda"):
-            torch.cuda.empty_cache()
+            free_device_memory()
             torch.cuda.reset_peak_memory_stats()
         try:
             holder, run = build()
@@ -169,7 +172,7 @@ def vqa(args) -> None:
               f"questions, {took / len(questions):.2f} s each, peak {_peak(args.device)}", flush=True)
         del model
         if args.device.startswith("cuda"):
-            torch.cuda.empty_cache()
+            free_device_memory()
             torch.cuda.reset_peak_memory_stats()
     base = args.baseline if args.baseline in results else None
     if base:

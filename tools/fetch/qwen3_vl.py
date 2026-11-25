@@ -179,13 +179,13 @@ def character_classes(published: str) -> dict[str, object]:
     def reordered(sequence: str) -> bool:
         return nfd.normalize_str(sequence) != sequence
 
-    probes = {230: "́"}
+    probes = {230: "\u0301"}
     for codepoint in range(0x110000):
         character = chr(codepoint)
         klass = unicodedata.combining(character)
         if not klass or klass in probes or nfd.normalize_str(character) != character:
             continue
-        if reordered(f"á{character}" if klass < 230 else f"a{character}́"):
+        if reordered(f"a\u0301{character}" if klass < 230 else f"a{character}\u0301"):
             probes[klass] = character
     canonical_parts = {
         chr(int(part, 16))
@@ -267,7 +267,7 @@ def derive_vocab() -> None:
     with urllib.request.urlopen(resolve("2b", "tokenizer.json"), timeout=300) as response:
         published = response.read().decode("utf-8")
     spec = json.loads(published)
-    for variant in SPECS:
+    for variant in (v for v in SPECS if v != "2b"):
         with urllib.request.urlopen(resolve(variant, "tokenizer.json"), timeout=300) as response:
             if response.read().decode("utf-8") != published:
                 raise SystemExit(f"{variant}'s tokenizer.json differs from 2b's; one asset cannot "

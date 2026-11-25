@@ -62,6 +62,13 @@ def test_auto_takes_the_exact_path_on_the_cpu():
     assert select_runtime("cpu", ["torch-bf16"], derives=DERIVES[FAMILY]) == "torch-fp32"
 
 
+def test_auto_takes_bf16_on_cuda():
+    """The weights' own precision: fp32 does not fit the 4B model on a 12 GB card."""
+    from mozo.runtimes import select_runtime
+
+    assert select_runtime("cuda", ["torch-bf16"], derives=DERIVES[FAMILY]) == "torch-bf16"
+
+
 def test_bf16_is_refused_on_the_cpu():
     """Measured slower than fp32 there, and different from the second token."""
     from mozo.runtimes import RuntimeError_, select_runtime
@@ -90,9 +97,9 @@ def test_4b_head_dim_is_not_width_over_heads():
 @pytest.mark.parametrize("text, ids", [
     ("Describe this image.", [74785, 419, 2168, 13]),
     ("ſ's 'LL", [144815, 594, 364, 4086]),                     # ſ folds onto s in (?i:'s)
-    ("Café 1234", [34, 2577, 963, 220, 16, 17, 18, 19]),   # NFC first, digits one by one
+    ("Cafe\u0301 1234", [34, 2577, 963, 220, 16, 17, 18, 19]),   # NFC first, digits one by one
     ("这张图片里有什么？😀", [108893, 45930, 69249, 104139, 11319, 141334]),
-    ("á\U00011d42́", [1953, 128240, 113, 224, 53839]),  # a mark the reference won't reorder
+    ("a\u0301\U00011d42\u0301", [1953, 128240, 113, 224, 53839]),  # a mark the reference won't reorder
     ("x  \n\n y\r\n", [87, 18611, 379, 319]),
 ])
 def test_token_ids_match_the_reference(text, ids):

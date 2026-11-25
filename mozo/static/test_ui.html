@@ -703,13 +703,13 @@ function onFamily() {
   if (boxed) state.mode = "box";
   // A floor is the point for a detector, and wrong for a classifier: dropping a phrase below
   // it drops a class, and a classifier that drops a class has not classified.
+  // A model that answers in words takes one question, not a list of concepts, and has no floor.
+  const words = answers();
   show("group-threshold",
-       (task === "object_detection" || entry.prompted)
-       && task !== "zero_shot_classification" && task !== "image_to_text");
-  // A model that answers in words takes one question, not a list of concepts to find.
-  const answers = task === "image_to_text";
-  show("group-text", entry.prompted && !answers);
-  show("group-question", answers);
+       (task === "object_detection" || entry.prompted) && !words
+       && task !== "zero_shot_classification");
+  show("group-text", entry.prompted && !words);
+  show("group-question", words);
   show("group-prompt", promptable || boxed);
   show("prompt-mode", promptable);
   show("group-name", promptable);
@@ -733,6 +733,7 @@ const placesBox = () => task() === "promptable_segmentation" || boxed();
 // Served by /models rather than listed here: which tasks want ?text= is the
 // registry's to say, and a copy kept in step by hand is a copy that drifts.
 const prompted = () => state.catalogue[$("family").value]?.prompted;
+const answers = () => task() === "image_to_text";
 
 /* --- Image --------------------------------------------------------------- */
 
@@ -775,7 +776,7 @@ async function run() {
   if (threshold !== "" && $("group-threshold").classList.contains("on")) {
     params.set("threshold", threshold);
   }
-  if (current === "image_to_text") {
+  if (answers()) {
     const question = $("question").value.trim();
     if (!question) {
       showStatus("failed", "This model needs a question",
@@ -849,7 +850,7 @@ async function run() {
       // task would silently render an inpainting story about itself.
       if (task() === "depth_estimation") await takeDepth(response);
       else await takeImage(response, task());
-    } else if (task() === "image_to_text") {
+    } else if (answers()) {
       takeAnswer(await response.text());
     } else {
       takeDetections(await response.text());

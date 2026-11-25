@@ -145,16 +145,10 @@ class Qwen3VLPredictor:
         """
         if not isinstance(prompt, str):
             raise ValueError(f"prompt must be one string, got {type(prompt).__name__}")
-        if not temperature >= 0:
-            raise ValueError(f"temperature must be 0 (greedy) or more, got {temperature}")
-        if not 0 < top_p <= 1:
-            raise ValueError(f"top_p must be above 0 and at most 1, got {top_p}")
-        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 0:
-            raise ValueError(f"top_k must be a whole number, 0 to keep every token, got {top_k!r}")
         if isinstance(max_pixels, bool) or not isinstance(max_pixels, int):
             raise ValueError(f"max_pixels must be a whole number, got {max_pixels!r}")
         answer = self._model.generate(
             load_image(image), prompt, max_new_tokens,
-            Sampling(float(temperature), float(top_p), int(top_k), int(seed)), max_pixels)
+            Sampling(float(temperature), float(top_p), top_k, int(seed)), max_pixels)
         return Generation(answer.text, answer.finish_reason, answer.prompt_tokens,
                           answer.generated_tokens)

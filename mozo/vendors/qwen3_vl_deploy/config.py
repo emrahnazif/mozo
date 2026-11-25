@@ -107,10 +107,7 @@ class Tokens:
     """The ids the prompt template and the stopping rule use, from the published tokenizer."""
 
     endoftext: int = 151_643
-    im_start: int = 151_644
     im_end: int = 151_645
-    vision_start: int = 151_652
-    vision_end: int = 151_653
     image_pad: int = 151_655
 
     @property

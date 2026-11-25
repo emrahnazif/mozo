@@ -143,8 +143,13 @@ def get_default_device() -> str:
 #: 1098 ms on torch MPS -- 1.3x, not 5x -- and 4488 ms on torch CPU. Both models prefer CoreML
 #: here; only one of them dramatically. A family whose margin came out under 1.0 would belong in
 #: ``EXECUTES`` or unpublished, not in a third preference table.
+#:
+#: ``torch-bf16`` is published by one family, Qwen3-VL, whose weights are bfloat16 as trained: on a
+#: 12 GB RTX 3060 it answered 295 of 300 VQAv2 questions exactly as fp32 did (VQA accuracy 76.9%
+#: against 77.3%) at 2.4x fp32's speed and half its memory -- and the 4B model does not fit a 12 GB
+#: card in fp32 at all, so preferring fp32 there would make ``auto`` fail. It runs on CUDA only.
 _PREFERENCE: dict[str, tuple[str, ...]] = {
-    "cuda": ("tensorrt-fp32", "torch-fp16", "torch-fp32", "onnx-fp32"),
+    "cuda": ("tensorrt-fp32", "torch-fp16", "torch-bf16", "torch-fp32", "onnx-fp32"),
     "cpu": ("torch-fp32", "onnx-fp32"),
     "mps": ("coreml-fp32", "torch-fp32", "onnx-fp32"),
 }

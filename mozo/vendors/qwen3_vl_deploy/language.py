@@ -134,7 +134,7 @@ class Layer(nn.Module):
         return x + self.mlp(self.post_attention_layernorm(x))
 
 
-def rope_index(input_ids: torch.Tensor, image_token: int, grid: tuple[int, int, int] | None,
+def rope_index(input_ids: torch.Tensor, image_token: int, grid: tuple[int, int, int],
                merge: int) -> tuple[torch.Tensor, int]:
     """``get_rope_index`` for one sequence holding at most one image: ``((3, 1, L), delta)``.
 
@@ -175,10 +175,12 @@ class TextDecoder(nn.Module):
         self.embed_tokens = nn.Embedding(spec.vocab, spec.width)
         self.layers = nn.ModuleList(Layer(spec, i) for i in range(spec.layers))
         self.norm = RMSNorm(spec.width, spec.norm_eps)
-        self.register_buffer(
-            "inv_freq",
-            1.0 / (spec.rope_theta ** (torch.arange(0, spec.head_dim, 2, dtype=torch.float) / spec.head_dim)),
-            persistent=False)
+        self.register_buffer("inv_freq", self.rotary_frequencies(), persistent=False)
+
+    def rotary_frequencies(self) -> torch.Tensor:
+        """Upstream's ``inv_freq``, computed on the CPU in float32 as upstream computes it."""
+        d = self.spec.head_dim
+        return 1.0 / (self.spec.rope_theta ** (torch.arange(0, d, 2, dtype=torch.float) / d))
 
     def _rotary(self, x: torch.Tensor, positions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """``Qwen3VLTextRotaryEmbedding``: *positions* ``(3, 1, L)``."""

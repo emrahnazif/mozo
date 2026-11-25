@@ -183,15 +183,16 @@ class VisionTower(nn.Module):
         self.spec = spec
         self.patch_embed = PatchEmbed(spec)
         self.pos_embed = nn.Embedding(spec.grid * spec.grid, spec.width)
-        spatial = spec.head_dim // 2
-        self.register_buffer(
-            "inv_freq",
-            1.0 / (spec.rope_theta ** (torch.arange(0, spatial, 2, dtype=torch.float) / spatial)),
-            persistent=False)
+        self.register_buffer("inv_freq", self.rotary_frequencies(), persistent=False)
         self.blocks = nn.ModuleList(Block(spec) for _ in range(spec.depth))
         self.merger = PatchMerger(spec, postshuffle=False)
         self.deepstack_merger_list = nn.ModuleList(
             PatchMerger(spec, postshuffle=True) for _ in spec.deepstack)
+
+    def rotary_frequencies(self) -> torch.Tensor:
+        """Upstream's ``inv_freq``, computed on the CPU in float32 as upstream computes it."""
+        spatial = self.spec.head_dim // 2
+        return 1.0 / (self.spec.rope_theta ** (torch.arange(0, spatial, 2, dtype=torch.float) / spatial))
 
     def _rotary(self, x: torch.Tensor, positions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         freqs = positions[..., None].float() * self.inv_freq.to(device=x.device, dtype=torch.float)

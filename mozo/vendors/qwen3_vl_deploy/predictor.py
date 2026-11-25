@@ -51,7 +51,6 @@ class Generator:
     def __init__(self, weights: str | Path, spec: Spec, device: str = "cpu",
                  dtype: torch.dtype = torch.float32) -> None:
         self.spec = spec
-        self.device = device
         self.tokenizer = Tokenizer()
         self.model = load_model(spec, weights, device, dtype)
 
@@ -65,8 +64,9 @@ class Generator:
 
         Raises:
             ValueError: For a blank prompt or one holding a control token, a ``max_new_tokens``
-                below 1, a ``max_pixels`` outside ``[65536, 16777216]``, an image more than 200 times
-                wider than tall (or the reverse), or sampling settings out of range.
+                below 1, a ``max_pixels`` outside ``[65536, 16777216]``, or an image more than 200
+                times wider than tall (or the reverse). :class:`~.model.Sampling` refuses its own
+                settings out of range when it is built.
         """
         self.tokenizer.check(prompt)
         if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens < 1:

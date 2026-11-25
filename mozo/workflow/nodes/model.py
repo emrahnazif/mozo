@@ -221,6 +221,17 @@ def edgetam_boxes(image: Image, detections: Detections, models: Models,
 
 
 @node(category="Segment", exclusive=True)
+def sam_hq_boxes(image: Image, detections: Detections, models: Models,
+                 variant: variants("sam_hq") = "tiny") -> Detections:
+    """HQ-SAM -- SAM made fine: a mask for each box it is given, the rows otherwise unchanged.
+
+    Everything ``sam2_boxes`` promises, with masks that keep thin parts -- spokes, legs, rails,
+    wires -- that SAM 2 rounds off.
+    """
+    return _segment_boxes(models, "sam_hq", variant, image, detections)
+
+
+@node(category="Segment", exclusive=True)
 def sam3_boxes(image: Image, detections: Detections, models: Models,
                variant: variants("sam3") = "sam3") -> Detections:
     """SAM 3 by Meta -- a mask for each box it is given, the rows otherwise unchanged.

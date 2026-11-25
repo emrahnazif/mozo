@@ -1366,6 +1366,106 @@
         }
       }
     },
+    "sam_hq/base": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "sam_hq/base/2026-11-25/LICENSE",
+              "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+              "size": 11357
+            },
+            "NOTICE": {
+              "path": "sam_hq/base/2026-11-25/NOTICE",
+              "sha256": "5afb52fe0313d6f6cad6a478b84cdb638cffb38f5960a6b0d04852591898c372",
+              "size": 983
+            },
+            "torch-fp32": {
+              "path": "sam_hq/base/2026-11-25/torch-fp32.pth",
+              "sha256": "14a9d662cd6f5a9c2dba6d40ab0058d88d287e4a18fd6fdc6ad5fb1a3fdeaa57",
+              "size": 379335069
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "sam_hq/huge": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "sam_hq/huge/2026-11-25/LICENSE",
+              "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+              "size": 11357
+            },
+            "NOTICE": {
+              "path": "sam_hq/huge/2026-11-25/NOTICE",
+              "sha256": "38fa080e3447ad2b0444909a81557a8fd1d9f60e9461af6020df3bde1d5ec0dc",
+              "size": 983
+            },
+            "torch-fp32": {
+              "path": "sam_hq/huge/2026-11-25/torch-fp32.pth",
+              "sha256": "a7ac14a085326d9fa6199c8c698c4f0e7280afdbb974d2c4660ec60877b45e35",
+              "size": 2570940653
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "sam_hq/large": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "sam_hq/large/2026-11-25/LICENSE",
+              "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+              "size": 11357
+            },
+            "NOTICE": {
+              "path": "sam_hq/large/2026-11-25/NOTICE",
+              "sha256": "45ada13ecd9cb7e6c8adc9201df05b26236701877da43070cc6f2439246701e1",
+              "size": 984
+            },
+            "torch-fp32": {
+              "path": "sam_hq/large/2026-11-25/torch-fp32.pth",
+              "sha256": "e1a6c385d62bf005ded91a54d5ec55c985cfc4103ef89c08d90f39f04934c343",
+              "size": 1254865805
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "sam_hq/tiny": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "sam_hq/tiny/2026-11-25/LICENSE",
+              "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+              "size": 11357
+            },
+            "NOTICE": {
+              "path": "sam_hq/tiny/2026-11-25/NOTICE",
+              "sha256": "31ca8b7ac13b7bbc9c59a2038e9fdbaf75007b505f507e4f8ec6e389acec7d53",
+              "size": 1094
+            },
+            "torch-fp32": {
+              "path": "sam_hq/tiny/2026-11-25/torch-fp32.pth",
+              "sha256": "0f32c075ccdd870ae54db2f7630e7a0878ede5a2b06d05d6fe02c65a82fb7196",
+              "size": 42526881
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
     "siglip2/base-224": {
       "latest": "2026-08-23",
       "revisions": {

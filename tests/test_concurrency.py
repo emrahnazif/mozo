@@ -21,7 +21,7 @@ from conftest import executable_runtimes
 
 #: The families the thread-safety audit found shared state in, one small variant each, and
 #: whether a call needs a click.
-FAMILIES = {("sam2", "tiny"): True, ("edgetam", "edgetam"): True,
+FAMILIES = {("sam2", "tiny"): True, ("edgetam", "edgetam"): True, ("sam_hq", "tiny"): True,
             ("yolov8", "nano"): False, ("rfdetr", "nano"): False}
 THREADS, CALLS = 4, 8
 

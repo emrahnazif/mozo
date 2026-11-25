@@ -116,7 +116,8 @@ def _save(source, path, *answers):
 
 class TestSegmentingBoxes:
     @pytest.mark.parametrize("node, family", [("edgetam_boxes", "edgetam"), ("sam2_boxes", "sam2"),
-                                              ("sam3_boxes", "sam3")])
+                                              ("sam3_boxes", "sam3"),
+                                              ("sam_hq_boxes", "sam_hq")])
     def test_every_row_comes_back_in_order_with_its_fields_and_a_mask(self, node, family):
         out = _detect_then_segment(node).run(
             models=Provider(grounding_dino=Detector(THREE), **{family: Segmenter()}))["segment"]

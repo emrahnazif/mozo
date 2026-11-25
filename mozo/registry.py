@@ -50,7 +50,7 @@ BOXED = frozenset({"pose_estimation", "image_inpainting"})
 #: set, because a task name cannot say that one of its families also does this. Read before
 #: anything is loaded, for the reason PROMPTED is, and served by ``/models`` so a page knows when
 #: to let a picture be clicked.
-CLICKABLE = frozenset({"edgetam", "sam2", "sam3"})
+CLICKABLE = frozenset({"edgetam", "sam2", "sam3", "sam_hq"})
 
 #: What each family can encode, and from what. A family absent from here does not encode at all.
 #:
@@ -82,7 +82,7 @@ ENCODE_ONLY = frozenset({"text_embedding"})
 #: adapters have ``prepare(image)``, and ``/predict`` accepts ``?sha256=`` for an image
 #: ``/prepare`` was given. Read before anything is loaded, for the reason ENCODES is: an endpoint
 #: refuses the rest before decoding an upload, and a page reads it to know when to offer it.
-PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
+PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3", "sam_hq"})
 
 #: Which frameworks each family's adapter has code to execute. A family absent from here runs
 #: whatever it publishes. Passed to :func:`mozo.runtimes.select_runtime` as ``executes``.
@@ -93,7 +93,8 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 #: The adapters read it from here, so there is one statement of it.
 EXECUTES: dict[str, tuple[str, ...]] = {
     **{family: ("torch",)
-       for family in ("ben2", "clip", "easyocr", "edgetam", "moebius", "sam2", "siglip2")},
+       for family in ("ben2", "clip", "easyocr", "edgetam", "moebius", "sam2", "sam_hq",
+                      "siglip2")},
     # A TensorRT engine exported from the checkpoint at the input size the user picks.
     "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
@@ -326,6 +327,19 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'the video tracker. Unlike SAM 3, the weights are Apache 2.0 like the code.'
         ),
         'variants': ['tiny', 'small', 'base_plus', 'large'],
+    },
+
+    'sam_hq': {
+        'adapter_class': 'SamHqPredictor',
+        'module': 'mozo.adapters.sam_hq',
+        'task_type': 'promptable_segmentation',
+        'description': (
+            'HQ-SAM by ETH Zurich & HKUST — promptable segmentation for fine structure. SAM with '
+            'one extra output token that fuses an early encoder feature, so a box or a click '
+            'around a bicycle, a chair or an insect returns its spokes, rails and legs rather '
+            'than a blob. 4 variants (tiny/base/large/huge). Apache 2.0 on the code and the weights.'
+        ),
+        'variants': ['tiny', 'base', 'large', 'huge'],
     },
 
     'sam3': {

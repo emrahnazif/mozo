@@ -136,6 +136,11 @@ DERIVES: dict[str, dict[str, str]] = {
     "mayaku": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
     # The fp32 engine is exact, at 1.6x torch.
     "omdet_turbo": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # RF-DETR's shape, measured the same way (RTX 3090, 500 COCO images per variant): the fp32
+    # engine changed no detection and left AP identical, at 1.9x (``xlarge``) to 5.4x (``nano``)
+    # torch CUDA's forward pass. fp16 on request only, where its graph is published. See
+    # docs/models/deim.md.
+    "deim": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
 #: Runtimes a family's ``auto`` tries before the shared order (:data:`mozo.runtimes._PREFERENCE`),

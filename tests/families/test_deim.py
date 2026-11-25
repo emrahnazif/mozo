@@ -26,6 +26,9 @@ from mozo.weights import WeightsError, artifacts
 
 FAMILY = "deim"
 ALL = ["nano", "small", "medium", "large", "xlarge", "xlarge-obj365"]
+#: Variants publishing an fp16 graph. nano's TensorRT fp16 engine was slower than its fp32 one
+#: (2.4 against 1.9 ms on an RTX 3090), so it publishes none.
+FP16 = ALL[1:]
 RECORDED = Path(__file__).resolve().parent.parent / "fixtures" / "deim_example.json"
 
 #: The fixture photograph is two people at a desk; COCO calls what is on it these things. A model
@@ -100,6 +103,7 @@ class TestPublished:
         if not keys:
             pytest.skip(f"{FAMILY}/{variant} is not in the manifest")
         assert {"torch-fp32", "onnx-fp32", "labels"} <= set(keys)
+        assert ("onnx-fp16" in keys) == (variant in FP16)
 
     @pytest.mark.parametrize("variant", ALL)
     def test_every_variant_ships_its_terms(self, variant):
@@ -241,7 +245,10 @@ class TestTensorRT:
         monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: True)
         for variant in ALL:
             assert self._choose("cuda", variant) == "tensorrt-fp32", variant
+        for variant in FP16:
             assert self._choose("cuda", variant, "tensorrt-fp16") == "tensorrt-fp16", variant
+        with pytest.raises(Exception, match="not published"):
+            self._choose("cuda", "nano", "tensorrt-fp16")
         assert self._choose("cpu", "nano") == "torch-fp32"
 
     def test_without_tensorrt_cuda_stays_on_torch(self, monkeypatch):
@@ -274,8 +281,8 @@ class TestTensorRT:
         assert worst <= 0.1
 
     def test_the_fp16_engine_keeps_the_confident_detections(self, predictor_for, image):
-        want = predictor_for("nano").predict(image, threshold=0.7)
-        got = self._on_cuda(predictor_for, "nano", "tensorrt-fp16").predict(image, threshold=0.4)
+        want = predictor_for("small").predict(image, threshold=0.7)
+        got = self._on_cuda(predictor_for, "small", "tensorrt-fp16").predict(image, threshold=0.4)
         assert len(want) > 0
         for found in want:
             nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))

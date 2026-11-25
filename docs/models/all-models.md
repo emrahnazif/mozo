@@ -1,4 +1,4 @@
-# All 82 models, by task
+# All 86 models, by task
 
 <!--
 summary: Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size.
@@ -6,7 +6,7 @@ label: All models
 keywords: mozo, model catalogue, computer vision models, licences, runtimes
 -->
 
-Mozo serves 82 variants across 18 families. A model is named `family/variant`, the same in Python
+Mozo serves 86 variants across 19 families. A model is named `family/variant`, the same in Python
 (`mozo.get_model("rfdetr/medium")`) and over HTTP (`/predict/rfdetr/medium`). Each family's page
 has examples, every parameter, and how the model behaves.
 
@@ -64,6 +64,7 @@ Point at something and get a mask of the thing you pointed at.
 |---|---|---|---|---|
 | [SAM 2](/docs/models/sam2.md) | `tiny` `small` `base_plus` `large` | Apache-2.0 | torch | 156–898 MB |
 | [EdgeTAM](/docs/models/edgetam.md) | `edgetam` | Apache-2.0 | torch | 56 MB |
+| [HQ-SAM](/docs/models/sam-hq.md) | `tiny` `base` `large` `huge` | Apache-2.0 | torch | 43 MB–2.6 GB |
 | [SAM 3](/docs/models/sam3.md) | `sam3` | SAM License | torch, coreml | 3.5 GB |
 
 ## Classification from words, and image embeddings

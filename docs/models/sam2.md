@@ -10,7 +10,8 @@ SAM 2 segments the thing you point at. Give it a click, a box, or both, and it r
 its box and the model's own estimate of how good the mask is. It does not know what it segmented:
 the mask is unnamed unless you name it. For masks of everything matching a phrase, see
 [SAM 3](/docs/models/sam3.md); for a smaller, faster model with the same prompts, see
-[EdgeTAM](/docs/models/edgetam.md).
+[EdgeTAM](/docs/models/edgetam.md); for finer outlines of thin structures, see
+[HQ-SAM](/docs/models/sam-hq.md).
 
 ## Quick start
 
@@ -181,7 +182,7 @@ annotation tool talking to a GPU machine down the hall, for example. Without it,
 the picture again. Code running mozo in-process needs only `prepare(image)`. A client that never
 sends `?sha256=` is answered exactly as before.
 
-[EdgeTAM](/docs/models/edgetam.md), [SAM 3](/docs/models/sam3.md) and
+[EdgeTAM](/docs/models/edgetam.md), [HQ-SAM](/docs/models/sam-hq.md), [SAM 3](/docs/models/sam3.md) and
 [OWLv2](/docs/models/owlv2.md) can be prepared too; `GET /models` says which families can.
 
 ## Weights and licence

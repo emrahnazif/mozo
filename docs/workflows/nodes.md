@@ -55,6 +55,7 @@ what runs.
 | `sam3` | image → detections | `text` (a list of phrases), `variant`=sam3, `threshold`=0.5 | SAM 3 by Meta: masks for every instance of a concept you name. |
 | `sam2_boxes` | image, detections → detections | `variant`=tiny | SAM 2 by Meta: a mask for each box it is given, the rows otherwise unchanged. |
 | `edgetam_boxes` | image, detections → detections | `variant`=edgetam | EdgeTAM: SAM 2 made small: a mask for each box it is given, the rows otherwise unchanged. |
+| `sam_hq_boxes` | image, detections → detections | `variant`=tiny | HQ-SAM: SAM made fine: a mask for each box it is given, the rows otherwise unchanged. |
 | `sam3_boxes` | image, detections → detections | `variant`=sam3 | SAM 3 by Meta: a mask for each box it is given, the rows otherwise unchanged. |
 
 ## Edit
@@ -150,9 +151,10 @@ the same.
 
 ## Boxes into masks
 
-`sam2_boxes`, `edgetam_boxes` and `sam3_boxes` add a mask to every box they are given, in one call
+`sam2_boxes`, `edgetam_boxes`, `sam_hq_boxes` and `sam3_boxes` add a mask to every box they are given, in one call
 per image, and keep every row as it came: same order, class, name, score and box. A row whose mask
 comes back empty keeps its box with an empty mask. An image with no boxes never runs the model.
+Pick `sam_hq_boxes` when the objects have thin parts -- chairs, bicycles, insects, plants.
 `sam3_boxes` after a `sam3` node on the same image reuses that node's image encode.
 
 Three graphs cover most annotation jobs:

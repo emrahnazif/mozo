@@ -179,7 +179,7 @@ application registers appear in its palette, because the palette is the node reg
 
 ## What it cannot do yet
 
-- **Zones**, and **clicks** for SAM 2, EdgeTAM and SAM 3. Both are pixel coordinates, and the editor
-  has no way to draw one yet. Boxes work: `sam2_boxes`, `edgetam_boxes` and `sam3_boxes` add masks
+- **Zones**, and **clicks** for SAM 2, EdgeTAM, HQ-SAM and SAM 3. Both are pixel coordinates, and the editor
+  has no way to draw one yet. Boxes work: `sam2_boxes`, `edgetam_boxes`, `sam_hq_boxes` and `sam3_boxes` add masks
   to the boxes another node found. For clicks, call the model from
   [Python](/docs/models/sam2.md).

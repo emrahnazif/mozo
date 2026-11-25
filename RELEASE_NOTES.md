@@ -1,5 +1,15 @@
 ## Unreleased
 
+- **New family: HQ-SAM (`sam_hq`), click-and-box segmentation that keeps thin parts.** Four sizes,
+  `tiny` (43 MB, runs on a CPU), `base`, `large` and `huge` (2.6 GB). It takes the same prompts and
+  returns the same result as SAM 2. On HQ-SAM's four fine-structure test sets (1,537 images of
+  bicycles, insects, chairs, plants), `base` outlines objects better than SAM 2 `large`: 86.5 mean
+  IoU against 83.6, and 78.7 boundary IoU against 76.5; `large` is the best of the four (88.0 and
+  80.9). `tiny` matches SAM 2 `tiny` in quality in less CPU time. A click returns three candidates, best first, like every promptable model in
+  mozo; the first is exactly what HQ-SAM's own code returns. A new workflow node, `sam_hq_boxes`,
+  adds a mask to each box a detector found. Code and weights are Apache-2.0; the weights are the
+  authors' files, unmodified.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

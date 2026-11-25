@@ -347,6 +347,33 @@ found traps it had not predicted, and the predicted ones were mostly real.
 - **Second passes are part of the model.** EasyOCR re-runs low-contrast crops and keeps the better
   read.
 
+### Generation (models that write, token by token)
+
+Found vendoring Qwen3-VL, the first such family.
+
+- **The reference's version moves every logit.** transformers 4.57.3 and 5.24.1 gave the same
+  pixels, prompt ids and 64 greedy tokens, and different logits at every step (up to 4.9e-04): the
+  vision tower's position interpolation was rewritten in 5.x. Pin the version and gate per step.
+- **Recomputing the whole sequence is not the cached step** (2–3e-05 on the logits). Never "check"
+  a decoding loop by re-running the prefix; grow the cache exactly as upstream does
+  (``DynamicLayer``: ``torch.cat`` onto an empty tensor, so even the prefill's keys are a copy).
+- **``logits_to_keep=1``**: ``generate`` projects only the last position. Without
+  ``MKL_CBWR=AVX2,STRICT`` that differed from the last row of a full projection by 1.1e-05 at
+  2,414 tokens; under it the two agree. Slice where upstream slices anyway.
+- **Sampling is exact if the warpers are.** Same order (temperature, top-k, top-p), same
+  ``softmax`` then ``torch.multinomial``, and a ``torch.Generator`` seeded as the reference's
+  ``torch.manual_seed`` -- the sampled ids then agree token for token on the CPU. A falsifier for
+  it fails at a *later step's logits* (the different token is fed back), not at the ids.
+- **The model's ``generation_config.json`` may sample by default**, so the model card's own example
+  answers differently on every run. Decide the default deliberately and say so.
+- **Control tokens in a prompt are instructions, not text.** ``<|im_end|>`` ends the user's turn,
+  ``<|image_pad|>`` claims to be image. Refuse them.
+- **Two image-processor backends disagree.** transformers 5's torchvision and PIL backends differ
+  by an 8-bit level; 4.57's slow processor even picked a different resolution. Name the one you
+  reproduce.
+- **bfloat16 on a CPU can be both slower and different** (2.7x fp32's time, a different answer
+  from the second token). Offer reduced precision per device, measured.
+
 ### Things that are upstream's behaviour, not bugs to fix
 
 Reproduce them, and record them:

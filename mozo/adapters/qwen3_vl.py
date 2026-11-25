@@ -19,7 +19,7 @@ word is written. Halving ``max_pixels`` roughly halves that; fine print and smal
 first.
 
 **On CUDA it runs in bfloat16** when the device is CUDA and ``runtime`` is ``auto``: the weights'
-own precision, at about a third of fp32's time and half its memory. bfloat16 is not bit-identical
+own precision, at about a quarter of fp32's time and under half its memory. bfloat16 is not bit-identical
 to fp32 and can change the words; ``runtime="torch-fp32"`` is the exact path.
 """
 

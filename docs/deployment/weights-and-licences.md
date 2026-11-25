@@ -54,14 +54,14 @@ runs it.
 
 ```bash
 MOZO_ENABLE=ben2,clip,easyocr,edgetam,granite_embedding_r2,grounding_dino,moebius,owlv2,\
-rfdetr,sam2,siglip2,vitpose,depth_anything_v2/small,depth_anything_v2/indoor-small,\
+qwen3_vl,rfdetr,sam2,siglip2,vitpose,depth_anything_v2/small,depth_anything_v2/indoor-small,\
 depth_anything_v2/indoor-base,depth_anything_v2/indoor-large,depth_anything_v2/outdoor-small,\
 depth_anything_v2/outdoor-base,depth_anything_v2/outdoor-large
 ```
 
-That is the 49 Apache-2.0 and MIT variants. Depth Anything V2 is named variant by variant because
+That is the 51 Apache-2.0 and MIT variants. Depth Anything V2 is named variant by variant because
 it is the one family whose licence is not the same for every variant. Because the list names what
-to offer rather than what to leave out, it still offers 49 after an upgrade that adds a family.
+to offer rather than what to leave out, it still offers 51 after an upgrade that adds a family.
 
 A server set this way never downloads or serves the weights it leaves out, through any route:
 a workflow that names one fails at that node instead of loading it.

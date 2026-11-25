@@ -1,5 +1,23 @@
 ## Unreleased
 
+- **New: Qwen3-VL, the first model in mozo that answers in words.** Ask a question about an image
+  and get the answer as text: `mozo.get_model("qwen3_vl/2b").predict("photo.jpg", "How many people
+  are there?")`. Two variants, the 2B and 4B Instruct models, Apache-2.0. The answer is a
+  `mozo.Generation`: the text, whether it finished or was cut off at `max_new_tokens`
+  (`finish_reason`), and how many tokens it read and wrote. Greedy by default, so the same question
+  gets the same answer; pass `temperature` (with `top_p`, `top_k` and `seed`) to sample. The image is
+  resized to at most `max_pixels`, 2.6 megapixels by default. On the CPU in fp32 the answer is token
+  for token, logit for logit, what `transformers` 5.24.1 gives, sampled answers included. On CUDA it
+  runs in bfloat16, the weights' own precision: on 300 VQAv2 questions, 295 answers were the same as
+  fp32's, at less than half the time and memory.
+- **A new task type, `image_to_text`**, for models that answer in words. Over HTTP it is
+  `/predict/{family}/{variant}` with the question as one `?text=`, and the answer comes back as JSON
+  (`text`, `finish_reason`, `prompt_tokens`, `generated_tokens`). New query parameters
+  `max_new_tokens`, `temperature`, `top_p`, `top_k` and `max_pixels`; `seed` already existed. The
+  test page has a question box and shows the answer.
+- **A new runtime name, `torch-bf16`**, for weights published in bfloat16. CUDA only: on the CPU it
+  measured slower than fp32 and changed answers.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

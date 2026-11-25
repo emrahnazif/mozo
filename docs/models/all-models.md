@@ -1,4 +1,4 @@
-# All 82 models, by task
+# All 84 models, by task
 
 <!--
 summary: Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size.
@@ -6,7 +6,7 @@ label: All models
 keywords: mozo, model catalogue, computer vision models, licences, runtimes
 -->
 
-Mozo serves 82 variants across 18 families. A model is named `family/variant`, the same in Python
+Mozo serves 84 variants across 19 families. A model is named `family/variant`, the same in Python
 (`mozo.get_model("rfdetr/medium")`) and over HTTP (`/predict/rfdetr/medium`). Each family's page
 has examples, every parameter, and how the model behaves.
 
@@ -84,6 +84,15 @@ not share a space with CLIP's or SigLIP 2's.
 | Family | Variants | Licence | Runtimes | Size |
 |---|---|---|---|---|
 | [Granite Embedding R2](/docs/models/granite-embedding-r2.md) | `small` | Apache-2.0 | torch, coreml | 95 MB |
+
+## Questions about an image, answered in words
+
+Ask anything about the image in plain language and get the answer as text, with whether it
+finished or was cut off at the token budget.
+
+| Family | Variants | Licence | Runtimes | Size |
+|---|---|---|---|---|
+| [Qwen3-VL](/docs/models/qwen3-vl.md) | `2b` `4b` | Apache-2.0 | torch | 4.3–8.9 GB |
 
 ## Text recognition
 

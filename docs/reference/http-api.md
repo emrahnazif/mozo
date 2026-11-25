@@ -29,13 +29,18 @@ parameter. Repeat a parameter to give several values.
 | `file` | all | The image. Leave it out only when naming a prepared image by `sha256`. |
 | `threshold` | detectors, prompted models | Confidence floor. Omitted, the family's own default applies. |
 | `labels` | detectors | Comma-separated class names replacing the model's own, such as `hardhat,vest`. |
-| `text` | prompted models | A phrase to look for. Repeat it for several: `?text=car&text=person`. Not comma-separated, so a phrase may contain a comma. |
+| `text` | prompted models | A phrase to look for. Repeat it for several: `?text=car&text=person`. Not comma-separated, so a phrase may contain a comma. For Qwen3-VL, the question, exactly once. |
 | `point` | SAM 2, EdgeTAM, SAM 3 | A click as `x,y` in the image's pixels. Each needs a `label`. On SAM 3, a click or `text`, not both. |
 | `label` | SAM 2, EdgeTAM, SAM 3 | `1` to include the matching point, `0` to exclude it. One per point, in order. No default. |
 | `box` | SAM 2, EdgeTAM, SAM 3, ViTPose, Moebius | A box as `x1,y1,x2,y2`. The segmenters segment it, ViTPose finds the joints of the person in it, Moebius removes it. |
 | `name` | SAM 2, EdgeTAM, SAM 3 | What to call what you pointed at. Omitted, `class_name` is `null`. |
 | `multimask` | SAM 2, EdgeTAM, SAM 3 | `true` (default) for three candidate masks ranked by predicted IoU, `false` for one. |
-| `seed` | Moebius | Which sample to draw. Default `0`. |
+| `seed` | Moebius, Qwen3-VL | Which sample to draw. Default `0`. Qwen3-VL reads it only when `temperature` is above 0. |
+| `max_new_tokens` | Qwen3-VL | The most tokens to write. Default `128`. |
+| `temperature` | Qwen3-VL | `0` (default) is greedy: the same answer every time. Above `0`, samples. |
+| `top_p` | Qwen3-VL | When sampling, keep the most likely tokens whose probabilities add up to this. Default `1`. |
+| `top_k` | Qwen3-VL | When sampling, keep this many most likely tokens. Default `0`, all. |
+| `max_pixels` | Qwen3-VL | Resize the image to at most this many pixels first, 65,536 to 16,777,216. Default 2,621,440. |
 | `sha256` | SAM 2, EdgeTAM, SAM 3, OWLv2 | The sha256 of an image this server holds from `/prepare`. Send it instead of `file`. |
 
 Responses by task:
@@ -47,6 +52,7 @@ Responses by task:
 | Depth Anything V2 | `image/png`, 16-bit. Headers `x-depth-unit` (`metres` or `none`), `x-depth-min` and `x-depth-max`: `depth = min + png / 65535 * (max - min)`. |
 | BEN2 | `image/png`: the photograph as RGBA, background transparent. |
 | Moebius | `image/png`: the photograph with every box painted out. |
+| Qwen3-VL | `application/json`: `{text, finish_reason, prompt_tokens, generated_tokens}`. `finish_reason` is `"length"` when the answer was cut off at `max_new_tokens`, `"stop"` when the model ended it. Two `text` parameters are refused with `400`. |
 
 A prepared image not held by this server (another worker, a restart, or dropped to stay within
 `MOZO_PREPARED_MB`) answers `404`. Send the file again with the same `sha256` and it is kept for the

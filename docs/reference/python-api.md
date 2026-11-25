@@ -197,6 +197,24 @@ Encode an `HxWx3` RGB or `HxWx4` RGBA `uint8` array as image bytes, the reverse 
 thin lines and mask edges, which JPEG blurs. An RGBA image needs a format that keeps transparency:
 `.png`, `.webp`, `.tif` or `.tiff`. Raises `ValueError` otherwise.
 
+## Generation
+
+```python
+mozo.Generation(text, finish_reason, prompt_tokens, generated_tokens)
+```
+
+What a model that answers in words returns from `predict` (Qwen3-VL). A frozen dataclass:
+
+| Field | Description |
+|---|---|
+| `text` | The answer, with the model's control tokens removed. |
+| `finish_reason` | `"stop"` if the model ended the answer, `"length"` if it reached `max_new_tokens` first and the text is cut off. |
+| `prompt_tokens` | Tokens read, the image's included. |
+| `generated_tokens` | Tokens written, the stopping token included. |
+
+`str(g)` is the text, and `g.to_dict()` the four fields, which is what `/predict` returns as JSON.
+There is no confidence number: the text is the model's continuation, not a checked fact.
+
 ## Model objects
 
 What `get_model` returns depends on the family; each model page lists its methods and their
@@ -204,14 +222,14 @@ arguments. These are shared:
 
 | Member | Description |
 |---|---|
-| `predict(image, ...)` | Run the model on one image. Every family except Granite Embedding R2. |
+| `predict(image, ...)` | Run the model on one image. Every family except Granite Embedding R2. Qwen3-VL's takes a prompt and returns a `mozo.Generation`: `text`, `finish_reason` (`"stop"` or `"length"`), `prompt_tokens`, `generated_tokens`, and `to_dict()`. |
 | `encode_image(image)` | Vectors for one image or a list of them, `(N, D)`. CLIP and SigLIP 2. |
 | `encode_text(text)` | Text vectors, `(N, D)`. CLIP, SigLIP 2 and Granite Embedding R2. |
 | `prepare(image)` | Run the image encode before the first prompt. SAM 2, EdgeTAM, SAM 3 and OWLv2. |
 | `cutout(image, ...)` | The photograph with its background made transparent. BEN2. |
 | `device` | The device it runs on. |
 | `runtime` | The artifact it runs from, such as `"torch-fp32"` or `"coreml-fp32"`. |
-| `revision` | The revision of the weights, on CLIP, SigLIP 2 and Granite Embedding R2. Store it with the vectors. |
+| `revision` | The revision of the weights, on CLIP, SigLIP 2, Granite Embedding R2 and Qwen3-VL. Store it with the vectors. |
 | `unit` | `"metres"` or `None`. Depth Anything V2. |
 
 `predict` may be called from several threads at once. That is safe on CPU, CUDA and ONNX Runtime;

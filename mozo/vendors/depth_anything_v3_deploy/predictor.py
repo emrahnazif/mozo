@@ -31,13 +31,12 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 import torchvision.transforms.functional as TF  # noqa: N812
 
-from .config import ModelSpec, get_spec
+from .config import PATCH_SIZE, ModelSpec, get_spec
 from .net import DepthAnything3Net, fill_sky
 
 # ImageNet statistics, as upstream's InputProcessor.NORMALIZE applies them.
 _MEAN = [0.485, 0.456, 0.406]
 _STD = [0.229, 0.224, 0.225]
-PATCH_SIZE = 14
 
 #: The seed of the generator the sky fill samples from, fresh on every call so the same image
 #: always gives the same depth. Upstream samples from torch's global RNG instead.
@@ -172,10 +171,6 @@ class Predictor:
         """:func:`preprocess` at this variant's processing size."""
         return preprocess(image, self.spec.process_res)
 
-    def postprocess(self, outputs: dict[str, torch.Tensor]) -> torch.Tensor:
-        """:func:`postprocess` for this variant."""
-        return postprocess(outputs, self.spec.sky)
-
     @torch.inference_mode()
     def predict(self, image: np.ndarray) -> torch.Tensor:
         """Estimate depth for one ``HxWx3`` uint8 RGB image.
@@ -185,4 +180,4 @@ class Predictor:
             larger is farther, on a scale of the model's choosing.
         """
         tensor = self.preprocess(image).to(self.device)
-        return self.postprocess(self.model(tensor))
+        return postprocess(self.model(tensor), self.spec.sky)

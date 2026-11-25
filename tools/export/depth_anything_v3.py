@@ -93,19 +93,19 @@ def _samples() -> list[np.ndarray]:
 class _Graph(torch.nn.Module):
     """The network as the graph runs it: pixels and shape inputs in, raw outputs out."""
 
-    def __init__(self, net: torch.nn.Module, sky: bool, autocast: bool) -> None:
+    def __init__(self, net: torch.nn.Module, outputs: tuple[str, ...], autocast: bool) -> None:
         super().__init__()
-        self.net, self.sky, self.autocast = net, sky, autocast
+        self.net, self.outputs, self.autocast = net, outputs, autocast
 
     def forward(self, pixels: torch.Tensor, *shape: torch.Tensor):
         with torch.autocast(pixels.device.type, dtype=torch.float16, enabled=self.autocast):
             out = self.net(pixels[:, None], list(shape))
-        return tuple(out[k][:, 0].float() for k in (("depth", "sky") if self.sky else ("depth",)))
+        return tuple(out[k][:, 0].float() for k in self.outputs)
 
 
 def _export(predictor: Predictor, destination: Path, autocast: bool) -> None:
     device = predictor.device
-    graph = _Graph(predictor.model, predictor.spec.sky, autocast).eval()
+    graph = _Graph(predictor.model, output_names(predictor.spec), autocast).eval()
     height, width = 378, 504
     pixels = torch.randn(1, 3, height, width, device=device)
     shape = predictor.model.shape_inputs(height, width, device)
@@ -142,8 +142,9 @@ def _check(predictor: Predictor, path: Path, autocast: bool) -> None:
         ort = OnnxRunner(path, device="cpu")
 
         def run(feed: list[torch.Tensor]) -> np.ndarray:
-            return ort._session.run(None, {name: t.cpu().numpy()
-                                           for name, t in zip(ort.inputs, feed)})[0][0]
+            # Called as the adapter calls it: the pixels, then the shape inputs by name.
+            extra = {name: t.cpu().numpy() for name, t in zip(ort.inputs[1:], feed[1:])}
+            return ort(feed[0].cpu().numpy(), **extra)[0][0]
     for i, rgb in enumerate(_samples()):
         pixels = predictor.preprocess(rgb)[:, 0].to(device)
         shape = predictor.model.shape_inputs(*pixels.shape[-2:], device)
@@ -158,7 +159,8 @@ def _check(predictor: Predictor, path: Path, autocast: bool) -> None:
                 half = half.cpu().numpy()
                 reference = float(np.mean(np.abs(half - want) / np.abs(want)))
                 limit = FP16_TOLERANCE
-                measured, note = mean, f"mean rel {mean:.2e}; autocast {reference:.2e}, limit {limit:.2e}"
+                measured = mean
+                note = f"mean rel {mean:.2e}; autocast {reference:.2e}, limit {limit:.2e}"
             else:
                 limit = FP32_TOLERANCE
                 measured, note = worst, f"limit {FP32_TOLERANCE:.0e}; mean rel {mean:.2e}"
@@ -172,14 +174,14 @@ def _check(predictor: Predictor, path: Path, autocast: bool) -> None:
         shutil.rmtree(engines, ignore_errors=True)
 
 
-def export(variant: str, revision: str | None, weights_dir: Path, fp16: bool) -> None:
+def export(variant: str, weights_dir: Path, fp16: bool) -> None:
     key = "onnx-fp16" if fp16 else "onnx-fp32"
     print(f"\n=== {FAMILY}/{variant} {key}")
     if fp16 and not torch.cuda.is_available():
         raise SystemExit("the fp16 graph is exported on CUDA, under fp16 autocast")
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
-    checkpoint = resolve(FAMILY, variant, "torch-fp32", revision=revision)
+    checkpoint = resolve(FAMILY, variant, "torch-fp32")
     predictor = Predictor.from_pretrained(variant, weights=checkpoint,
                                           device="cuda" if fp16 else "cpu")
     destination = weights_dir / FAMILY / variant / checkpoint.parent.name / f"{key}.onnx"
@@ -202,7 +204,7 @@ def main() -> int:
     if unknown:
         raise SystemExit(f"unknown variants: {unknown}. Known: {list(MODEL_SPECS)}")
     for variant in args.variants:
-        export(variant, None, args.weights_dir, args.fp16)
+        export(variant, args.weights_dir, args.fp16)
     print("\nMerge the new artifacts into mozo/manifest.json.")
     return 0
 

@@ -27,6 +27,7 @@ published position embedding, exactly as the torch path computes them for itself
 
 from __future__ import annotations
 
+import functools
 import logging
 from typing import Union
 
@@ -38,7 +39,8 @@ from ..registry import DERIVES, EXECUTES
 from ..runtimes import TensorRTRunner, get_default_device, make_runner, select_runtime
 from ..vendors.depth_anything_v3_deploy import (MODEL_SPECS, Predictor, postprocess, preprocess,
                                                 resize, shape_inputs)
-from ..vendors.depth_anything_v3_deploy.graph import MIN_PATCHES, PATCH, profile
+from ..vendors.depth_anything_v3_deploy.config import PATCH_SIZE
+from ..vendors.depth_anything_v3_deploy.graph import MIN_PATCHES, profile
 from ..weights import artifacts, framework_of, parts, resolve
 
 _log = logging.getLogger(__name__)
@@ -91,9 +93,8 @@ class DepthAnythingV3Predictor:
         else:
             # The graph carries the network; the shape inputs need only the learned position
             # embedding, published on its own so a graph runtime never downloads the checkpoint.
-            self._pos_embed = torch.load(
-                resolve(self.FAMILY, variant, "pos_embed", revision=revision),
-                map_location="cpu", weights_only=True)
+            pos_embed = torch.load(resolve(self.FAMILY, variant, "pos_embed", revision=revision),
+                                   map_location="cpu", weights_only=True)
             if framework == "tensorrt":
                 # Built once per GPU and TensorRT version from the graph it derives from, for every
                 # shape the network can be fed: 3 to 36 patches a side.
@@ -106,21 +107,29 @@ class DepthAnythingV3Predictor:
                     resolve(self.FAMILY, variant, self.runtime, revision=revision),
                     self.runtime, device=self.device)
                 self._graph_device = torch.device("cpu")
+            # The shape inputs depend on the shape alone, and computing them costs 5-11 ms on a
+            # GPU and 0.2 s on a CPU per call -- as much as an fp16 engine's whole forward. The
+            # last two shapes are kept (up to 73 MiB each, for base): a video, a camera or a folder
+            # of one camera's photographs repeats one shape. The closure holds only what it needs.
+            spec, device = self._spec, self._graph_device
+            pos_embed = pos_embed.to(device)
+            self._shape_inputs = functools.lru_cache(maxsize=2)(
+                lambda height, width: tuple(shape_inputs(spec, pos_embed, height, width, device)))
         _log.info("Depth Anything 3 %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def _depth(self, rgb: np.ndarray) -> torch.Tensor:
-        """Depth at the processed resolution, upstream's answer, from whichever runtime is loaded."""
+        """Depth at the processed resolution -- upstream's answer -- from the loaded runtime."""
         if self._predictor is not None:
             return self._predictor.predict(rgb)
         pixels = preprocess(rgb, self._spec.process_res)[:, 0]
         height, width = pixels.shape[-2:]
-        if min(height, width) < MIN_PATCHES * PATCH:
+        if min(height, width) < MIN_PATCHES * PATCH_SIZE:
             raise ValueError(
                 f"a {rgb.shape[1]}x{rgb.shape[0]} image is too elongated for the {self.runtime} "
                 f"graph: its short side would be {min(height, width)} px, and the graph takes "
-                f"{MIN_PATCHES * PATCH} or more (an aspect ratio up to 12:1). The torch-fp32 "
+                f"{MIN_PATCHES * PATCH_SIZE} or more (an aspect ratio up to 12:1). The torch-fp32 "
                 "runtime takes it.")
-        shape = shape_inputs(self._spec, self._pos_embed, height, width, self._graph_device)
+        shape = self._shape_inputs(height, width)
         if isinstance(self._runner, TensorRTRunner):
             outputs = self._runner(pixels.to(self._graph_device), *shape)
         else:

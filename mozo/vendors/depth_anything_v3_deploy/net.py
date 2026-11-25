@@ -25,13 +25,14 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from .config import ModelSpec
+from .config import PATCH_SIZE, ModelSpec
 from .dinov2.dinov2 import DinoV2
 from .dinov2.vision_transformer import interpolate_patch_pos_embed
 from .dpt import DPT
 from .dualdpt import DualDPT, uv_embeddings
 
-PATCH_SIZE = 14
+#: Sky head output below which a pixel is not sky (upstream's threshold).
+SKY_THRESHOLD = 0.3
 
 
 def compute_sky_mask(sky_prediction: torch.Tensor, threshold: float = 0.3) -> torch.Tensor:
@@ -62,7 +63,7 @@ def fill_sky(depth: torch.Tensor, sky: torch.Tensor, generator: torch.Generator)
         sky: The sky head's ``[B, S, H, W]`` output.
         generator: Where the sample is drawn from.
     """
-    non_sky_mask = compute_sky_mask(sky, threshold=0.3)
+    non_sky_mask = compute_sky_mask(sky, threshold=SKY_THRESHOLD)
     if non_sky_mask.sum() <= 10:
         return depth
     if (~non_sky_mask).sum() <= 10:
@@ -168,5 +169,5 @@ class DepthAnything3Net(nn.Module):
         H, W = x.shape[-2], x.shape[-1]
         with torch.autocast(device_type=x.device.type, enabled=False):
             if isinstance(self.head, DualDPT):
-                return self.head(feats, H, W, patch_start_idx=0, uv=uv or None)
+                return self.head(feats, H, W, patch_start_idx=0, uv=uv)
             return self.head(feats, H, W, patch_start_idx=0)

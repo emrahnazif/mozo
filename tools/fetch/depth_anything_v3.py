@@ -90,7 +90,7 @@ CHECKPOINTS: dict[str, Checkpoint] = {
 }
 
 
-def convert(source: Path, variant: str) -> dict[str, torch.Tensor]:
+def convert(source: Path, variant: str) -> tuple[dict[str, torch.Tensor], int]:
     """The state dict mozo publishes: upstream's tensors minus :data:`UNUSED`, prefix dropped.
 
     Checked against the vendored network: the result loads strictly, and every tensor equals
@@ -113,7 +113,7 @@ def convert(source: Path, variant: str) -> dict[str, torch.Tensor]:
             raise SystemExit(f"{variant}: {key} did not survive the conversion")
     print(f"  {variant:<10} {len(kept)} of {len(state)} tensors kept, "
           f"{len(state) - len(kept)} unused dropped")
-    return kept
+    return kept, len(state)
 
 
 def _notice(variant: str, entry: Checkpoint, sha256: str, kept: int, total: int) -> str:
@@ -155,11 +155,7 @@ def fetch(variant: str, revision: str, weights_dir: Path) -> None:
         hub_lfs_sha256s(entry.repo, entry.commit)["model.safetensors"],
         label=variant, width=10, detail="Apache-2.0")
 
-    from safetensors import safe_open
-
-    with safe_open(source, "pt") as handle:
-        total = len(list(handle.keys()))
-    kept = convert(source, variant)
+    kept, total = convert(source, variant)
     torch.save(kept, target)
     # The one tensor a graph runtime needs beside its graph: the shape inputs are computed from
     # it, and publishing it alone spares a graph runtime the whole checkpoint.

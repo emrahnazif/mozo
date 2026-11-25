@@ -15,14 +15,13 @@ from __future__ import annotations
 
 __all__ = ["MAX_PATCHES", "MIN_PATCHES", "input_names", "output_names", "profile"]
 
-from .config import ModelSpec
+from .config import PATCH_SIZE, ModelSpec
 
 #: Patches per side a graph accepts. The long side is always 36 (504 px); the short side may be
 #: as small as 3 (42 px), an aspect ratio of 12:1. Below 3 the exporter cannot keep the size
 #: symbolic, so a more elongated image is refused by graph runtimes.
 MIN_PATCHES = 3
 MAX_PATCHES = 36
-PATCH = 14
 
 
 def input_names(spec: ModelSpec) -> tuple[str, ...]:
@@ -37,10 +36,10 @@ def output_names(spec: ModelSpec) -> tuple[str, ...]:
 
 def _shapes(spec: ModelSpec, h: int, w: int) -> list[tuple[int, ...]]:
     width = spec.head_dim_in // (2 if spec.cat_token else 1)
-    shapes = [(1, 3, PATCH * h, PATCH * w), (1, width, h, w)]
+    shapes = [(1, 3, PATCH_SIZE * h, PATCH_SIZE * w), (1, width, h, w)]
     if not spec.sky:
         shapes += [(1, c, h, w) for c in spec.out_channels]
-        shapes.append((1, spec.features // 2, PATCH * h, PATCH * w))
+        shapes.append((1, spec.features // 2, PATCH_SIZE * h, PATCH_SIZE * w))
     return shapes
 
 

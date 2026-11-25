@@ -19,10 +19,13 @@ sky head.
 
 from __future__ import annotations
 
-__all__ = ["MODEL_SPECS", "ModelSpec", "get_spec"]
+__all__ = ["MODEL_SPECS", "PATCH_SIZE", "ModelSpec", "get_spec"]
 
 from dataclasses import dataclass
 from typing import Literal
+
+#: The ViT patch side, in pixels. Every input side is a multiple of it.
+PATCH_SIZE = 14
 
 
 @dataclass(frozen=True)

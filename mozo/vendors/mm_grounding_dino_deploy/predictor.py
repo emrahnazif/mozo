@@ -1,0 +1,179 @@
+# SPDX-License-Identifier: Apache-2.0
+"""The seam: an image and some phrases in, located boxes out.
+
+Everything a caller of this package needs is here. It builds the caption upstream expects from
+the list of prompts mozo's endpoint takes, runs the model, and hands back detections that carry
+the index of the prompt each one matched.
+
+**mozo owns the caption.** Upstream's processor takes a list of labels and joins them -- each
+stripped and lowercased, joined by ``". "``, a trailing ``"."`` -- and this does the same, so the
+separators are this package's business and a detection can be traced back to a prompt rather
+than to a decoded span.
+"""
+
+from __future__ import annotations
+
+from contextlib import nullcontext
+from pathlib import Path
+from typing import Callable, Sequence
+
+import numpy as np
+import torch
+
+from .boxes import Detection, decode
+from .checkpoint import build
+from .config import Spec
+from .image import fit_square, preprocess
+from .network import phrase_masks
+from .text.tokenizer import Tokenizer
+
+__all__ = ["SEPARATORS", "Predictor", "caption_for"]
+
+#: Tokens that end a phrase. ``"?"`` is one of them, so a prompt containing a question mark
+#: splits -- upstream's rule, and the reason a question is not a good prompt.
+#:
+#: Public, and exported from the package, because the gate and the tests need the same set. A
+#: private copy retyped in each of them is the one failure a bit-exactness gate may not have:
+#: change the set here and the gate keeps passing while feeding ``phrase_masks`` the old one.
+SEPARATORS = ("[CLS]", "[SEP]", ".", "?")
+
+
+def caption_for(prompts: Sequence[str]) -> str:
+    """Join prompts into the single caption the model was trained on.
+
+    ``_merge_candidate_labels_text`` from upstream's processor: each prompt stripped and
+    lowercased, joined by ``". "``, a trailing ``"."``. Case is destroyed here because upstream
+    destroys it; a proper noun is not preserved.
+    """
+    return ". ".join(prompt.strip().lower() for prompt in prompts) + "."
+
+
+class Predictor:
+    """One loaded MM-Grounding-DINO variant.
+
+    Args:
+        weights: Path to a published checkpoint.
+        spec: Which variant it is.
+        device: Where to run.
+        autocast: Run the forward under CUDA fp16 autocast. Not upstream's: the model is
+            published and evaluated in fp32. Measured against it on COCO in the family's
+            documentation (``docs/models/mm-grounding-dino.md``).
+        input_size: Letterbox every image into this square, with a padding mask, instead of
+            upstream's aspect-preserving resize. ``None`` -- the default -- is upstream's resize.
+            A square is what a compiled graph needs; it changes the answers, because the picture
+            is then smaller than the resize makes it. See :func:`~.image.fit_square`.
+        forward: A compiled replacement for the network, called as the network is, with the
+            pixel mask last: ``forward(image, input_ids, token_type_ids, token_mask, attention,
+            position_ids, pixel_mask) -> (logits, boxes)``. The checkpoint is then not loaded at
+            all, and *weights* may be ``None``. Requires *input_size*: a graph has one shape.
+
+    Attributes:
+        spec: The variant's geometry.
+        device: The device in use.
+
+    Examples:
+        >>> model = Predictor(path, SPECS["llmdet-tiny"])   # doctest: +SKIP
+        >>> model(image, ["a cat", "a laptop"])             # doctest: +SKIP
+    """
+
+    def __init__(self, weights: str | Path | None, spec: Spec, device: str = "cpu",
+                 autocast: bool = False, input_size: int | None = None,
+                 forward: Callable | None = None) -> None:
+        if forward is not None and input_size is None:
+            raise ValueError("a compiled forward runs at one shape; give it an input_size")
+        self.spec = spec
+        self.device = device
+        self.autocast = autocast
+        self.input_size = input_size
+        self.tokenizer = Tokenizer()
+        # Built once, and on the CPU: the text setup runs there. See __call__.
+        self._separators = torch.tensor(
+            self.tokenizer.convert_tokens_to_ids(list(SEPARATORS)), dtype=torch.long
+        )
+        self.model = build(spec, weights, device=device) if forward is None else None
+        self._forward = forward or self.model
+
+    def __call__(
+        self,
+        image: np.ndarray,
+        prompts: Sequence[str],
+        box_threshold: float | None = None,
+    ) -> list[Detection]:
+        """Find every instance of each prompt in *image*.
+
+        Args:
+            image: ``HxWx3`` RGB ``uint8``.
+            prompts: What to look for. Each is free text and may contain spaces.
+            box_threshold: Confidence floor. ``None`` takes the variant's published default.
+
+        Returns:
+            Detections carrying a box in source pixels, a score, and the index of the prompt
+            that matched.
+
+        Raises:
+            ValueError: If no prompt is given, if one is blank, or if the caption exceeds the
+                model's 256-token budget. Upstream truncates silently there; a prompt that was
+                dropped without being mentioned is a wrong answer that never raises.
+        """
+        if not prompts:
+            raise ValueError("give at least one prompt naming what to look for")
+        if any(not prompt.strip() for prompt in prompts):
+            raise ValueError("every prompt must name a concept; one of them is blank")
+
+        caption = caption_for(prompts)
+        ids, types, mask = self.tokenizer.encode(caption)
+        if len(ids) > self.spec.max_text_len:
+            raise ValueError(
+                f"{len(prompts)} prompts tokenize to {len(ids)} tokens, over this model's "
+                f"{self.spec.max_text_len}-token budget. Ask for fewer, or shorter ones."
+            )
+
+        source_height, source_width = image.shape[:2]
+        if self.input_size is None:
+            batch = preprocess(image, self.spec.short_side, self.spec.max_side)[None]
+            padding = ()
+        else:
+            # The boxes come back normalised to the picture, not to the square -- the mask is what
+            # tells the model where the picture ends -- so decoding below is the same either way.
+            canvas, mask_2d = fit_square(image, self.input_size)
+            batch, padding = canvas[None], (mask_2d[None].to(self.device),)
+        batch = batch.to(self.device)
+
+        # The text setup is built on the CPU and moved once, rather than built where the model
+        # lives. ``phrase_masks`` is twenty tiny integer kernels and a ``nonzero`` -- which on an
+        # accelerator is a synchronisation -- for a caption of a dozen tokens: 2.10 ms on MPS
+        # against 0.067 ms here. The phrase map is wanted back on the CPU anyway, for decoding.
+        input_ids = torch.tensor([ids], dtype=torch.long)
+        attention, position_ids, phrase_map = phrase_masks(input_ids, self._separators)
+
+        if phrase_map[0].shape[0] != len(prompts):
+            # The caption split into a different number of phrases than prompts were given --
+            # a prompt containing its own '.' or '?' is the way that happens. Refused rather
+            # than reported against the wrong prompt.
+            raise ValueError(
+                f"{len(prompts)} prompt(s) became {phrase_map[0].shape[0]} phrase(s); a prompt "
+                "may not contain '.' or '?', which separate concepts."
+            )
+
+        # Entered only when asked: ``torch.autocast("cuda", enabled=False)`` still warns on a
+        # machine without CUDA, and the fp32 path should be exactly what it was.
+        half = torch.autocast("cuda", torch.float16) if self.autocast else nullcontext()
+        with torch.inference_mode(), half:
+            logits, boxes = self._forward(
+                batch,
+                input_ids.to(self.device),
+                torch.tensor([types], dtype=torch.long, device=self.device),
+                torch.tensor([mask], dtype=torch.bool, device=self.device),
+                attention.to(self.device),
+                position_ids.to(self.device),
+                *padding,
+            )
+
+        return decode(
+            logits[0].float().cpu(),
+            boxes[0].float().cpu(),
+            phrase_map[0],
+            source_height,
+            source_width,
+            self.spec.box_threshold if box_threshold is None else box_threshold,
+        )

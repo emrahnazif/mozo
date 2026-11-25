@@ -1,0 +1,71 @@
+mm_grounding_dino_deploy
+
+This product includes software derived from:
+
+  - LLMDet, by Shenghao Fu, Qize Yang, Qijie Mo, Junkai Yan, Xihan Wei, Jingke
+    Meng, Xiaohua Xie and Wei-Shi Zheng (iSEE Laboratory, Sun Yat-sen
+    University), https://github.com/iSEE-Laboratory/LLMDet, described in
+    "LLMDet: Learning Strong Open-Vocabulary Object Detectors under the
+    Supervision of Large Language Models" (CVPR 2025, arXiv:2501.18954).
+    Apache License, Version 2.0.
+
+  - MM-Grounding-DINO, by Xiangyu Zhao, Yicheng Chen, Shilin Xu, Xiangtai Li,
+    Xinjiang Wang, Yining Li and Haian Huang (OpenMMLab), part of MMDetection,
+    https://github.com/open-mmlab/mmdetection, described in "An Open and
+    Comprehensive Pipeline for Unified Object Grounding and Detection"
+    (arXiv:2401.02361). Apache License, Version 2.0.
+
+  - The Hugging Face Transformers port of MM-Grounding-DINO and of Grounding
+    DINO (models/mm_grounding_dino, models/grounding_dino, models/swin,
+    models/bert), Copyright The HuggingFace Inc. team,
+    https://github.com/huggingface/transformers. Apache License, Version 2.0.
+    The modules here are extracted from that port, at version 4.57.3.
+
+  - Grounding DINO (IDEA Research), Deformable DETR (SenseTime) and the Swin
+    Transformer (Microsoft), the architectures the above build on, each
+    released under Apache-2.0 or MIT.
+
+See the LICENSE file in this directory: the LLMDet repository's own, which is
+Apache-2.0 followed by the notices of the code it builds on.
+
+ON THE WEIGHTS
+--------------
+The checkpoints mozo publishes for this package are LLMDet's, from the authors'
+own Hugging Face organisation:
+
+  - https://huggingface.co/iSEE-Laboratory/llmdet_tiny
+  - https://huggingface.co/iSEE-Laboratory/llmdet_base
+  - https://huggingface.co/iSEE-Laboratory/llmdet_large
+
+Each model card states `license: apache-2.0`, and the repositories are ungated.
+The LLMDet code repository is Apache-2.0 as well. The NOTICE placed beside each
+checkpoint names the exact file, commit and sha256 it was repacked from.
+
+The weights were trained on datasets that carry their own terms -- Objects365,
+GoldG (Flickr30k Entities, GQA), V3Det, GRIT, OpenImages and the authors'
+GroundingCap-1M, built partly on COCO. Those terms are the datasets', not
+restated here.
+
+THE TEXT VOCABULARY AND CHARACTER TABLE
+---------------------------------------
+  - BERT
+    Copyright 2018 The Google AI Language Team Authors
+    https://huggingface.co/bert-base-uncased
+    Apache License, Version 2.0
+
+  assets/vocab.txt.gz is Google's bert-base-uncased vocab.txt, 30,522 entries,
+  compressed and otherwise unmodified; it is byte-identical to the vocab.txt in
+  each LLMDet repository. The *weights* of the BERT tower are not Google's --
+  they are the fine-tuned copy carried inside each checkpoint.
+
+  assets/bert_chars.json.gz records, for every Unicode codepoint, what the
+  Hugging Face `tokenizers` library (Apache-2.0) does to it when it runs this
+  vocabulary's normaliser and pre-tokenizer. It is derived by probing that
+  library and contains no code from it.
+
+NOT INCLUDED
+------------
+The training heads and losses, denoising, auxiliary per-layer outputs, the
+one-stage query branch, gradient checkpointing, the kernel-hub deformable
+attention, the learned-position-embedding and timm/ResNet backbone options, and
+the language model LLMDet was trained with. See PROVENANCE.md.

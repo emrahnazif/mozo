@@ -1,0 +1,34 @@
+deim_deploy
+Copyright (C) INTELLINDUST INFORMATION TECHNOLOGY (SHENZHEN) CO., LTD. and all its affiliates.
+Copyright (c) 2024 The DEIM Authors.
+
+This product includes software extracted from DEIM: DETR with Improved Matching for Fast
+Convergence (https://github.com/ShihuaHuang95/DEIM, commit 09d35d53d39ee3145a1e61e3a989b28b9468d1dd)
+and reduced to its inference path. It is licensed under the Apache License, Version 2.0; see the
+LICENSE file in this directory, which is upstream's.
+
+DEIM itself derives from earlier works, whose copyright notices are preserved in the headers of
+the files that carry their code:
+
+  - D-FINE
+    Copyright (c) 2024 The D-FINE Authors. All Rights Reserved.
+    https://github.com/Peterande/D-FINE
+    Apache License 2.0
+
+  - RT-DETR
+    Copyright (c) 2023 lyuwenyu. All Rights Reserved.
+    https://github.com/lyuwenyu/RT-DETR
+    Apache License 2.0
+
+  - HGNetv2, from PaddleDetection
+    Copyright (c) PaddlePaddle Authors. All Rights Reserved.
+    https://github.com/PaddlePaddle/PaddleDetection
+    Apache License 2.0
+
+  - DETR (FrozenBatchNorm2d, box conversion)
+    Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+    https://github.com/facebookresearch/detr
+    Apache License 2.0
+
+Modifications for mozo: training code removed, imports made relative, the loader and the
+preprocessing written for mozo; the arithmetic is upstream's. See PROVENANCE.md.

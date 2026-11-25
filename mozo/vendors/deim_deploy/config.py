@@ -55,7 +55,6 @@ class Spec:
     nhead: int = 8
     enc_act: str = "gelu"
     enc_cross_act: str = "silu"
-    use_encoder_idx: int = -1  # the last level, resolved against ``enc_in_channels``
     size: Tuple[int, int] = (640, 640)  # (height, width): eval_spatial_size
 
 

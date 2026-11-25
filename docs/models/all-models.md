@@ -1,4 +1,4 @@
-# All 87 models, by task
+# All 93 models, by task
 
 <!--
 summary: Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size.
@@ -6,7 +6,7 @@ label: All models
 keywords: mozo, model catalogue, computer vision models, licences, runtimes
 -->
 
-Mozo serves 87 variants across 20 families. A model is named `family/variant`, the same in Python
+Mozo serves 93 variants across 21 families. A model is named `family/variant`, the same in Python
 (`mozo.get_model("rfdetr/medium")`) and over HTTP (`/predict/rfdetr/medium`). Each family's page
 has examples, every parameter, and how the model behaves.
 
@@ -21,6 +21,7 @@ A box, a class and a confidence for each object.
 |---|---|---|---|---|
 | [RF-DETR](/docs/models/rfdetr.md) | `nano` `small` `medium` `large` | Apache-2.0 | torch, onnx, coreml | 136–405 MB |
 | [Mayaku](/docs/models/mayaku.md) | `street-nano` `street-medium` | Apache-2.0 | torch, onnx, tensorrt | 22–138 MB |
+| [DEIM](/docs/models/deim.md) | `nano` `small` `medium` `large` `xlarge` `xlarge-obj365` | Apache-2.0 | torch, onnx, tensorrt | 16–252 MB |
 | [YOLOv8](/docs/models/yolov8.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx, coreml | 7–137 MB |
 | [YOLO11](/docs/models/yolov11.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx | 6–115 MB |
 | [YOLO12](/docs/models/yolov12.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx, coreml | 6–119 MB |

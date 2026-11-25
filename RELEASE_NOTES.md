@@ -30,6 +30,19 @@
   COCO images with the 80 class names it scores 43.8 AP, below OWLv2's and Grounding DINO's
   50–51: pick it for speed. Code and weights are Apache-2.0; bit-identical to `transformers` at every
   stage on CUDA (RTX 3060, torch 2.13, CUDA 12.6) in fp32, and on the CPU.
+- **New family: DEIM**, real-time transformer detection of COCO's 80 classes (CVPR 2025, on
+  D-FINE's architecture). Six variants: `nano`, `small`, `medium`, `large` and `xlarge`, trained on
+  COCO, and `xlarge-obj365`, pretrained on Objects365 and the most accurate (59.5 AP by the
+  authors' count). Like RF-DETR it has no non-maximum suppression to tune. `mozo.get_model("deim/small")`,
+  `/predict/deim/small`, and a `deim` workflow node. Results are bit-identical to the authors' code
+  on the CPU, checked module by module. Code Apache-2.0; the weights come with no terms of their
+  own, and mozo reads them as the repository's Apache-2.0 (the NOTICE says so).
+- **DEIM runs 1.9 to 5.4 times faster on CUDA by default, with the same detections**, when
+  TensorRT 11 or later is installed: `auto` builds an fp32 engine from the published ONNX graph
+  (500 COCO images per variant: no detection changed, AP identical). `runtime="tensorrt-fp16"` is faster again (3.4 to 5.6 times torch) for every variant but
+  `nano`, from a published fp16 graph; at most 4 of about 3,000 confident detections change and AP
+  moves by at most 0.12. `auto` never picks it. On the CPU,
+  `runtime="onnx-fp32"` is faster than torch for most variants and gives the same detections.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a

@@ -24,7 +24,7 @@ Each graph is run through ONNX Runtime on the CPU and compared, through the vend
 against the torch module it came from, on the fixture photographs. fp32 must give the same
 detections above 0.3, each matched to the graph's same-class detection of highest IoU: boxes within
 0.01 px, scores within 0.001, none unmatched. fp16 must keep every
-confident detection (see :func:`_changes`).
+confident detection (see :func:`confident_changes`).
 """
 
 from __future__ import annotations
@@ -40,22 +40,21 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from common import fixtures, variant_parser  # noqa: E402
+from common import fixtures, require_one_file, variant_parser  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import OnnxRunner  # noqa: E402
-from mozo.vendors.deim_deploy import get_spec, load, postprocess, preprocess  # noqa: E402
+from mozo.vendors.deim_deploy import OUTPUTS, get_spec, load, postprocess, preprocess  # noqa: E402
 
 FAMILY = "deim"
 REVISION = "2026-11-25"
 OPSET, FP16_OPSET = 17, 18
-OUTPUTS = ["pred_logits", "pred_boxes"]
 CONF = 0.05
 BOX_TOLERANCE, SCORE_TOLERANCE = 1e-2, 1e-3
 
 
 def _export(model, destination: Path, size: tuple[int, int], fp16: bool) -> None:
     x = torch.zeros(1, 3, *size)
-    kwargs = dict(input_names=["images"], output_names=OUTPUTS, dynamo=False)
+    kwargs = dict(input_names=["images"], output_names=list(OUTPUTS), dynamo=False)
     with torch.no_grad():
         if fp16:
             with torch.autocast("cuda", torch.float16):
@@ -73,7 +72,7 @@ def _detect(forward, image, size):
     return labels[0][keep], boxes[0][keep], scores[0][keep]
 
 
-def _changes(want, got, high=0.52, low=0.5) -> int:
+def confident_changes(want, got, high=0.52, low=0.5) -> int:
     """Confident detections one side has and the other lacks: a detection above *high* with no
     same-class partner above *low* at IoU over 0.5. The margin keeps a score moving across a
     single threshold from counting as a change."""
@@ -122,7 +121,7 @@ def _check(model, path: Path, size, fp16: bool) -> None:
         got = _detect(graph, image, size)
         name = image_path.name
         if fp16:
-            n = _changes(want, got)
+            n = confident_changes(want, got)
             print(f"    {name:<20} {len(want[2])} / {len(got[2])} detections, {n} confident changes")
             if n:
                 problems.append(f"{name}: {n} confident detections changed in fp16")
@@ -149,6 +148,7 @@ def export_variant(variant: str, revision: str, weights_dir: Path, fp16: bool) -
     with tempfile.TemporaryDirectory(dir=directory) as staging:
         staged = Path(staging) / f"{key}.onnx"
         _export(model, staged, size, fp16)
+        require_one_file(staged)
         _check(model, staged, size, fp16)
         staged.replace(directory / f"{key}.onnx")
     print(f"  wrote {key}.onnx, {(directory / f'{key}.onnx').stat().st_size / 1e6:.1f} MB")

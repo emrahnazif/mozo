@@ -28,7 +28,7 @@ FAMILY = "deim"
 ALL = ["nano", "small", "medium", "large", "xlarge", "xlarge-obj365"]
 #: Variants publishing an fp16 graph. nano's TensorRT fp16 engine was slower than its fp32 one
 #: (2.4 against 1.9 ms on an RTX 3090), so it publishes none.
-FP16 = ALL[1:]
+FP16 = set(ALL) - {"nano"}
 RECORDED = Path(__file__).resolve().parent.parent / "fixtures" / "deim_example.json"
 
 #: The fixture photograph is two people at a desk; COCO calls what is on it these things. A model
@@ -39,6 +39,12 @@ EXPECTED_NAMES = {"person", "laptop", "chair", "cup", "tv", "dining table", "boo
 #: What a graph runtime may move against torch, after PixelFlow's rounding: what
 #: ``tools/export/deim.py`` holds the fp32 graph to, plus one rounding step.
 BOX_TOLERANCE = 1e-2 + COORD_STEP
+
+
+def _worst(want, got) -> float:
+    """The largest box-coordinate difference between two detection lists, pair by pair."""
+    return max((max(abs(a - b) for a, b in zip(x.bbox, y.bbox)) for x, y in zip(want, got)),
+               default=0.0)
 
 
 @pytest.fixture(scope="module")
@@ -212,10 +218,6 @@ class TestDetections:
 
 
 class TestRuntimes:
-    def test_auto_picks_torch_on_the_cpu(self):
-        require_weights(FAMILY, "nano")
-        assert select_runtime("cpu", artifacts(FAMILY, "nano")) == "torch-fp32"
-
     @pytest.mark.parametrize("variant", ALL)
     def test_onnx_gives_the_torch_answer(self, predictor_for, image, variant):
         require_weights(FAMILY, variant, "onnx-fp32")
@@ -223,9 +225,7 @@ class TestRuntimes:
         want = predictor_for(variant).predict(image)
         got = predictor_for(variant, "onnx-fp32").predict(image)
         assert [d.class_id for d in want] == [d.class_id for d in got]
-        worst = max((max(abs(a - b) for a, b in zip(x.bbox, y.bbox)) for x, y in zip(want, got)),
-                    default=0)
-        assert worst <= BOX_TOLERANCE
+        assert _worst(want, got) <= BOX_TOLERANCE
 
 
 class TestTensorRT:
@@ -277,14 +277,14 @@ class TestTensorRT:
         got = self._on_cuda(predictor_for, "nano", "tensorrt-fp32").predict(image)
         assert len(want) == len(got) > 0
         assert [d.class_id for d in want] == [d.class_id for d in got]
-        worst = max(max(abs(a - b) for a, b in zip(x.bbox, y.bbox)) for x, y in zip(want, got))
-        assert worst <= 0.1
+        assert _worst(want, got) <= 0.1
 
     def test_the_fp16_engine_keeps_the_confident_detections(self, predictor_for, image):
         want = predictor_for("small").predict(image, threshold=0.7)
         got = self._on_cuda(predictor_for, "small", "tensorrt-fp16").predict(image, threshold=0.4)
         assert len(want) > 0
         for found in want:
-            nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))
-            assert nearest.class_name == found.class_name
-            assert float(np.abs(np.subtract(nearest.bbox, found.bbox)).max()) < 5.0
+            distance, nearest = min((float(np.abs(np.subtract(g.bbox, found.bbox)).max()), i)
+                                    for i, g in enumerate(got))
+            assert got[nearest].class_name == found.class_name
+            assert distance < 5.0

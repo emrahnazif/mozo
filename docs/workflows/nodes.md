@@ -45,6 +45,7 @@ what runs.
 | `yolov26` | image → detections | `variant`=nano, `threshold`=0.5 | YOLO26 by Ultralytics: NMS-free detection, and instance masks on the seg variants. |
 | `rfdetr` | image → detections | `variant`=nano, `threshold`=0.5 | RF-DETR by Roboflow: NMS-free transformer detection, under a permissive licence. |
 | `mayaku` | image → detections | `variant`=street-nano, `threshold`=0.4 | Mayaku, the street models: road scenes, faces and licence plates included, masks on the seg variants. |
+| `deim` | image → detections | `variant`=medium, `threshold`=0.4 | DEIM: real-time NMS-free DETR detection of COCO's 80 classes, nano to xlarge. |
 | `rfdetr_checkpoint` | image → detections | `checkpoint`, `architecture`=nano, `labels`, `threshold`=0.5 | RF-DETR from a checkpoint of your own: a model you trained, run like a published one. |
 | `owlv2` | image → detections | `text` (a list of phrases), `variant`=base-ensemble, `threshold`=0.1 | OWLv2 by Google: find anything you can name, with no training. |
 | `grounding_dino` | image → detections | `text` (a list of phrases), `variant`=tiny, `threshold`=0.3 | Grounding DINO by IDEA: open-vocabulary detection from a phrase. |

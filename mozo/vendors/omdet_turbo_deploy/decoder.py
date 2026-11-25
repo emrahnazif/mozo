@@ -260,15 +260,11 @@ class Decoder(nn.Module):
         embeddings = features[rows, top].view(batch, spec.queries, -1)
 
         reference = reference.sigmoid()
-        last = len(self.layers) - 1
-        for index, layer in enumerate(self.layers):
+        for layer, box_head in zip(self.layers, self.decoder_bbox_head):
             embeddings, task = layer(embeddings, task, reference, memory, shapes,
                                      self.query_position_head(reference))
-            refined = torch.sigmoid(
-                self.decoder_bbox_head[index](embeddings) + inverse_sigmoid(reference))
-            if index == last:
-                logits = class_similarity(
-                    embeddings, self.decoder_class_head[index](classes).permute(1, 2, 0))
-                return refined, logits
-            reference = refined
-        raise AssertionError("unreachable")
+            reference = torch.sigmoid(box_head(embeddings) + inverse_sigmoid(reference))
+        # Only the last layer's class head runs at inference, as upstream.
+        logits = class_similarity(embeddings,
+                                  self.decoder_class_head[-1](classes).permute(1, 2, 0))
+        return reference, logits

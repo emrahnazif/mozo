@@ -37,7 +37,11 @@ import torch
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
+sys.path.insert(0, str(ROOT))
+
 from common import download_verified, hub_lfs_sha256s, require_licence, variant_parser  # noqa: E402
+
+from mozo.vendors.omdet_turbo_deploy.config import VARIANTS  # noqa: E402
 
 REPO = "omlab/omdet-turbo-swin-tiny-hf"
 
@@ -53,7 +57,6 @@ LICENCE_SOURCE = "https://www.apache.org/licenses/LICENSE-2.0.txt"
 #: The tokenizer's lowercase table, committed to the repository because it has to be in the wheel.
 LOWERCASE_ASSET = ROOT / "mozo" / "vendors" / "omdet_turbo_deploy" / "assets" / "lowercase.json.gz"
 
-VARIANTS = ("tiny",)
 
 
 def _notice(sha256: str) -> str:

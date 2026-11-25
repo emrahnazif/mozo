@@ -83,7 +83,7 @@ class WindowAttention(nn.Module):
         self.proj = nn.Linear(dim, dim)
 
     def forward(self, x: Tensor, mask: Tensor | None) -> Tensor:
-        batch, length, channels = x.shape
+        batch, length, _ = x.shape
         qkv = self.qkv(x).reshape(batch, length, 3, self.heads, -1).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
         q = q * self.scale
@@ -111,8 +111,9 @@ class Mlp(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, dim: int, heads: int, size: int, window: int, shift: int, spec: SwinSpec):
+    def __init__(self, dim: int, heads: int, size: int, shift: int, spec: SwinSpec):
         super().__init__()
+        window = spec.window
         self.window, self.shift = window, shift
         self.norm1 = nn.LayerNorm(dim, eps=spec.layer_norm_eps)
         self.attn = WindowAttention(dim, heads, window)
@@ -122,7 +123,7 @@ class Block(nn.Module):
                              persistent=False)
 
     def _attn(self, x: Tensor) -> Tensor:
-        batch, height, width, channels = x.shape
+        _, height, width, channels = x.shape
         window, shift = self.window, self.shift
         shifted = torch.roll(x, shifts=(-shift, -shift), dims=(1, 2)) if shift else x
         pad_h = (window - height % window) % window
@@ -163,7 +164,7 @@ class Stage(nn.Module):
         dim = spec.widths[index]
         self.downsample = PatchMerging(spec.widths[index - 1], spec.layer_norm_eps) if index else None
         self.blocks = nn.Sequential(*(
-            Block(dim, spec.heads[index], size, spec.window,
+            Block(dim, spec.heads[index], size,
                   0 if block % 2 == 0 else spec.window // 2, spec)
             for block in range(spec.depths[index])))
 

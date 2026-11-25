@@ -62,11 +62,20 @@ def _load(module: nn.Module, state: dict[str, torch.Tensor]) -> None:
     module.load_state_dict(state, strict=True)
 
 
-def build(spec: Spec, weights: str | Path,
-          device: str | torch.device = "cpu") -> tuple[OmDetTurbo, TextTower]:
-    """Build both halves, load them strictly, and put them in eval mode on *device*."""
-    parts = split(torch.load(weights, map_location="cpu", weights_only=True))
-    image, text = OmDetTurbo(spec), TextTower(spec.text)
-    _load(image, parts["image"])
+def build(spec: Spec, weights: str | Path, device: str | torch.device = "cpu", *,
+          image: bool = True) -> tuple[OmDetTurbo | None, TextTower]:
+    """Build both halves -- or the text tower alone, for a graph runtime -- load them strictly,
+    and put them in eval mode on *device*.
+
+    Memory-mapped, so a text-only build reads only the text tower's tensors from disk. The file's
+    image keys are still renamed and accounted for by :func:`split` either way.
+    """
+    parts = split(torch.load(weights, map_location="cpu", weights_only=True, mmap=True))
+    text = TextTower(spec.text)
     _load(text, parts["text"])
-    return image.eval().to(device), text.eval().to(device)
+    built = None
+    if image:
+        built = OmDetTurbo(spec)
+        _load(built, parts["image"])
+        built = built.eval().to(device)
+    return built, text.eval().to(device)

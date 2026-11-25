@@ -31,7 +31,7 @@ from .. import registry
 from ..image import load_image
 from ..runtimes import TensorRTRunner, get_default_device, make_runner, select_runtime
 from ..vendors.omdet_turbo_deploy import SPECS, THRESHOLD, VARIANTS, Detector
-from ..vendors.omdet_turbo_deploy.export import MAX_CLASSES, example
+from ..vendors.omdet_turbo_deploy.export import example, profile
 from ..weights import artifacts, framework_of, parts, resolve
 
 try:
@@ -45,6 +45,16 @@ __all__ = ["OmDetTurboPredictor"]
 FAMILY = "omdet_turbo"
 
 _log = logging.getLogger(__name__)
+
+
+def onnx_forward(graph):
+    """The image path's ``(pixels, classes, task) -> (boxes, logits)`` contract over an
+    :class:`~mozo.runtimes.OnnxRunner`, which speaks numpy and names its extra inputs."""
+    def forward(pixels, classes, task):
+        boxes, logits = graph(pixels.cpu().numpy(), classes=classes.cpu().numpy(),
+                              task=task.cpu().numpy())
+        return torch.from_numpy(boxes), torch.from_numpy(logits)
+    return forward
 
 
 class OmDetTurboPredictor:
@@ -76,7 +86,7 @@ class OmDetTurboPredictor:
     EXECUTES = registry.EXECUTES[FAMILY]
     DERIVES = registry.DERIVES[FAMILY]
 
-    #: The vocabulary size a TensorRT engine is tuned for. It accepts 1 to ``MAX_CLASSES``.
+    #: The vocabulary size a TensorRT engine is tuned for. It accepts 1 to 1,024.
     TENSORRT_CLASSES = 80
 
     def __init__(
@@ -102,23 +112,13 @@ class OmDetTurboPredictor:
         forward = None
         framework = framework_of(self.runtime)
         if framework == "tensorrt":
-            width = spec.class_embed_dim
-            engine = TensorRTRunner(
+            forward = TensorRTRunner(
                 parts(FAMILY, variant, self.runtime, revision=revision)[""], self.device,
-                shapes={"classes": ((1, 1, width), (self.TENSORRT_CLASSES, 1, width),
-                                    (MAX_CLASSES, 1, width)),
-                        "task": ((1, 1, width), (spec.text.context_length, 1, width),
-                                 (spec.text.context_length, 1, width))},
-                probe=example(spec, self.device))
-            forward = engine
+                shapes=profile(spec, self.TENSORRT_CLASSES), probe=example(spec, self.device))
         elif framework == "onnx":
-            graph = make_runner(resolve(FAMILY, variant, self.runtime, revision=revision),
-                                self.runtime, device=self.device)
-
-            def forward(pixels, classes, task):
-                boxes, logits = graph(pixels.cpu().numpy(), classes=classes.cpu().numpy(),
-                                      task=task.cpu().numpy())
-                return torch.from_numpy(boxes), torch.from_numpy(logits)
+            forward = onnx_forward(make_runner(
+                resolve(FAMILY, variant, self.runtime, revision=revision), self.runtime,
+                device=self.device))
 
         weights = resolve(FAMILY, variant, "torch-fp32", revision=revision)
         self._detector = Detector(weights, spec, device=self.device, forward=forward)

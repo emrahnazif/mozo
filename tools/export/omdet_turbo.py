@@ -40,13 +40,12 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from common import fixtures, require_one_file  # noqa: E402
 from mozo.image import load_image  # noqa: E402
-from mozo.runtimes import OnnxRunner  # noqa: E402
-from mozo.vendors.omdet_turbo_deploy import SPECS, Detector  # noqa: E402
+from mozo.adapters.omdet_turbo import onnx_forward  # noqa: E402
+from mozo.runtimes import make_runner  # noqa: E402
+from mozo.vendors.omdet_turbo_deploy import SPECS, THRESHOLD, Detector  # noqa: E402
+from mozo.vendors.omdet_turbo_deploy.checkpoint import build  # noqa: E402
 from mozo.vendors.omdet_turbo_deploy.export import export  # noqa: E402
 from mozo.weights import resolve  # noqa: E402
-
-#: Detections compared at upstream's default threshold.
-THRESHOLD = 0.3
 
 #: Measured: torch and the fp32 graph through ONNX Runtime agree to 0.0004 px and 2e-06 on the
 #: fixture's detections. Wide enough for float reordering, two orders below a real change.
@@ -89,85 +88,67 @@ def _drift(want, got) -> tuple[int, float, float]:
             float((ws[kept] - gs[match[kept]]).abs().max()))
 
 
-def _onnx_forward(path: Path):
-    runner = OnnxRunner(path, device="cpu")
-
-    def forward(pixels, classes, task):
-        boxes, logits = runner(pixels.cpu().numpy(), classes=classes.cpu().numpy(),
-                               task=task.cpu().numpy())
-        return torch.from_numpy(boxes), torch.from_numpy(logits)
-    return forward
-
-
-def _with_forward(detector: Detector, forward) -> Detector:
-    """The same text tower and caches, a different image path."""
-    other = Detector.__new__(Detector)
-    other.__dict__.update(detector.__dict__)
-    other.forward = forward
-    return other
-
-
-def export_fp32(checkpoint: Path, destination: Path, images) -> None:
-    reference = Detector(checkpoint, SPECS["tiny"])
+def _stage(image, destination: Path, images, fp16: bool, check) -> None:
+    """Export *image* to a scratch file, run *check* on every image and vocabulary against the
+    graph through ONNX Runtime on the CPU, and only then place it at *destination*."""
     with tempfile.TemporaryDirectory() as scratch:
         staged = Path(scratch) / destination.name
-        export(reference.image, staged, fp16=False)
+        export(image, staged, fp16=fp16)
         require_one_file(staged)
-        graph = _with_forward(reference, _onnx_forward(staged))
+        graph = onnx_forward(make_runner(staged, destination.stem, device="cpu"))
         for name, pixels in images:
             for vocabulary in VOCABULARIES:
-                want = reference(pixels, vocabulary, THRESHOLD)
-                got = graph(pixels, vocabulary, THRESHOLD)
-                if len(want[0]) != len(got[0]) or not torch.equal(want[2], got[2]):
-                    raise SystemExit(f"{name}: torch found {len(want[0])} detections, the graph "
-                                     f"{len(got[0])} (or other classes). Not writing it.")
-                box = float((want[0] - got[0]).abs().max()) if len(want[0]) else 0.0
-                score = float((want[1] - got[1]).abs().max()) if len(want[0]) else 0.0
-                if box > BOX_TOLERANCE_PX or score > SCORE_TOLERANCE:
-                    raise SystemExit(f"{name}: boxes moved {box:.4f} px, scores {score:.6f}. "
-                                     "Not writing it.")
-                print(f"  {name[:22]:<22} {vocabulary[0]:<6} {len(want[0]):>3} detections   "
-                      f"boxes {box:.4f} px   scores {score:.2e}")
+                print(f"  {name[:22]:<22} {vocabulary[0]:<6} " + check(name, pixels, vocabulary,
+                                                                     graph))
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(staged, destination)
-    print(f"  onnx-fp32 {destination.stat().st_size / 1e6:.1f} MB")
+    print(f"  {destination.stem} {destination.stat().st_size / 1e6:.1f} MB")
 
 
-def export_fp16(checkpoint: Path, destination: Path, images) -> None:
+def export_fp32(reference: Detector, destination: Path, images) -> None:
+    def check(name, pixels, vocabulary, graph):
+        want = reference(pixels, vocabulary, THRESHOLD)
+        # Matched by class and IoU, so a near-tie ordered differently is not a failure.
+        lost, box, score = _drift(want, reference.with_forward(graph)(pixels, vocabulary,
+                                                                     THRESHOLD))
+        if lost or box > BOX_TOLERANCE_PX or score > SCORE_TOLERANCE:
+            raise SystemExit(f"{name}: {lost} detections unmatched, boxes moved {box:.4f} px, "
+                             f"scores {score:.6f}. Not writing it.")
+        return f"{len(want[0]):>3} detections   boxes {box:.4f} px   scores {score:.2e}"
+
+    _stage(reference.image, destination, images, False, check)
+
+
+def export_fp16(reference: Detector, checkpoint: Path, destination: Path, images) -> None:
     if not torch.cuda.is_available():
         raise SystemExit("the fp16 graph is exported on CUDA, under fp16 autocast")
-    reference = Detector(checkpoint, SPECS["tiny"])
-    half = Detector(checkpoint, SPECS["tiny"], device="cuda")
+    # The autocast baseline is compared in IEEE fp32 outside its fp16 casts, as rfdetr's is.
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    half, _ = build(SPECS["tiny"], checkpoint, device="cuda")
 
     def autocast(pixels, classes, task):
         with torch.autocast("cuda", torch.float16):
-            return half.image(pixels.cuda(), classes.cuda(), task.cuda())
+            return half(pixels.cuda(), classes.cuda(), task.cuda())
 
-    torch_fp16 = _with_forward(reference, autocast)
-    with tempfile.TemporaryDirectory() as scratch:
-        staged = Path(scratch) / destination.name
-        export(half.image, staged, fp16=True)
-        require_one_file(staged)
-        graph = _with_forward(reference, _onnx_forward(staged))
-        for name, pixels in images:
-            for vocabulary in VOCABULARIES:
-                want = reference(pixels, vocabulary, THRESHOLD)
-                ac_lost, ac_box, ac_score = _drift(want, torch_fp16(pixels, vocabulary, THRESHOLD))
-                lost, box, score = _drift(want, graph(pixels, vocabulary, THRESHOLD))
-                box_limit = max(FP16_MARGIN * ac_box, FP16_BOX_FLOOR_PX)
-                score_limit = max(FP16_MARGIN * ac_score, FP16_SCORE_FLOOR)
-                if lost > ac_lost or box > box_limit or score > score_limit:
-                    raise SystemExit(
-                        f"{name}: the fp16 graph is farther from fp32 than torch autocast -- "
-                        f"{lost} unmatched against {ac_lost}, boxes {box:.2f} px (limit "
-                        f"{box_limit:.2f}), scores {score:.4f} (limit {score_limit:.4f}). "
-                        "Not writing it.")
-                print(f"  {name[:22]:<22} {vocabulary[0]:<6} {len(want[0]):>3} detections   "
-                      f"unmatched {lost} ({ac_lost})   boxes {box:.2f} px ({ac_box:.2f})   "
-                      f"scores {score:.4f} ({ac_score:.4f})   [autocast in brackets]")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(staged, destination)
-    print(f"  onnx-fp16 {destination.stat().st_size / 1e6:.1f} MB")
+    torch_fp16 = reference.with_forward(autocast)
+
+    def check(name, pixels, vocabulary, graph):
+        want = reference(pixels, vocabulary, THRESHOLD)
+        ac_lost, ac_box, ac_score = _drift(want, torch_fp16(pixels, vocabulary, THRESHOLD))
+        lost, box, score = _drift(want, reference.with_forward(graph)(pixels, vocabulary,
+                                                                     THRESHOLD))
+        box_limit = max(FP16_MARGIN * ac_box, FP16_BOX_FLOOR_PX)
+        score_limit = max(FP16_MARGIN * ac_score, FP16_SCORE_FLOOR)
+        if lost > ac_lost or box > box_limit or score > score_limit:
+            raise SystemExit(
+                f"{name}: the fp16 graph is farther from fp32 than torch autocast -- "
+                f"{lost} unmatched against {ac_lost}, boxes {box:.2f} px (limit "
+                f"{box_limit:.2f}), scores {score:.4f} (limit {score_limit:.4f}). Not writing it.")
+        return (f"{len(want[0]):>3} detections   unmatched {lost} ({ac_lost})   boxes {box:.2f} px "
+                f"({ac_box:.2f})   scores {score:.4f} ({ac_score:.4f})   [autocast in brackets]")
+
+    _stage(half, destination, images, True, check)
 
 
 def main() -> int:
@@ -183,12 +164,14 @@ def main() -> int:
     checkpoint = Path(resolve("omdet_turbo", "tiny", "torch-fp32", revision=args.revision))
     revision_dir = args.weights_dir / "omdet_turbo" / "tiny" / checkpoint.parent.name
     images = _images(args.coco, args.images)
+    # Detections compared at upstream's default threshold, on one CPU reference.
+    reference = Detector(checkpoint, SPECS["tiny"])
     if args.only != "fp16":
         print("=== omdet_turbo/tiny onnx-fp32")
-        export_fp32(checkpoint, revision_dir / "onnx-fp32.onnx", images)
+        export_fp32(reference, revision_dir / "onnx-fp32.onnx", images)
     if args.only != "fp32":
         print("=== omdet_turbo/tiny onnx-fp16")
-        export_fp16(checkpoint, revision_dir / "onnx-fp16.onnx", images)
+        export_fp16(reference, checkpoint, revision_dir / "onnx-fp16.onnx", images)
     print("\nRun tools/generate_manifest.py to pick these up.")
     return 0
 

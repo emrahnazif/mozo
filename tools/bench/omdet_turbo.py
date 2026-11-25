@@ -19,7 +19,7 @@ autocast, which mozo does not offer) are measured beside them for the record.
              same-class partner above 0.3 on the other, counted both ways, out of the reference's
              detections above 0.3.
 ``latency``  Medians on the first image: ``forward`` the image path alone with the text cached,
-             ``predict`` a whole call from an array, with 3 prompts and with the 80 COCO names.
+             ``predict`` a whole detector call from an array, with 3 prompts and with the 80 COCO names.
 
 Run CPU runtimes one per process: torch's and ONNX Runtime's thread pools slow each other down.
 """
@@ -52,19 +52,19 @@ FEW = ["person", "car", "dog"]
 
 
 def _build(name: str, device: str):
-    """An adapter for *name*, and the image-path forward to time and run."""
-    if name in ("floor", "autocast"):
-        adapter = OmDetTurboPredictor("tiny", device, runtime="torch-fp32")
-        model = adapter._detector.image
-        if name == "floor":
-            forward = lambda p, c, t: model(p.half().float(), c, t)  # noqa: E731
-        else:
-            def forward(p, c, t):
-                with torch.autocast(device, torch.float16):
-                    return model(p, c, t)
-        adapter._detector.forward = forward
-        return adapter
-    return OmDetTurboPredictor("tiny", device, runtime=name)
+    """The loaded detector for *name*: a shipped runtime through the public adapter, or one of the
+    two record-only variants on the torch image path."""
+    if name not in ("floor", "autocast"):
+        return OmDetTurboPredictor("tiny", device, runtime=name)._detector
+    detector = OmDetTurboPredictor("tiny", device, runtime="torch-fp32")._detector
+    model = detector.image
+    if name == "floor":
+        return detector.with_forward(lambda p, c, t: model(p.half().float(), c, t))
+
+    def autocast(p, c, t):
+        with torch.autocast(device, torch.float16):
+            return model(p, c, t)
+    return detector.with_forward(autocast)
 
 
 def _unmatched(src, dst) -> int:
@@ -101,9 +101,8 @@ def measure(coco: Path, device: str, names: list[str], n: int, seed: int) -> dic
     first = load_image(path(ids[0]))
     for name in names:
         start = time.perf_counter()
-        adapter = _build(name, device)
+        detector = _build(name, device)
         loaded = time.perf_counter() - start
-        detector = adapter._detector
         runs = 5 if device == "cpu" else 30
         latency = {"load_s": loaded}
         with torch.inference_mode():
@@ -113,7 +112,7 @@ def measure(coco: Path, device: str, names: list[str], n: int, seed: int) -> dic
                 latency[f"forward_{label}_ms"] = median_ms(
                     lambda: detector.forward(pixels, classes, task), device, runs=runs, warmup=2)
                 latency[f"predict_{label}_ms"] = median_ms(
-                    lambda: adapter.predict(first, prompts), device, runs=runs, warmup=2)
+                    lambda: detector(first, prompts), device, runs=runs, warmup=2)
             raw[name] = {}
             for img_id in ids:
                 image = load_image(path(img_id))
@@ -121,7 +120,6 @@ def measure(coco: Path, device: str, names: list[str], n: int, seed: int) -> dic
                 raw[name][img_id] = (boxes.cpu(), logits.cpu(), image.shape[:2])
         report["runtimes"][name] = latency
         print(f"  {name}: {json.dumps({k: round(v, 1) for k, v in latency.items()})}", flush=True)
-        del adapter, detector
 
     reference = names[0]
     for name in names:

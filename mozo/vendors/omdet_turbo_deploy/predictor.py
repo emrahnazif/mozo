@@ -68,10 +68,8 @@ class Detector:
                  forward: Forward | None = None):
         self.spec = spec
         self.device = torch.device(device)
-        image, self.text = build(spec, weights, device=self.device)
-        self.image = None if forward is not None else image
-        self.forward: Forward = forward if forward is not None else image
-        del image
+        self.image, self.text = build(spec, weights, device=self.device, image=forward is None)
+        self.forward: Forward = forward or self.image
         self.tokenizer = Tokenizer(context_length=spec.text.context_length)
         self._prompts: OrderedDict[tuple[str, ...], tuple[Tensor, Tensor]] = OrderedDict()
         self._lock = Lock()
@@ -91,12 +89,22 @@ class Detector:
         task_ids, task_mask = self.tokenizer([task_sentence(key)], truncate=True)
         with torch.inference_mode():
             classes = self.text.classes(class_ids.to(self.device)).unsqueeze(1)
-            task, _ = self.text.task(task_ids.to(self.device), task_mask.to(self.device))
+            task = self.text.task(task_ids.to(self.device), task_mask.to(self.device))
         with self._lock:
             self._prompts[key] = (classes, task)
             while len(self._prompts) > PROMPT_CACHE:
                 self._prompts.popitem(last=False)
         return classes, task
+
+    def with_forward(self, forward: Forward) -> "Detector":
+        """A detector sharing this one's text tower, tokenizer and vocabulary cache, whose image
+        path is *forward* -- to compare a graph against the torch path on identical text."""
+        other = object.__new__(Detector)
+        other.spec, other.device, other.text, other.tokenizer = (
+            self.spec, self.device, self.text, self.tokenizer)
+        other._prompts, other._lock = self._prompts, self._lock
+        other.image, other.forward = None, forward
+        return other
 
     def raw(self, image: np.ndarray, prompts: Sequence[str]) -> tuple[Tensor, Tensor]:
         """The image path's ``(900, 4)`` boxes and ``(900, C)`` logits, before post-processing."""

@@ -121,15 +121,15 @@ class TextTower(nn.Module):
             x = block(x)
         return self.final_layer_norm(x)
 
-    def task(self, ids: Tensor, mask: Tensor) -> tuple[Tensor, Tensor]:
+    def task(self, ids: Tensor, mask: Tensor) -> Tensor:
         """Encode task sentences, as upstream's ``encode_type="task"``.
 
         Returns:
-            ``(length, B, width)`` states cut to the longest sentence, and ``(B, length)`` mask.
+            ``(length, B, width)`` states cut to the longest sentence.
         """
         hidden = self.hidden(ids)
         length = (mask != 0).sum(1).max().item()
-        return hidden[:, :length, :].transpose(0, 1), mask[:, :length]
+        return hidden[:, :length, :].transpose(0, 1)
 
     def classes(self, ids: Tensor) -> Tensor:
         """Encode class prompts, as upstream's ``encode_type="class"``: ``(B, projection)``."""

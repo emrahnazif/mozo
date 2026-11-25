@@ -141,6 +141,11 @@ DERIVES: dict[str, dict[str, str]] = {
     # torch CUDA's forward pass. fp16 where its graph is published (not nano). See
     # docs/models/deim.md.
     "deim": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # The same shape of decision for Depth Anything 3, on 654 NYUv2 test images (RTX 3090):
+    # tensorrt-fp32 changes the inverse depth by 3e-7 to 8e-7 on average and AbsRel not at all,
+    # at 1.2x (mono-large) to 1.4x (small) torch fp32 end to end; tensorrt-fp16 is 3.1x, moves
+    # AbsRel by at most 1e-4, and is on request only.
+    "depth_anything_v3": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
 #: Runtimes a family's ``auto`` tries before the shared order (:data:`mozo.runtimes._PREFERENCE`),
@@ -191,6 +196,7 @@ NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
     # Its graph is the image path and takes the text features as inputs; the text tower that
     # makes them comes from the checkpoint.
     "omdet_turbo": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
+    "depth_anything_v3": {"onnx": ("pos_embed",), "tensorrt": ("pos_embed",)},
 }
 
 #: Family -> where its adapter lives, what it does, and which variants it publishes.
@@ -263,6 +269,21 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'indoor-small', 'indoor-base', 'indoor-large',
             'outdoor-small', 'outdoor-base', 'outdoor-large',
         ],
+    },
+
+    'depth_anything_v3': {
+        'adapter_class': 'DepthAnythingV3Predictor',
+        'module': 'mozo.adapters.depth_anything_v3',
+        'task_type': 'depth_estimation',
+        'description': (
+            'Depth Anything 3 by ByteDance Seed — relative depth from one photograph. '
+            '3 variants: small and base (the any-view models, run on a single image) and '
+            'mono-large (the monocular model, which also finds the sky and pushes it to the '
+            'back). Returns inverse depth on an arbitrary per-image scale, larger meaning '
+            'nearer, as the relative Depth Anything V2 models do. Apache 2.0 code and weights; '
+            "the non-commercial sizes and the metric model are not offered."
+        ),
+        'variants': ['small', 'base', 'mono-large'],
     },
 
     'easyocr': {

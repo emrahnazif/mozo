@@ -616,6 +616,126 @@
         }
       }
     },
+    "depth_anything_v3/base": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "depth_anything_v3/base/2026-11-25/LICENSE",
+              "sha256": "78446e29c48900cda82620a8df183cca61f0a595e05a49d0401a5fd604dd1870",
+              "size": 11355
+            },
+            "NOTICE": {
+              "path": "depth_anything_v3/base/2026-11-25/NOTICE",
+              "sha256": "ea2b8f328a71719665f77b6814932bcace37b851cbc5ed185f7722487873f69d",
+              "size": 1159
+            },
+            "onnx-fp16": {
+              "path": "depth_anything_v3/base/2026-11-25/onnx-fp16.onnx",
+              "sha256": "e9e88a309d8a27b910f201042cbd96af303a1c4d0e5d912371bf402e4e240e72",
+              "size": 394115746
+            },
+            "onnx-fp32": {
+              "path": "depth_anything_v3/base/2026-11-25/onnx-fp32.onnx",
+              "sha256": "43734a48923f2e7afb1358205dff310b88c9d8ffef581bbdf00094ee2f6541ce",
+              "size": 394159360
+            },
+            "pos_embed": {
+              "path": "depth_anything_v3/base/2026-11-25/pos_embed.pth",
+              "sha256": "c1813439500ef4196c171051c1c78f3ea8f705956bd186cb49d3968e6a068b3a",
+              "size": 4210231
+            },
+            "torch-fp32": {
+              "path": "depth_anything_v3/base/2026-11-25/torch-fp32.pth",
+              "sha256": "240790fea7c6175ed61a4092829277b0539348295d5747458b6c0570b03eea2a",
+              "size": 393236574
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "depth_anything_v3/mono-large": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "depth_anything_v3/mono-large/2026-11-25/LICENSE",
+              "sha256": "78446e29c48900cda82620a8df183cca61f0a595e05a49d0401a5fd604dd1870",
+              "size": 11355
+            },
+            "NOTICE": {
+              "path": "depth_anything_v3/mono-large/2026-11-25/NOTICE",
+              "sha256": "715c95e032470b1606c27b415fdaa378e1fcd297695c0fe74b373e76dd4621ca",
+              "size": 1066
+            },
+            "onnx-fp16": {
+              "path": "depth_anything_v3/mono-large/2026-11-25/onnx-fp16.onnx",
+              "sha256": "fdc64dbd464cc355ce84739af4e20e5f6d2e51e6d558d1e08899fdc1604bca24",
+              "size": 1337617079
+            },
+            "onnx-fp32": {
+              "path": "depth_anything_v3/mono-large/2026-11-25/onnx-fp32.onnx",
+              "sha256": "18e3237f175398b0a3cb19b01074d5c76355a944eff3cdaa721dc1b51e7d8a12",
+              "size": 1337868150
+            },
+            "pos_embed": {
+              "path": "depth_anything_v3/mono-large/2026-11-25/pos_embed.pth",
+              "sha256": "5751d98d627239e3ed9c9ab4f47bb1bed0ebbc55b1adcb36c4b6b1ac0a7760d2",
+              "size": 5613111
+            },
+            "torch-fp32": {
+              "path": "depth_anything_v3/mono-large/2026-11-25/torch-fp32.pth",
+              "sha256": "63a8310d47ac88b8b43ee5967b348254b5d6db4b9ebfc504ace304d8d5a7a337",
+              "size": 1336816487
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "depth_anything_v3/small": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "depth_anything_v3/small/2026-11-25/LICENSE",
+              "sha256": "78446e29c48900cda82620a8df183cca61f0a595e05a49d0401a5fd604dd1870",
+              "size": 11355
+            },
+            "NOTICE": {
+              "path": "depth_anything_v3/small/2026-11-25/NOTICE",
+              "sha256": "43d2a78f57b9b0caec78d3fb1759bcf55379460d1abf55378124a7d34f9c3750",
+              "size": 1162
+            },
+            "onnx-fp16": {
+              "path": "depth_anything_v3/small/2026-11-25/onnx-fp16.onnx",
+              "sha256": "596b2c00cb5f69db156f6b269a570e9c6a741489f9dd7d3a08679d83a61df117",
+              "size": 101013358
+            },
+            "onnx-fp32": {
+              "path": "depth_anything_v3/small/2026-11-25/onnx-fp32.onnx",
+              "sha256": "9e2b0a243b7fe79be52713b2df7fe3b743dfcbd491d36b0e7fd96be40a84e680",
+              "size": 100973441
+            },
+            "pos_embed": {
+              "path": "depth_anything_v3/small/2026-11-25/pos_embed.pth",
+              "sha256": "535dd8d2d430799e61b220bc31a920946ac0635dfbd4e082208a3fbf674326dc",
+              "size": 2105911
+            },
+            "torch-fp32": {
+              "path": "depth_anything_v3/small/2026-11-25/torch-fp32.pth",
+              "sha256": "ba0f291eeac2e1e3a092beff54651d1b981dc196baf5df8107fb05307379852e",
+              "size": 100053534
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
     "easyocr/chinese-simplified": {
       "latest": "2026-08-21",
       "revisions": {

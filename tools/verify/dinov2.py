@@ -74,7 +74,7 @@ from common import fixtures as photographs  # noqa: E402
 from fetch.dinov2 import COMMIT, authors_url  # noqa: E402
 
 from mozo.vendors.dinov2_deploy import SPECS, Encoder  # noqa: E402
-from mozo.vendors.dinov2_deploy import image as vendor_image  # noqa: E402
+from mozo.vendors.dinov2_deploy import predictor  # noqa: E402
 
 #: The versions parity was established against. Printed, not enforced.
 PINNED = {"torch": "2.11.0", "torchvision": "0.26.0"}
@@ -190,17 +190,21 @@ def tokens_of(model, x: torch.Tensor) -> torch.Tensor:
 
 def compare_variant(variant: str, backbones, transform, authors: Path,
                     frames: list[tuple[str, np.ndarray]], gate: Gate,
-                    falsifier: str | None = None) -> Encoder:
-    """Every stage for one variant. Returns the vendor encoder, for the mozo path."""
+                    falsifier: str | None = None) -> tuple[Encoder, torch.Tensor]:
+    """Every stage for one variant. Returns the vendor encoder and upstream's vectors, for the
+    mozo path."""
     from mozo.weights import resolve
 
     spec = SPECS[variant]
     original = authors_checkpoint(variant, authors)
     published = resolve("dinov2", variant, "torch-fp32")
 
-    # --- the checkpoint ---
+    # --- the checkpoint: the published file, as the vendor loaded it (``assign=True`` keeps the
+    # file's own tensors), against the authors' ---
+    encoder = Encoder(published, spec, device="cpu")
+    network = encoder.network()
     theirs_state = torch.load(original, map_location="cpu", weights_only=True)
-    ours_state = torch.load(published, map_location="cpu", weights_only=True)
+    ours_state = network.state_dict()
     if set(theirs_state) != set(ours_state):
         gate.failures.append(("checkpoint", float("inf")))
         print(f"    FAIL checkpoint keys differ: {sorted(set(theirs_state) ^ set(ours_state))[:5]}")
@@ -214,8 +218,6 @@ def compare_variant(variant: str, backbones, transform, authors: Path,
     reference.eval()
     del theirs_state
 
-    encoder = Encoder(published, spec, device="cpu")
-    network = encoder.network()
     if falsifier:
         perturb(falsifier, encoder, network)
 
@@ -224,12 +226,11 @@ def compare_variant(variant: str, backbones, transform, authors: Path,
     theirs_seen, theirs_hooks = capture(reference, names)
 
     # --- per image, every stage ---
-    theirs_vectors, pixels = [], []
+    theirs_vectors = []
     for label, rgb in frames:
-        mine = vendor_image.preprocess(rgb)
+        mine = predictor.preprocess(rgb)  # the binding the encoder calls, so one patch covers both
         x = transform(Image.fromarray(rgb))
         gate.check("pixels", mine, x, label)
-        pixels.append(mine)
         gate.check("tokens", tokens_of(network, mine[None]), tokens_of(reference, x[None]), label)
         with torch.inference_mode():
             ours_cls = network(mine[None])
@@ -239,13 +240,13 @@ def compare_variant(variant: str, backbones, transform, authors: Path,
         gate.check("cls", ours_cls, theirs_cls, label)
         theirs_vectors.append(F.normalize(theirs_cls, dim=1, p=2))
 
+    for handle in ours_hooks + theirs_hooks:
+        handle.remove()
+
     # --- the vector, through the encoder's own path, all images in one call ---
     ours_vectors = encoder.encode_image([rgb for _, rgb in frames])
     for i, (label, _) in enumerate(frames):
         gate.check("vector", ours_vectors[i:i + 1], theirs_vectors[i], label)
-
-    for handle in ours_hooks + theirs_hooks:
-        handle.remove()
 
     # --- the backbone off the 224 path: no interpolation, and a non-square grid ---
     generator = torch.Generator().manual_seed(0)
@@ -254,8 +255,7 @@ def compare_variant(variant: str, backbones, transform, authors: Path,
         with torch.inference_mode():
             gate.check("backbone", network(x), reference(x), f"{shape[0]}x{shape[1]}")
 
-    encoder.reference_vectors = torch.cat(theirs_vectors)  # for the mozo path
-    return encoder
+    return encoder, torch.cat(theirs_vectors)
 
 
 def perturb(name: str, encoder: Encoder, network) -> None:
@@ -264,7 +264,7 @@ def perturb(name: str, encoder: Encoder, network) -> None:
 
     from mozo.vendors.dinov2_deploy.config import CROP, MEAN, RESIZE, STD
 
-    original = vendor_image.preprocess
+    original = predictor.preprocess
     if name == "crop_floor":
         def preprocess(image):
             resized = TF.resize(Image.fromarray(image), RESIZE,
@@ -273,15 +273,15 @@ def perturb(name: str, encoder: Encoder, network) -> None:
             top, left = (h - CROP) // 2, (w - CROP) // 2
             cropped = resized.crop((left, top, left + CROP, top + CROP))
             return TF.normalize(TF.to_tensor(cropped), mean=list(MEAN), std=list(STD))
-        vendor_image.preprocess = preprocess
+        predictor.preprocess = preprocess
     elif name == "squash":
         def preprocess(image):
             resized = TF.resize(Image.fromarray(image), [CROP, CROP],
                                 interpolation=TF.InterpolationMode.BICUBIC)
             return TF.normalize(TF.to_tensor(resized), mean=list(MEAN), std=list(STD))
-        vendor_image.preprocess = preprocess
+        predictor.preprocess = preprocess
     elif name == "bgr":
-        vendor_image.preprocess = lambda image: original(np.ascontiguousarray(image[..., ::-1]))
+        predictor.preprocess = lambda image: original(np.ascontiguousarray(image[..., ::-1]))
     elif name == "offset":
         network.interpolate_offset = 0.0
     elif name == "antialias":
@@ -311,14 +311,10 @@ def perturb(name: str, encoder: Encoder, network) -> None:
             [network(original(rgb)[None]) for rgb in images])
     else:
         raise SystemExit(f"unknown falsifier {name!r}; known: {sorted(FALSIFIERS)}")
-    # The stage functions above call ``vendor_image.preprocess`` by attribute, so the vector path
-    # is perturbed with them.
-    if name in ("crop_floor", "squash", "bgr"):
-        import mozo.vendors.dinov2_deploy.predictor as predictor
-        predictor.preprocess = vendor_image.preprocess
 
 
-def against_mozo(variant: str, vendor: Encoder, frames, paths: list[Path], gate: Gate) -> None:
+def against_mozo(variant: str, vendor: Encoder, reference: torch.Tensor, frames,
+                 paths: list[Path], gate: Gate) -> None:
     """mozo's adapter, through the registry and the weights tree, against upstream."""
     import mozo
     from mozo.image import load_image
@@ -328,7 +324,7 @@ def against_mozo(variant: str, vendor: Encoder, frames, paths: list[Path], gate:
         print(f"    note: mozo chose {model.runtime}; comparing that")
     got = torch.from_numpy(model.encode_image([rgb for _, rgb in frames]))
     for i, (label, _) in enumerate(frames):
-        gate.check("mozo", got[i:i + 1], vendor.reference_vectors[i:i + 1], label)
+        gate.check("mozo", got[i:i + 1], reference[i:i + 1], label)
     # File paths go through mozo.image.load_image on mozo's side; upstream gets the same RGB.
     decoded = [load_image(str(p)) for p in paths]
     want = torch.cat([vendor.encode_image(rgb) for rgb in decoded])
@@ -395,10 +391,10 @@ def main() -> int:
     for variant in variants:
         before = (gate.count, len(gate.failures))
         print(f"\n[{variant}]")
-        vendor = compare_variant(variant, backbones, transform, args.authors, frames, gate,
-                                 falsifier=args.falsify)
+        vendor, reference = compare_variant(variant, backbones, transform, args.authors, frames,
+                                            gate, falsifier=args.falsify)
         if args.mozo and not args.falsify:
-            against_mozo(variant, vendor, frames, photographs(), gate)
+            against_mozo(variant, vendor, reference, frames, photographs(), gate)
         count, failed = gate.count - before[0], len(gate.failures) - before[1]
         print(f"  {variant}: {count - failed} of {count} comparisons exact")
 
@@ -408,7 +404,7 @@ def main() -> int:
         where = ("CAUGHT at the expected stage" if first == expected
                  else f"CAUGHT, but first at {first!r} (expected {expected!r})" if first
                  else "NOT CAUGHT")
-        stages = sorted({stage for stage, _ in gate.failures}, key=lambda s: s)
+        stages = sorted({stage for stage, _ in gate.failures})
         print(f"falsifier {args.falsify!r} ({what}): {where}; "
               f"{len(gate.failures)} of {gate.count} comparisons failed, stages {stages}")
         return 0 if first == expected else 1

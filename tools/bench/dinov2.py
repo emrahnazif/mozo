@@ -41,40 +41,34 @@ os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
-import torch.nn.functional as F  # noqa: E402
 
 from common import fixtures, median_ms, synchronise  # noqa: E402
 from mozo.adapters.dinov2 import Dinov2Predictor  # noqa: E402
+from mozo.runtimes import free_device_memory  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.vendors.dinov2_deploy import SPECS, Encoder  # noqa: E402
 from mozo.vendors.dinov2_deploy.image import preprocess  # noqa: E402
-from mozo.weights import resolve  # noqa: E402
 
 
-def build(variant: str, runtime: str, device: str):
-    """Something with ``encode_image`` for *runtime*; ``torch-fp16`` is built here."""
+def build(variant: str, runtime: str, device: str) -> Dinov2Predictor:
+    """The adapter on *runtime*; ``torch-fp16``, which mozo does not offer, is its torch-fp32
+    network under fp16 autocast, swapped in behind the same ``encode_image``."""
     if runtime != "torch-fp16":
         return Dinov2Predictor(variant, device=device, runtime=runtime)
-    encoder = Encoder(resolve("dinov2", variant, "torch-fp32"), SPECS[variant], device=device)
+    model = Dinov2Predictor(variant, device=device, runtime="torch-fp32")
+    network = model._encoder.network()
 
     def half(pixels):
         with torch.autocast("cuda", torch.float16):
-            return encoder.network()(pixels)
+            return network(pixels)
 
-    fp16 = Encoder(None, SPECS[variant], device=device, backbone=half)
-    fp16.encode_image_np = lambda images: fp16.encode_image(
-        [load_image(i) for i in (images if isinstance(images, list) else [images])]).numpy()
-    return fp16
-
-
-def encode(model, images) -> np.ndarray:
-    if hasattr(model, "encode_image_np"):
-        return model.encode_image_np(images)
-    return model.encode_image(images)
+    model._encoder = Encoder(None, SPECS[variant], device=device, backbone=half)
+    return model
 
 
 def embed(model, paths: list[str], chunk: int = 64) -> np.ndarray:
-    return np.concatenate([encode(model, paths[i:i + chunk]) for i in range(0, len(paths), chunk)])
+    return np.concatenate([model.encode_image(paths[i:i + chunk])
+                           for i in range(0, len(paths), chunk)])
 
 
 def knn_top1(index: np.ndarray, labels: np.ndarray, queries: np.ndarray, truth: np.ndarray,
@@ -159,15 +153,15 @@ def main() -> int:
             try:
                 started = time.perf_counter()
                 model = build(variant, runtime, args.device)
-                encode(model, photo)
+                model.encode_image(photo)
                 synchronise(args.device)
                 load = time.perf_counter() - started
             except Exception as error:  # noqa: BLE001 -- a runtime that cannot load is a finding
                 print(f"  {runtime:14s} could not load: {type(error).__name__}: {error}")
                 continue
-            ms = median_ms(lambda: encode(model, photo), args.device, runs=args.runs)
-            core = (model._encoder if hasattr(model, "_encoder") else model).network()
-            one = pixels[:1]
+            ms = median_ms(lambda: model.encode_image(photo), args.device, runs=args.runs)
+            core = model._encoder.network()
+            one = pixels[:1].to(model._encoder.device)  # where the encoder hands it pixels
             with torch.inference_mode():
                 core_ms = median_ms(lambda: core(one), args.device, runs=args.runs)
             row = (f"  {runtime:14s} {ms:7.2f} ms/image, backbone {core_ms:6.2f} ms"
@@ -181,8 +175,7 @@ def main() -> int:
                 row += f"  k-NN top-1 {knn_top1(index, data[1], embed(model, data[2]), data[3]):.4f}"
             print(row, flush=True)
             del model
-            if args.device == "cuda":
-                torch.cuda.empty_cache()
+            free_device_memory()
     return 0
 
 

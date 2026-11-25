@@ -100,7 +100,8 @@ def to_upstream(hub: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     out, used = {}, set()
     for old, new in _RENAMES.items():
         if old in hub:
-            out[new], _ = hub[old], used.add(old)
+            out[new] = hub[old]
+            used.add(old)
     i = 0
     while f"encoder.layer.{i}.norm1.weight" in hub:
         src, dst = f"encoder.layer.{i}.", f"blocks.{i}."

@@ -72,8 +72,8 @@ ENCODES: dict[str, frozenset[str]] = {
 #: Task types whose model gives no answer, only vectors: ``/encode`` is the whole of what it does.
 #: ``/predict`` returns an answer, so it refuses these before decoding or loading anything and
 #: points at ``/encode`` instead -- rather than demanding a picture a text model would ignore, or
-#: downloading an image model's weights, and only then giving up. Text (Granite Embedding R2) and
-#: images (DINOv2) alike.
+#: downloading an image model's weights, and only then giving up. ``ENCODES`` says what each
+#: family takes instead.
 #:
 #: Named here for the reason PROMPTED is: the endpoint has to refuse before the load, and a test
 #: holds every registered task to having somewhere to go.
@@ -132,6 +132,10 @@ DERIVES: dict[str, dict[str, str]] = {
     # (``seg-nano``) torch fp32 -- RF-DETR is launch-bound at batch 1. fp16 only where an fp16
     # graph is published (the detection variants), and only on request.
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # From the published graphs (every variant but giant). On an RTX 3060, 500 COCO images per
+    # variant: tensorrt-fp32 within 2e-05 of torch fp32 with every 10 nearest neighbours kept, at
+    # 1.17x (large) to 1.45x (small) on the network, so ``auto`` takes it. fp16 3.8-4.8x, about
+    # 0.5% of neighbours changed, on request only.
     "dinov2": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 

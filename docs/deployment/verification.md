@@ -23,6 +23,7 @@ then found where it goes wrong, not inferred from a final number that happens to
 | OWLv2 | `transformers` | 226 on `base-ensemble`: tokenizer, preprocessing, both towers, three heads, boxes |
 | Grounding DINO | the authors' implementation | 138 across both variants, from the tokenizer to the final logits and boxes |
 | CLIP | `openai/CLIP` | 104 across four variants, from preprocessing to `logits_per_image` |
+| DINOv2 | the authors' torch-hub code | 5,742 across six variants on 29 images: the checkpoint against the authors' file, pixels, tokens, every block, the norm and the unit vector |
 | Granite Embedding R2 | `transformers` | 1,153,207: every stage of the model on 20 texts, and the tokenizer on 1.15 million texts, on Python 3.10 to 3.14 |
 
 Sixteen of the nineteen families ship a gate in `tools/verify/` in mozo's repository. RF-DETR,

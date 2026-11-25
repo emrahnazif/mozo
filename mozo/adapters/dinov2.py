@@ -100,11 +100,15 @@ class Dinov2Predictor:
         #: Which published revision produced the vectors, or ``None`` for your own checkpoint. A
         #: vector is only comparable against others from the same weights, so an index built from
         #: these has to record it.
-        self.revision = None if checkpoint_path else revision_of(FAMILY, variant, revision=revision)
+        self.revision = (None if checkpoint_path is not None
+                         else revision_of(FAMILY, variant, revision=revision))
         # Every runtime shares the encoder's preprocessing and normalisation; only the backbone
         # -- pixels to class token -- changes. The torch network is built on the first encode.
         framework = framework_of(self.runtime)
-        backbone = None
+        backbone = weights = None
+        # Where the encoder puts the pixels before the backbone: ONNX Runtime reads host memory,
+        # so on its path they stay on the CPU rather than going to the GPU and straight back.
+        pixels_on = self.device
         if framework == "tensorrt":
             # Built from the published graph it derives from (``registry.DERIVES``), once per GPU
             # and TensorRT version. The graph's shape is fixed, so the engine's is too.
@@ -114,11 +118,12 @@ class Dinov2Predictor:
         elif framework == "onnx":
             runner = make_runner(resolve(FAMILY, variant, self.runtime, revision=revision),
                                  self.runtime, device=self.device)
-            backbone = lambda pixels: torch.from_numpy(runner(pixels.cpu().numpy())[0])  # noqa: E731
-        weights = None if backbone is not None else (
-            Path(checkpoint_path) if checkpoint_path
-            else resolve(FAMILY, variant, "torch-fp32", revision=revision))
-        self._encoder = Encoder(weights, SPECS[variant], device=self.device, backbone=backbone)
+            backbone = lambda pixels: torch.from_numpy(runner(pixels.numpy())[0])  # noqa: E731
+            pixels_on = "cpu"
+        else:
+            weights = (Path(checkpoint_path) if checkpoint_path is not None
+                       else resolve(FAMILY, variant, "torch-fp32", revision=revision))
+        self._encoder = Encoder(weights, SPECS[variant], device=pixels_on, backbone=backbone)
         _log.info("DINOv2 %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def encode_image(
@@ -137,4 +142,6 @@ class Dinov2Predictor:
             ValueError: If no image is given, or one cannot be decoded.
         """
         batch = image if isinstance(image, (list, tuple)) else [image]
-        return self._encoder.encode_image([load_image(item) for item in batch]).numpy()
+        # Decoded one at a time as the encoder reaches each, so a long list of large photographs
+        # never sits in memory all at once.
+        return self._encoder.encode_image(load_image(item) for item in batch).numpy()

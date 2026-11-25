@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Sequence
+from typing import Callable, Iterable
 
 import numpy as np
 import torch
@@ -39,7 +39,7 @@ class Encoder:
     Args:
         weights: Path to a published checkpoint.
         spec: Which variant it is.
-        device: Where to run.
+        device: Where the torch network runs, and where pixels are placed before a *backbone*.
         backbone: A callable that replaces the torch backbone: ``(1, 3, 224, 224)`` pixels to the
             ``(1, width)`` class token. How a graph runtime takes the network's place; the
             preprocessing and the normalisation stay here, so they are the same code on every
@@ -66,22 +66,24 @@ class Encoder:
                     self._backbone = load_network(self.spec, self._weights, self.device)
         return self._backbone
 
-    def encode_image(self, images: np.ndarray | Sequence[np.ndarray]) -> torch.Tensor:
+    def encode_image(self, images: np.ndarray | Iterable[np.ndarray]) -> torch.Tensor:
         """Encode one image or many.
 
         Args:
-            images: An ``HxWx3`` RGB ``uint8`` array, or a sequence of them.
+            images: An ``HxWx3`` RGB ``uint8`` array, or an iterable of them, read one at a time.
 
         Returns:
             ``(N, width)`` float32 on the CPU, L2-normalised. Always two-dimensional, including
             for a single image.
         """
-        batch = [images] if isinstance(images, np.ndarray) else list(images)
-        if not batch:
-            raise ValueError("give at least one image to encode")
+        batch = [images] if isinstance(images, np.ndarray) else images
         network = self.network()
         with torch.inference_mode():
+            # Kept on the device until the end, so the next image's preprocessing overlaps this
+            # one's forward instead of waiting on a copy back.
             vectors = [F.normalize(network(preprocess(image)[None].to(self.device)).float(),
-                                   dim=1, p=2).cpu()
+                                   dim=1, p=2)
                        for image in batch]
-        return torch.cat(vectors)
+        if not vectors:
+            raise ValueError("give at least one image to encode")
+        return torch.cat(vectors).cpu()

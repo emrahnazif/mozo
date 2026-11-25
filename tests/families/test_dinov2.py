@@ -194,28 +194,41 @@ def test_it_refuses_an_unknown_variant():
 # --- the published graphs ---
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_every_variant_but_giant_publishes_its_graphs(variant):
-    """``giant`` is past ONNX's 2 GB limit as one file. Another graph means ``EXECUTES`` changes."""
+def test_it_runs_torch_onnx_and_tensorrt_from_the_graphs():
+    """Another runtime is a change to ``EXECUTES``; TensorRT engines come from the graphs."""
     from mozo.adapters.dinov2 import Dinov2Predictor
     from mozo.registry import DERIVES
 
+    assert Dinov2Predictor.EXECUTES == ("torch", "onnx", "tensorrt")
+    assert DERIVES[FAMILY] == {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"}
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_every_variant_but_giant_publishes_its_graphs(variant):
+    """``giant`` is past ONNX's 2 GB limit as one file."""
     keys = published(FAMILY, variant)
     if not keys:
         pytest.skip(f"{FAMILY}/{variant} publishes nothing")
     graphs = [] if variant == "giant" else ["onnx-fp16", "onnx-fp32"]
     assert sorted(keys) == graphs + ["torch-fp32"]
-    assert Dinov2Predictor.EXECUTES == ("torch", "onnx", "tensorrt")
-    assert DERIVES[FAMILY] == {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"}
+
+
+def _load(variant: str, **kwargs):
+    """A predictor on a graph runtime, skipped when its graph cannot be had."""
+    require_weights(FAMILY, variant, "onnx-fp32")
+    from mozo.adapters.dinov2 import Dinov2Predictor
+    from mozo.weights import WeightsError
+
+    try:
+        return Dinov2Predictor(variant, **kwargs)
+    except WeightsError as error:
+        pytest.skip(str(error))
 
 
 def test_the_onnx_graph_agrees_with_torch(predictor):
     """Not bit-identical -- no graph runtime is -- but 5e-07 at worst when measured."""
     pytest.importorskip("onnxruntime")
-    require_weights(FAMILY, "small", "onnx-fp32")
-    from mozo.adapters.dinov2 import Dinov2Predictor
-
-    graph = Dinov2Predictor("small", device="cpu", runtime="onnx-fp32")
+    graph = _load("small", device="cpu", runtime="onnx-fp32")
     images = [str(FIXTURE), np.zeros((300, 200, 3), np.uint8)]
     np.testing.assert_allclose(graph.encode_image(images), predictor.encode_image(images),
                                atol=1e-5)
@@ -223,13 +236,13 @@ def test_the_onnx_graph_agrees_with_torch(predictor):
 
 def test_tensorrt_fp32_agrees_with_torch(predictor):
     """The engine ``auto`` picks on CUDA: within 2e-05 of torch on 500 COCO images when measured."""
+    from mozo.runtimes import _tensorrt_unusable
+
     if not torch.cuda.is_available():
         pytest.skip("needs CUDA")
-    pytest.importorskip("tensorrt")
-    require_weights(FAMILY, "small", "onnx-fp32")
-    from mozo.adapters.dinov2 import Dinov2Predictor
-
-    engine = Dinov2Predictor("small", device="cuda")
+    if (problem := _tensorrt_unusable()) is not None:
+        pytest.skip(problem)
+    engine = _load("small", device="cuda")
     assert engine.runtime == "tensorrt-fp32"
     images = [str(FIXTURE), np.zeros((300, 200, 3), np.uint8)]
     np.testing.assert_allclose(engine.encode_image(images), predictor.encode_image(images),

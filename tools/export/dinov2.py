@@ -32,7 +32,6 @@ and an artifact is one file.
 
 from __future__ import annotations
 
-import argparse
 import os
 import shutil
 import sys
@@ -51,7 +50,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 # Exports from the tree you just built, not from the published bucket.
 os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 
-from common import fixtures, require_one_file  # noqa: E402
+from common import fixtures, require_one_file, variant_parser  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import OnnxRunner  # noqa: E402
 from mozo.vendors.dinov2_deploy import SPECS  # noqa: E402
@@ -66,7 +65,7 @@ OPSET = 17
 FP16_OPSET = 18
 
 #: The variants a graph can be published for: everything under protobuf's 2 GB.
-GRAPH_VARIANTS = ("small", "base", "large", "small-reg", "base-reg")
+GRAPH_VARIANTS = tuple(variant for variant in SPECS if variant != "giant")
 
 #: Largest ``max|delta|`` allowed between the fp32 graph (ONNX Runtime, CPU) and torch on a
 #: normalised vector. Measured worst on the fixtures, all five variants: see the plan's Results.
@@ -79,7 +78,8 @@ FP16_FLOOR = 1e-4
 
 
 def images() -> list[np.ndarray]:
-    """The repository's photographs, plus noise and a flat image: what the gate also uses."""
+    """The repository's photographs, plus odd-margin noise and a flat image. A short check of what
+    is written; ``tools/verify/dinov2.py`` and ``tools/bench/dinov2.py`` measure more."""
     rng = np.random.default_rng(0)
     return [load_image(str(p)) for p in fixtures()] + [
         rng.integers(0, 256, (256, 343, 3), dtype=np.uint8), np.zeros((224, 224, 3), np.uint8)]
@@ -102,20 +102,27 @@ class _Backbone(torch.nn.Module):
             tokens = torch.zeros(1, 1 + grid, network.embed_dim, device=network.pos_embed.device)
             self.register_buffer("pos", network.interpolate_pos_encoding(tokens, CROP, CROP).clone())
 
+    def _frozen(self, x, w, h):
+        assert w == h == CROP, f"the graph is fixed at {CROP}x{CROP}, not {w}x{h}"
+        return self.pos
+
     def forward(self, pixels):
-        return self.network(pixels)
+        # The network reads its position embedding through this one method; for the trace it
+        # reads the frozen one.
+        self.network.interpolate_pos_encoding = self._frozen
+        try:
+            return self.network(pixels)
+        finally:
+            del self.network.interpolate_pos_encoding
 
 
-def _export(network, destination: Path, opset: int, device: str, autocast: bool) -> None:
-    dummy = torch.randn(1, 3, CROP, CROP, device=device)
-    backbone = _Backbone(network).eval()
-    network.interpolate_pos_encoding = lambda x, w, h: backbone.pos
-    try:
-        with torch.no_grad(), torch.autocast("cuda", torch.float16, enabled=autocast):
-            torch.onnx.export(backbone, (dummy,), str(destination), input_names=[INPUT_NAME],
-                              output_names=[OUTPUT_NAME], opset_version=opset, dynamo=False)
-    finally:
-        del network.interpolate_pos_encoding
+def _export(network, destination: Path, fp16: bool) -> None:
+    """fp32 on the CPU at opset 17; fp16 under CUDA autocast at opset 18, which can export its casts."""
+    dummy = torch.randn(1, 3, CROP, CROP, device="cuda" if fp16 else "cpu")
+    with torch.no_grad(), torch.autocast("cuda", torch.float16, enabled=fp16):
+        torch.onnx.export(_Backbone(network).eval(), (dummy,), str(destination),
+                          input_names=[INPUT_NAME], output_names=[OUTPUT_NAME],
+                          opset_version=FP16_OPSET if fp16 else OPSET, dynamo=False)
 
 
 def _vectors(run, pixels: list[torch.Tensor]) -> torch.Tensor:
@@ -140,7 +147,7 @@ def export(variant: str, revision: str | None, weights_dir: Path, fp16: bool) ->
             raise SystemExit("the fp16 graph is exported on CUDA, under fp16 autocast")
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cudnn.allow_tf32 = False
-        network = load_network(SPECS[variant], checkpoint, "cuda")
+        network = reference.to("cuda")  # ``want`` is already on the host; no second load
 
         def autocast(x):
             with torch.autocast("cuda", torch.float16):
@@ -154,7 +161,7 @@ def export(variant: str, revision: str | None, weights_dir: Path, fp16: bool) ->
         raise SystemExit("xformers was imported; the vendored package must not need it")
     with tempfile.TemporaryDirectory() as scratch:
         staged = Path(scratch) / f"{key}.onnx"
-        _export(network, staged, FP16_OPSET if fp16 else OPSET, "cuda" if fp16 else "cpu", fp16)
+        _export(network, staged, fp16)
         require_one_file(staged)
         runner = OnnxRunner(staged, device="cpu")
         got = _vectors(lambda x: runner(x.numpy())[0], pixels)
@@ -177,11 +184,7 @@ def export(variant: str, revision: str | None, weights_dir: Path, fp16: bool) ->
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("variants", nargs="+", help=f"of {list(GRAPH_VARIANTS)}")
-    parser.add_argument("--revision", default=None, help="default: the newest published")
-    parser.add_argument("--weights-dir", type=Path, default=ROOT / "weights")
+    parser = variant_parser(__doc__, ROOT / "weights", required=True, revision=None)
     parser.add_argument("--fp16", action="store_true", help="export the onnx-fp16 graph (CUDA)")
     args = parser.parse_args()
     for variant in args.variants:

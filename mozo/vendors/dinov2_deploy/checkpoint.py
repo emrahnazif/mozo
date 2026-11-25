@@ -9,8 +9,9 @@ and used only in training; the network declares it so nothing is silently skippe
 
 The network is built on the ``meta`` device and the checkpoint's tensors are assigned into it,
 so a 1.1B-parameter giant is not first initialised at random and then overwritten. The tensors
-come from a plain ``torch.load``, not ``mmap``: each one gets an allocation of its own, as it would
-in upstream's ``load_state_dict`` copy.
+come from a plain ``torch.load``, not ``mmap``, straight onto the device: each one gets an
+allocation of its own, as it would in upstream's ``load_state_dict`` copy, and a GPU load never
+holds the whole model in host memory first.
 """
 
 from __future__ import annotations
@@ -43,6 +44,6 @@ def load_network(spec: Spec, path: str | Path, device: str = "cpu") -> DinoVisio
     """Build the backbone for *spec* and fill it from the checkpoint at *path*."""
     with torch.device("meta"):
         network = build(spec)
-    state = torch.load(path, map_location="cpu", weights_only=True)
+    state = torch.load(path, map_location=device, weights_only=True)
     network.load_state_dict(state, strict=True, assign=True)
-    return network.eval().to(device)
+    return network.eval()

@@ -13,7 +13,7 @@ and ``transformers`` gets the plain one wrong (``PROVENANCE.md``). The strict lo
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 __all__ = ["CROP", "MEAN", "RESIZE", "SPECS", "STD", "VARIANTS", "Spec"]
 
@@ -65,8 +65,6 @@ class Spec:
 
 def _registers(spec: Spec) -> Spec:
     """The same backbone trained with four registers, as upstream's ``*_reg`` hub entries build it."""
-    from dataclasses import replace
-
     return replace(spec, variant=f"{spec.variant}-reg", upstream=f"{spec.upstream}_reg",
                    registers=4, interpolate_antialias=True, interpolate_offset=0.0)
 

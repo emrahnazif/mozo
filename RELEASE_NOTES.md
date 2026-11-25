@@ -1,5 +1,17 @@
 ## Unreleased
 
+- **New family: Florence-2 object detection (`florence2_detect`), by Microsoft, MIT code and
+  weights.** It writes out every object it can name, each with a box, in its own words: `class_name`
+  is the model's label ("human face", "laptop") and `class_id` is `None`, since there is no class
+  list. Four variants: `base` (0.23B), `large` (0.77B), and Microsoft's fine-tuned `base-ft` and
+  `large-ft`, which use COCO's names (44.4 and 46.1 COCO AP on 500 val2017 images). The confidence is
+  Microsoft's own score, how sure the decoder was of the box, not a calibrated probability; every box
+  is returned unless you pass `threshold`, and `labels` is refused. Decoding is Microsoft's default
+  3-beam search, deterministic. On CUDA `auto` runs the published half-precision weights, about
+  twice as fast as fp32 with COCO AP within 0.3; on the CPU they load as exact fp32. Checked against
+  Microsoft's own code on every stage and every decoding step, with no tolerance. A workflow node
+  comes with it.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

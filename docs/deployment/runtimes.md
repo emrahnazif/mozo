@@ -22,6 +22,7 @@ itself; this page says what exists, how the choice is made, and when to override
 | Granite Embedding R2 | yes | none | yes |
 | OWLv2 | yes, and fp16 on CUDA | every variant (the image tower in fp16, to build TensorRT engines from) | none |
 | Grounding DINO | yes, and fp16 on CUDA | none (exported on your machine, to build TensorRT engines from) | none |
+| Florence-2 | yes; published in fp16, run in fp16 on CUDA and fp32 elsewhere | none | none |
 | BEN2, CLIP, Depth Anything V2, EasyOCR, EdgeTAM, Moebius, SAM 2, SigLIP 2 | yes | none | none |
 
 Some of those families publish graphs mozo does not run yet, such as SAM 2's ONNX and CoreML and

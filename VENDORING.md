@@ -29,7 +29,11 @@ Three rules hold everywhere and are never bent:
    Duplication between vendors is deliberate. Three families each carry their own copy of CLIP's
    byte-pair vocabulary; that is correct.
 2. **Each family gets its own vendored package *and* its own adapter.** No shared base classes
-   between families.
+   between families. One exception: families that are *views of one checkpoint* -- the same
+   weights asked different tasks and answering in different shapes, as Florence-2's `<OD>`
+   (`florence2_detect`) and its later text and grounding views -- share that checkpoint's vendored
+   package, and each still has its own adapter. Copies of one model's code and gate would be
+   duplication with no independence to buy: the views cannot drift apart, being one model.
 3. **The gate is exact.** `torch.equal`, no tolerance, because a tolerance hides precisely the
    drift a gate exists to catch.
 
@@ -355,6 +359,36 @@ Reproduce them, and record them:
   padded tokens are attended — and that is what the published weights were trained with.
 - A prompt containing a literal `<|endoftext|>` pools there (CLIP). Upstream behaves the same way.
 
+### Remote code and beam search (found vendoring Florence-2)
+
+- **Remote code pins its own transformers range.** Florence-2's `modeling_florence2.py` runs on
+  transformers up to 4.53.3 and fails inside on 4.54+ (cache API changes); 4.49, 4.51.3 and 4.53.3
+  gave bit-identical scores. Find the newest version it runs on and pin that.
+- **`attn_implementation` may not reach the sub-model you think.** Loading with `"eager"` set the
+  outer config only; the BART half kept transformers' default and built SDPA attention throughout.
+  The gate caught it at the first encoder layer (eager arithmetic: 2e-07 per attention). Print the
+  attention classes the reference actually built, do not trust the argument.
+- **Beam search's first step is forced.** With `forced_bos_token_id`, step 0's scores are `-inf`
+  everywhere but `<s>`, so "step 0 agrees" proves nothing about the decoder -- compare from step 1.
+- **Some beam-search rules show only in the sequence, never in a step's scores.** The length
+  penalty decides between *finished* hypotheses, so its falsifier fails at `sequence`; the
+  n-gram ban and the forced end only fail on inputs where they fire (a blank image's beams repeat
+  a trigram; the forced `</s>` needs a case cut by `max_new_tokens`). `early_stopping=False`
+  changed nothing on 13 fixtures. Choose each falsifier's fixture by measuring where it bites.
+- **A model card's parse path is not the only one, and may be the buggy one.** Florence-2's card
+  decodes to a string and parses that, which leaves the decoder's leading `</s>` in the first OCR
+  line (`'</s>Hello World'`) and gives no scores; the `sequence=` path drops the start token and is
+  the only one that returns `<OD>` scores.
+- **Sibling repositories carry different copies of the remote code.** Florence-2's `-ft`
+  repositories have an older `processing_florence2.py` with no `<OD>` scores; the base repository's
+  is newer. Diff every copy you reference.
+- **A published checkpoint can be replaced under the same name.** `Florence-2-large` became a
+  "4k context" model in December 2024 (new weights, 4,096 positions). Pin the commit, and measure
+  whether the replacement is better before choosing it.
+- **PIL's `reducing_gap` only matters past a 2x downscale** (factor `floor(scale / gap)`), so a
+  preprocessing falsifier for it needs a large image; and `x / 255` in float32 equals upstream's
+  float64-then-float32 rescale for every uint8 value, so that "difference" cannot be falsified.
+
 ### Environment traps
 
 - **Import-time side effects.** EasyOCR sets `os.environ["LRU_CACHE_CAPACITY"] = "1"` — a
@@ -462,7 +496,8 @@ Two measurement traps worth inheriting:
 ## 9. The rules, in one place
 
 1. A vendored package imports no other vendor and never `mozo`.
-2. Each family has its own vendored package and its own adapter. No sharing.
+2. Each family has its own vendored package and its own adapter. No sharing -- except families
+   that are views of one checkpoint, which share its package (§0).
 3. The gate is exact, covers every stage, and has been made to fail on purpose.
 4. Pin the reference: commit, versions, device, attention implementation.
 5. Geometry is written down, never inferred. The strict load is what checks it.

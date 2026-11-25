@@ -28,7 +28,20 @@ for sampling, `transformers` runs after `torch.manual_seed(seed)` and mozo draws
 `torch.Generator` seeded the same, and the sampled ids agree exactly. Through three paths: this
 package, the reference, and mozo's adapter loaded through the registry and the weights tree.
 
-RESULTS_PLACEHOLDER
+**`2b`: 918 comparisons on 12 fixtures, all `torch.equal`** -- every pre-decoding stage (61) plus
+every step's logits, the ids and the text: the photograph at the default 2.6 MP budget (2,414
+prompt tokens, 32 steps); two sampled cases (t=0.7/p=0.8/k=20, seed 3; t=1.3, seed 11); an answer
+that stops on its own (2 tokens); a 9x13 image scaled up to the pixel floor; a 2000x120 strip; a
+512x512 image (no resize); the photograph at a 262,144-pixel budget; an RGBA PNG and a greyscale
+JPEG through `load_image`; CJK + emoji + a combining mark + a newline; a 630-token prompt. The
+mozo path (registry, `file://` weights, adapter, `auto` → `torch-fp32` on CPU) agreed on the
+photograph and both sampled cases. **`4b`: 271 comparisons on 3 fixtures (the photograph at 2.6 MP, the sampled case, the stopping case), all `torch.equal`, mozo path included.**
+
+Falsified on 13 perturbations (`--falsify all`), each caught at the first stage it reaches: the
+resize's antialias, `round` in `smart_resize`, the position table's corner alignment, the vision
+GELU, the mergers' LayerNorm epsilon, the vision rotary positions (×(1+1e-7), 2.1e-06), M-RoPE's
+interleaving, DeepStack's layers, the text rotary base, the RMSNorm epsilon, the warpers' order, the
+seed, and the tokenizer's NFC.
 
 **Claimed only against `transformers` 5.24.1.** 4.57.3 gives the same pixels, the same prompt ids
 and the same 64 greedy tokens on the example photograph, and different logits at every one of the
@@ -107,7 +120,26 @@ names behind `model.`; there is no `lm_head.weight` (tied to the embedding).
 
 ## Runtimes
 
-RUNTIMES_PLACEHOLDER
+torch only. Published: one artifact per variant, `torch-bf16` (the checkpoint as stored); mozo's
+`torch-fp32` is that file upcast at load (`DERIVES`), which is exact and the gated path.
+
+**bf16 on CUDA is what `auto` picks there**, measured on an RTX 3060 12 GB with the example
+photograph and 32 new tokens: `2b` 1.74 s against fp32's 6.71 s (4.7 GB against 10.2 GB), `4b`
+2.77 s (9.5 GB; fp32 does not fit 12 GB). mozo and `transformers` take the same time on both
+(6.71 s / 1.74 s for `2b`). On 300 VQAv2 questions, `2b` bf16 gave 295 of fp32's 300 answers
+unchanged (VQA accuracy 76.9% against 77.3%). bf16 is not bit-identical to anything, and on the
+CPU it is refused: 2.7x slower than fp32 there, and a different answer from the second token.
+
+**ONNX and TensorRT, vision tower only, not published.** The tower exports (fixed grid, the
+grid-dependent tables as inputs): ONNX Runtime matches torch fp32 to 3.7e-04 at 1,040 patches and
+5.3e-03 at 9,600, and is 12-30x slower than torch on the GPU (it has only its CPU provider in
+mozo's install). A TensorRT 11 fp32 engine at 1,040 patches is 1.22x torch fp32 (max |d|
+1.9e-04); at 9,600 patches its execution context wants 12.15 GB and does not fit a 12 GB card. An
+fp16 engine is 5.2x torch fp32 at 1,040 patches and 8.2x at 9,600 (466 ms against 3,820 ms),
+against features that then differ by up to 0.97 and 3.1.
+The tower is a fraction of a bf16 call's time (1.19 s to the first token for the whole prefill),
+so neither is worth an artifact. The text decoder was not exported: one graph per decoding step
+with a growing cache as inputs and outputs, three rotary rows and DeepStack outside it.
 
 ## Traps found while building it
 

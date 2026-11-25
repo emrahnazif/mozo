@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Granite Embedding R2's inference path, extracted from ``transformers/models/modernbert``.
 
-An English text becomes one vector, and texts that mean the same thing land close together. Text
-only: there is no image tower, so these vectors do not share a space with CLIP's or SigLIP 2's.
+A text -- English, or with ``multilingual-small`` any of 200+ languages -- becomes one vector, and
+texts that mean the same thing land close together. Text only: there is no image tower, so these
+vectors do not share a space with CLIP's or SigLIP 2's.
 
     >>> from mozo.vendors.granite_embedding_r2_deploy import Encoder, SPECS
     >>> encoder = Encoder(weights, SPECS["small"])                     # doctest: +SKIP
@@ -11,7 +12,7 @@ only: there is no image tower, so these vectors do not share a space with CLIP's
 See ``PROVENANCE.md`` for what was taken, what was left, and where this diverges.
 """
 
-from .config import CONTEXT, SPECS, VARIANTS, Spec
+from .config import SPECS, VARIANTS, Spec
 from .predictor import Encoder
 
-__all__ = ["CONTEXT", "SPECS", "VARIANTS", "Encoder", "Spec"]
+__all__ = ["SPECS", "VARIANTS", "Encoder", "Spec"]

@@ -6,7 +6,8 @@ complaint if it is got wrong:
 
 **Rotary positions, at two bases.** No position embedding is added anywhere. Queries and keys are
 rotated instead, and the rotation's base depends on the layer: the full-attention layers turn at
-``global_theta`` (80,000), the sliding ones at ``local_theta`` (10,000). The angles are computed in
+``global_theta`` (80,000 English, 150,000 multilingual), the sliding ones at ``local_theta``
+(10,000 and 160,000). The angles are computed in
 float32 from an *integer* ``arange`` divided by the head dimension, the way upstream does it -- a
 float ``arange`` rounds differently.
 
@@ -15,9 +16,11 @@ see ``abs(query - key) <= window`` -- 64 either side, 129 positions in all. Upst
 module carries ``window + 1``, but only its FlashAttention path reads that; the mask the SDPA path
 uses is built from ``window`` itself. Copying the 65 changes every input longer than 65 tokens.
 
-**A gated MLP with exact GELU.** One matrix produces the value and the gate together, split in that
-order: ``Wo(gelu(value) * gate)``. ``hidden_activation`` is ``"gelu"``, the erf form, not the tanh
-approximation SigLIP 2 uses.
+**A gated MLP.** One matrix produces the value and the gate together, split in that order:
+``Wo(act(value) * gate)``. The English model's ``hidden_activation`` is ``"gelu"``, the erf form, not
+the tanh approximation SigLIP 2 uses; the multilingual model's is ``"silu"``. Still gated: IBM's
+card calls the larger multilingual model's MLP "GeGLU" and the small one's "SiLU", but the
+checkpoint's ``Wi`` is two matrices' worth wide for both, and upstream splits it the same way.
 
 **No biases, and no norm before the first attention.** Not in any linear layer, not in any
 LayerNorm. And layer 0 feeds its input straight to attention: upstream makes its ``attn_norm`` an
@@ -105,17 +108,23 @@ class Attention(nn.Module):
         return self.Wo(attended.transpose(1, 2).reshape(batch, length, -1))
 
 
+#: The activations a variant may name, by the published config's ``hidden_activation``:
+#: transformers' ``ACT2FN``, whose ``"gelu"`` is the exact erf form and ``"silu"`` is ``nn.SiLU``.
+ACTIVATIONS = {"gelu": F.gelu, "silu": F.silu}
+
+
 class MLP(nn.Module):
-    """``Wo(gelu(value) * gate)``, with value and gate from one projection, in that order."""
+    """``Wo(act(value) * gate)``, with value and gate from one projection, in that order."""
 
     def __init__(self, spec: Spec) -> None:
         super().__init__()
+        self.act = ACTIVATIONS[spec.activation]
         self.Wi = nn.Linear(spec.width, 2 * spec.mlp, bias=False)
         self.Wo = nn.Linear(spec.mlp, spec.width, bias=False)
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
         value, gate = self.Wi(hidden).chunk(2, dim=-1)
-        return self.Wo(F.gelu(value) * gate)
+        return self.Wo(self.act(value) * gate)
 
 
 class EncoderLayer(nn.Module):

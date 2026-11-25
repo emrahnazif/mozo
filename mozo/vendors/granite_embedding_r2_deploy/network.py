@@ -35,9 +35,9 @@ class Network(nn.Module):
     """Granite Embedding R2's encoder. ``(N, L)`` int64 ids -> ``(N, L, width)``.
 
     Every row must be the same length and none may be padding: there is no attention mask for
-    padding, because nothing here pads. A padded batch is not bit-identical to its rows run alone
-    (measured 1.1e-07), so :class:`~mozo.vendors.granite_embedding_r2_deploy.predictor.Encoder`
-    only ever batches rows of equal length.
+    padding, because nothing here pads. Not even an equal-length batch is bit-identical to its rows
+    run alone on a multi-threaded CPU, so
+    :class:`~mozo.vendors.granite_embedding_r2_deploy.predictor.Encoder` runs one row at a time.
     """
 
     def __init__(self, spec: Spec) -> None:

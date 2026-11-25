@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Granite Embedding R2's tokenizer: ModernBERT's byte-level BPE, rebuilt from its parts.
+"""Granite Embedding R2's tokenizers: two byte-level BPEs, rebuilt from their parts.
 
-The published ``tokenizer.json`` is a pipeline of five stages, and each one has a way to give
-plausible wrong ids without raising:
+Each published ``tokenizer.json`` is a pipeline, and each stage has a way to give plausible wrong
+ids without raising. Two pipelines are carried, one per vocabulary asset, and they share every
+stage but three.
+
+**The English one** (``granite_bpe``, ModernBERT's):
 
 1. **Added tokens are cut out first, in two passes.** The seven special tokens (``[CLS]``,
    ``[SEP]``, ``<|endoftext|>`` ...) are matched on the raw text. The other 109 -- ``[unused0]`` to
@@ -16,20 +19,36 @@ plausible wrong ids without raising:
 4. **GPT-2's split pattern**, then each piece's UTF-8 bytes mapped to printable characters.
 5. **Byte-pair merges within each piece**, lowest rank first.
 
-Then ``[CLS]`` in front and ``[SEP]`` behind. That is the whole template.
+Then ``[CLS]`` in front and ``[SEP]`` behind.
 
-**Unicode tables are carried, not borrowed from the interpreter.** Three stages ask Unicode
-questions -- is this a letter, a digit, whitespace; how does this compose -- and the answers
-change between Unicode versions. Python 3.10 ships Unicode 13 and 3.14 ships 16; the ``regex``
-package ships newer still; the reference is none of them. Measured against it: ``regex`` 2026.4
-calls 4,657 codepoints letters or digits that the reference treats as punctuation, Python 3.14
-decomposes 20 characters the reference leaves alone, and even Python 3.10 composes across 58
-marks the reference will not. Any of those would make a document's vector depend on which Python
-wrote it, silently, and an index written from two machines would not agree with itself. So the split pattern is built from the reference's own classes, read out of it when the
-vocabulary was derived, and NFC is applied the way the reference applies it. See :func:`_nfc`.
+**The multilingual one** (``granite_multilingual_bpe``, 180K pieces) differs in three stages:
 
-The vocabulary ships beside this module, derived from the published ``tokenizer.json`` by
-``tools/fetch/granite_embedding_r2.py --derive-vocab``. See ``PROVENANCE.md`` for its hash.
+- **No normalisation at all.** ``e`` + U+0301 and ``é`` are different tokens, as upstream.
+- **o200k's split pattern**, which splits ``camelCase`` at the capital, keeps digits in runs of at
+  most three, and matches contractions case-insensitively -- including ``'ſ``, because the long s
+  case-folds to ``s``.
+- **A piece that is already in the vocabulary is taken whole** (``ignore_merges``), before any
+  merge is tried. And 40 control bytes and three UTF-8 lead bytes have no piece: upstream drops
+  them without a word, and the bytes either side of the gap may then merge.
+
+Its 44 reserved non-special tokens are ``single_word``: written out against a letter, digit or
+underscore on either side, they are not that token but ordinary text. Its template is
+``<|startoftext|> ... <|return|>``.
+
+**Unicode tables are carried, not borrowed from the interpreter.** Each split pattern asks Unicode
+questions -- is this a letter, upper or lower case, a mark, a digit, whitespace -- and the English
+pipeline also composes. The answers change between Unicode versions. Python 3.10 ships Unicode 13
+and 3.14 ships 16; the ``regex`` package ships newer still; the reference is none of them.
+Measured against it: ``regex`` 2026.4 calls 4,657 codepoints letters or digits that the reference
+treats as punctuation, Python 3.14 decomposes 20 characters the reference leaves alone, and even
+Python 3.10 composes across 58 marks the reference will not. Any of those would make a document's
+vector depend on which Python wrote it, silently, and an index written from two machines would not
+agree with itself. So each split pattern is built from the reference's own classes, read out of it
+when the vocabulary was derived, and NFC is applied the way the reference applies it. See
+:func:`_nfc`.
+
+The vocabularies ship beside this module, derived from the published ``tokenizer.json`` files by
+``tools/fetch/granite_embedding_r2.py --derive-vocab``. See ``PROVENANCE.md`` for their hashes.
 
 This module imports nothing outside the standard library, so it can be checked under any Python
 on its own.
@@ -48,7 +67,15 @@ from typing import Callable, NamedTuple, Sequence
 
 __all__ = ["Tokenizer"]
 
-VOCAB_PATH = Path(__file__).resolve().parent / "assets" / "granite_bpe.json.gz"
+ASSETS = Path(__file__).resolve().parent / "assets"
+
+#: The English vocabulary, ModernBERT's.
+ENGLISH = "granite_bpe"
+
+
+def vocab_path(vocabulary: str) -> Path:
+    """Where the asset named *vocabulary* lives."""
+    return ASSETS / f"{vocabulary}.json.gz"
 
 #: Every codepoint above the Basic Multilingual Plane, as a class body.
 _ASTRAL = "\U00010000-\U0010ffff"
@@ -130,10 +157,12 @@ def _alternation(tokens: list[str]) -> "re.Pattern[str]":
 
 
 class Tables(NamedTuple):
-    """Everything read out of the vocabulary asset, named rather than positional."""
+    """Everything read out of one vocabulary asset, named rather than positional."""
 
-    #: Byte -> the id of the piece that stands for it.
+    #: Byte -> the id of the piece that stands for it, or -1 for a byte with no piece.
     byte_ids: list[int]
+    #: Byte-mapped piece -> id, for a piece taken whole (``ignore_merges``); empty otherwise.
+    whole: dict[str, int]
     #: Adjacent pair of ids -> the priority of merging them. Lower wins.
     ranks: dict[tuple[int, int], int]
     #: The id a merge produces, indexed by that merge's rank.
@@ -147,22 +176,75 @@ class Tables(NamedTuple):
     lstrip: frozenset[str]
     #: What ``lstrip`` counts as whitespace: Rust's ``char::is_whitespace``.
     strip: frozenset[str]
-    #: GPT-2's split pattern, over the reference's own character classes.
+    #: The added tokens that count only standing alone, and the characters that stop them: the
+    #: reference's word characters (``\\w``), letters, marks, digits and connectors.
+    single_word: frozenset[str]
+    word: "re.Pattern[str]"
+    #: The split pattern, over the reference's own character classes.
     split: "re.Pattern[str]"
-    #: Where NFC must not reach across. See :func:`_nfc`.
-    boundaries: "re.Pattern[str]"
-    #: The ids the template puts before and after every input: ``[CLS]`` and ``[SEP]``.
+    #: Where NFC must not reach across (see :func:`_nfc`), or ``None`` for no normalisation.
+    boundaries: "re.Pattern[str] | None"
+    #: The ids the template puts before and after every input.
     before: tuple[int, ...]
     after: tuple[int, ...]
 
 
-@lru_cache(maxsize=1)
-def _vocabulary() -> Tables:
-    """Read the asset once and build the lookups tokenizing needs.
+def _gpt2(data: dict) -> "re.Pattern[str]":
+    """GPT-2's pattern, as the reference writes it::
+
+        's|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+
+
+    with each class replaced by the reference's own membership. ``re`` rather than ``regex``,
+    because once the classes are explicit nothing here needs Unicode properties at all.
+    """
+    letters, numbers = _member(data["letters"]), _member(data["numbers"])
+    other = _member(sorted(data["spaces"] + data["letters"] + data["numbers"]), negate=True)
+    spaces = _class(data["spaces"])  # all within the BMP, so one class is already fast
+    return re.compile(
+        rf"'s|'t|'re|'ve|'m|'ll|'d| ?{letters}+| ?{numbers}+| ?{other}+"
+        rf"|[{spaces}]+(?![^{spaces}])|[{spaces}]+")
+
+
+def _o200k(data: dict) -> "re.Pattern[str]":
+    """o200k's pattern, as the reference writes it::
+
+        [^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]*[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?
+        |[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]+[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?
+        |\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+
+
+    with each class replaced by the reference's own membership, and the case-insensitive
+    contractions by the characters the reference matches for each letter -- read off it, because
+    case folding is a Unicode table too: ``(?i:'s)`` matches ``'ſ``.
+    """
+    letters, numbers, spaces = data["letters"], data["numbers"], data["spaces"]
+    upper, lower = _member(data["upper"]), _member(data["lower"])
+    lead = _member(sorted(letters + numbers + [[10, 10], [13, 13]]), negate=True)
+    other = _member(sorted(spaces + letters + numbers), negate=True)
+    space = _class(spaces)  # all within the BMP
+    # ``'s 't 'm 'd`` are one class of first character, ``'re 've`` two classes, ``'ll`` two.
+    contraction = "'(?:" + "|".join(
+        "".join(f"[{re.escape(characters)}]" for characters in alternative)
+        for alternative in data["contractions"]) + ")"
+    return re.compile(
+        rf"{lead}?{upper}*{lower}+(?:{contraction})?"
+        rf"|{lead}?{upper}+{lower}*(?:{contraction})?"
+        rf"|{_member(numbers)}{{1,3}}| ?{other}+[\r\n/]*|[{space}]*[\r\n]+"
+        rf"|[{space}]+(?![^{space}])|[{space}]+")
+
+
+#: The split patterns an asset may name.
+PATTERNS: dict[str, Callable[[dict], "re.Pattern[str]"]] = {"gpt2": _gpt2, "o200k": _o200k}
+
+
+@lru_cache(maxsize=None)
+def _vocabulary(vocabulary: str) -> Tables:
+    """Read the asset named *vocabulary* once and build the lookups tokenizing needs.
 
     Cached at module level rather than per instance, so two encoders in one process share one copy.
+    An asset says which split pattern it uses, whether it normalises and whether it takes known
+    pieces whole; the English asset predates those keys, and its values are their defaults.
     """
-    data = json.loads(gzip.decompress(VOCAB_PATH.read_bytes()))
+    data = json.loads(gzip.decompress(vocab_path(vocabulary).read_bytes()))
     pieces: list[str] = data["pieces"]
     ids = {piece: index for index, piece in enumerate(pieces)}
 
@@ -173,29 +255,23 @@ def _vocabulary() -> Tables:
         ranks[(left, right)] = rank
         merged.append(ids[pieces[left] + pieces[right]])
 
-    # Five bytes have no piece (0xC0, 0xC1, 0xF5-0xFF). None of them occurs in UTF-8, which is
-    # the only thing ever split into bytes here.
+    # Bytes with no piece are -1 and dropped, as upstream drops a character it has no piece for
+    # when there is no unknown token. English: five bytes that never occur in UTF-8 (0xC0, 0xC1,
+    # 0xF5-0xFF). Multilingual: also 40 control bytes and the lead bytes 0xF1, 0xF2 and 0xF4.
     byte_ids = [ids.get(character, -1) for _, character in sorted(byte_encoder().items())]
 
     added = {token["content"]: token["id"] for token in data["added"]}
     raw = _alternation([t["content"] for t in data["added"] if not t["normalized"]])
     normalised = _alternation([t["content"] for t in data["added"] if t["normalized"]])
     lstrip = frozenset(t["content"] for t in data["added"] if t["lstrip"])
-    strip = frozenset(chr(c) for low, high in data["strip"] for c in range(low, high + 1))
+    strip = frozenset(chr(c) for low, high in data.get("strip", []) for c in range(low, high + 1))
+    single_word = frozenset(t["content"] for t in data["added"] if t.get("single_word"))
+    nfc = data.get("normalizer", "NFC") == "NFC"
 
-    # GPT-2's pattern, as the reference writes it:
-    #   's|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+
-    # with each class replaced by the reference's own membership. ``re`` rather than ``regex``,
-    # because once the classes are explicit nothing here needs Unicode properties at all.
-    letters, numbers = _member(data["letters"]), _member(data["numbers"])
-    other = _member(sorted(data["spaces"] + data["letters"] + data["numbers"]), negate=True)
-    spaces = _class(data["spaces"])  # all within the BMP, so one class is already fast
-    split = re.compile(
-        rf"'s|'t|'re|'ve|'m|'ll|'d| ?{letters}+| ?{numbers}+| ?{other}+"
-        rf"|[{spaces}]+(?![^{spaces}])|[{spaces}]+")
-
-    return Tables(byte_ids, ranks, merged, added, raw, normalised, lstrip, strip, split,
-                  re.compile(_member(data["boundaries"])),
+    return Tables(byte_ids, ids if data.get("ignore_merges") else {}, ranks, merged, added, raw,
+                  normalised, lstrip, strip, single_word, re.compile(_member(data.get("word", []))),
+                  PATTERNS[data.get("pattern", "gpt2")](data),
+                  re.compile(_member(data["boundaries"])) if nfc else None,
                   tuple(data["template"]["before"]), tuple(data["template"]["after"]))
 
 
@@ -279,20 +355,27 @@ def _merge(symbols: list[int], ranks: dict[tuple[int, int], int], merged: list[i
 
 
 @lru_cache(maxsize=WORD_CACHE)
-def _word(word: str) -> tuple[int, ...]:
+def _word(vocabulary: str, word: str) -> tuple[int, ...]:
     """One pre-tokenized piece to ids.
 
     Cached because prose repeats its words, bounded because a corpus's numbers, hashes and
     identifiers do not, and at module level because the answer depends only on the shared tables:
     every tokenizer in the process can use one cache.
     """
-    tables = _vocabulary()
-    symbols = [tables.byte_ids[byte] for byte in word.encode("utf-8")]
+    tables = _vocabulary(vocabulary)
+    if tables.whole:
+        # Upstream looks the whole byte-mapped piece up before merging anything. Not a shortcut:
+        # merging can reach a different split of a piece the vocabulary has whole.
+        encoder = byte_encoder()
+        whole = tables.whole.get("".join(encoder[byte] for byte in word.encode("utf-8")))
+        if whole is not None:
+            return (whole,)
+    symbols = [i for i in (tables.byte_ids[byte] for byte in word.encode("utf-8")) if i >= 0]
     return tuple(_merge(symbols, tables.ranks, tables.merged))
 
 
 class Tokenizer:
-    """Turn text into the token ids the encoder expects, ``[CLS]`` and ``[SEP]`` included.
+    """Turn text into the token ids the encoder expects, the template's special tokens included.
 
     Examples:
         >>> Tokenizer().encode("Hello  world")             # doctest: +SKIP
@@ -303,11 +386,14 @@ class Tokenizer:
             :meth:`__call__`, not by :meth:`encode`, which reproduces upstream and so enforces
             nothing. A parameter rather than an import, so this module stays free of the rest of
             the package and can be checked under any Python on its own.
+        vocabulary: Which asset: :data:`ENGLISH`, or ``"granite_multilingual_bpe"``. A variant's
+            ``Spec.vocabulary`` names it.
     """
 
-    def __init__(self, context: int | None = None) -> None:
+    def __init__(self, context: int | None = None, vocabulary: str = ENGLISH) -> None:
         self.context = context
-        self._tables = _vocabulary()
+        self.vocabulary = vocabulary
+        self._tables = _vocabulary(vocabulary)
 
     def __call__(self, texts: str | Sequence[str]) -> list[list[int]]:
         """Encode one text or many, refusing what the encoder cannot take.
@@ -345,12 +431,18 @@ class Tokenizer:
         """Emit the added tokens *pattern* finds in *text*, and hand what lies between to *between*.
 
         Both passes -- the raw one and the normalised one -- go through here, so an added token's
-        ``lstrip`` is honoured in whichever pass matches it.
+        ``lstrip`` and ``single_word`` are honoured in whichever pass matches it.
         """
         tables = self._tables
         position = 0
         for match in pattern.finditer(text):
             token, start = match.group(), match.start()
+            if token in tables.single_word and (
+                    (start and tables.word.match(text, start - 1))
+                    or tables.word.match(text, match.end())):
+                # Against a word character it is not the token. Upstream drops the match and does
+                # not look again inside it, which is what moving on to the next match does here.
+                continue
             if token in tables.lstrip:
                 # Back over the whitespace before it, but never into the previous match.
                 while start > position and text[start - 1] in tables.strip:
@@ -363,17 +455,18 @@ class Tokenizer:
     def _ordinary(self, text: str, out: list[int]) -> None:
         """Split normalised text without added tokens into pieces, and encode each."""
         for word in self._tables.split.findall(text):
-            out.extend(_word(word))
+            out.extend(_word(self.vocabulary, word))
 
     def _normalised(self, text: str, out: list[int]) -> None:
         """Normalise a stretch of raw text, then cut out the added tokens matched after that."""
-        self._cut(self._tables.normalised, _nfc(text, self._tables.boundaries), out,
-                  self._ordinary)
+        boundaries = self._tables.boundaries
+        self._cut(self._tables.normalised, text if boundaries is None else _nfc(text, boundaries),
+                  out, self._ordinary)
 
     def encode(self, text: str) -> list[int]:
-        """*text* to ids, as ``[CLS] ... [SEP]``. No truncation and no padding.
+        """*text* to ids, between the template's tokens. No truncation and no padding.
 
-        Special tokens written out in the text -- ``[SEP]``, ``<|endoftext|>`` -- become that token,
+        Special tokens written out in the text -- ``[SEP]``, ``<|return|>`` -- become that token,
         exactly as they do upstream, so a document that *mentions* ``[SEP]`` carries a separator
         in the middle. The published weights were evaluated that way; this reproduces it rather
         than escaping it.

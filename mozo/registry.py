@@ -93,7 +93,8 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 #: The adapters read it from here, so there is one statement of it.
 EXECUTES: dict[str, tuple[str, ...]] = {
     **{family: ("torch",)
-       for family in ("ben2", "clip", "easyocr", "edgetam", "moebius", "sam2", "siglip2")},
+       for family in ("ben2", "clip", "easyocr", "edgetam", "florence2_detect", "moebius", "sam2",
+                      "siglip2")},
     # A TensorRT engine exported from the checkpoint at the input size the user picks.
     "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
@@ -127,6 +128,10 @@ DERIVES: dict[str, dict[str, str]] = {
     # (``seg-nano``) torch fp32 -- RF-DETR is launch-bound at batch 1. fp16 only where an fp16
     # graph is published (the detection variants), and only on request.
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # The other way round: Microsoft publishes Florence-2 in float16 and so does mozo, and
+    # ``torch-fp32`` is that file upcast at load -- exact, since every float16 value is a float32
+    # value, and the path the gate holds bit-identical to Microsoft's code.
+    "florence2_detect": {"torch-fp32": "torch-fp16"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -232,6 +237,25 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'Apache 2.0.'
         ),
         'variants': ['edgetam'],
+    },
+
+    'florence2_detect': {
+        'adapter_class': 'Florence2DetectPredictor',
+        'module': 'mozo.adapters.florence2_detect',
+        'task_type': 'object_detection',
+        'description': (
+            'Florence-2 by Microsoft — object detection with an open vocabulary of its own. '
+            'Hand it a photograph and it writes out every object it can name, each with a box: '
+            '"glasses", "human face", "laptop", not an index into a fixed class list, so '
+            'class_id is None and class_name is the model\'s words. One task of a multi-task '
+            'model (its <OD> prompt): a DaViT vision tower and a BART encoder-decoder that writes '
+            'labels and location tokens, decoded with upstream\'s 3-beam search. 4 variants: '
+            'base (0.23B) and large (0.77B), and their fine-tuned base-ft and large-ft, which '
+            'name COCO\'s classes. The confidence is upstream\'s own score — how sure the '
+            'decoder was of a box\'s coordinates — not a calibrated probability, and every box '
+            'is returned unless you pass a threshold. Code and weights are MIT.'
+        ),
+        'variants': ['base', 'large', 'base-ft', 'large-ft'],
     },
 
     'granite_embedding_r2': {

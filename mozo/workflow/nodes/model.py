@@ -126,6 +126,18 @@ def rfdetr_checkpoint(image: Image, models: Models, checkpoint: Optional[FilePat
         image, threshold=threshold)
 
 
+@node(category="Detect", exclusive=True)
+def florence2_detect(image: Image, models: Models, variant: variants("florence2_detect") = "base",
+                     threshold: float = 0.0) -> Detections:
+    """Florence-2 by Microsoft -- detection that names what it finds in its own words.
+
+    No class list: each result's ``class_name`` is the model's own label ("human face",
+    "laptop") and ``class_id`` is empty. The score is how sure the decoder was of the box, not a
+    calibrated probability; 0 keeps every box the model wrote.
+    """
+    return models("florence2_detect", variant).predict(image, threshold=threshold)
+
+
 # --- Detection from a description ----------------------------------------------------------------
 
 @node(category="Detect", exclusive=True)

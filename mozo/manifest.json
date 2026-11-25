@@ -501,6 +501,106 @@
         }
       }
     },
+    "florence2_detect/base": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "florence2_detect/base/2026-11-25/LICENSE",
+              "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+              "size": 1141
+            },
+            "NOTICE": {
+              "path": "florence2_detect/base/2026-11-25/NOTICE",
+              "sha256": "29c5222aaa5fb047c22c1bef5e5ff871d6ea0251ea6ee73813eaf5141d7b234b",
+              "size": 1094
+            },
+            "torch-fp16": {
+              "path": "florence2_detect/base/2026-11-25/torch-fp16.pth",
+              "sha256": "5cc092e6209f956b4ec5a84b5f346cf55219eb23202cd88d2fde0dafafd5a2f5",
+              "size": 463360747
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    "florence2_detect/base-ft": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "florence2_detect/base-ft/2026-11-25/LICENSE",
+              "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+              "size": 1141
+            },
+            "NOTICE": {
+              "path": "florence2_detect/base-ft/2026-11-25/NOTICE",
+              "sha256": "a7c0943dff0a842d4db915cb2f9d86e511fe0db9fdab08559a2e613ad1b7de90",
+              "size": 1103
+            },
+            "torch-fp16": {
+              "path": "florence2_detect/base-ft/2026-11-25/torch-fp16.pth",
+              "sha256": "deb65a5e7e97c292e877ad0e068d887830e7cdb72782c647ad1dcdf2f3ee7512",
+              "size": 463360747
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    "florence2_detect/large": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "florence2_detect/large/2026-11-25/LICENSE",
+              "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+              "size": 1141
+            },
+            "NOTICE": {
+              "path": "florence2_detect/large/2026-11-25/NOTICE",
+              "sha256": "8ae7da6c0e41aa94488eb3b572922c6e411f84716dbaaa97fda1e8c03aa5e365",
+              "size": 1097
+            },
+            "torch-fp16": {
+              "path": "florence2_detect/large/2026-11-25/torch-fp16.pth",
+              "sha256": "872c7b26433f1d35ff57cf8c6856c64bd8f4bc2dacbc641be63167282c18cf9a",
+              "size": 1553753959
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
+    "florence2_detect/large-ft": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "florence2_detect/large-ft/2026-11-25/LICENSE",
+              "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+              "size": 1141
+            },
+            "NOTICE": {
+              "path": "florence2_detect/large-ft/2026-11-25/NOTICE",
+              "sha256": "488632a103f73add43073ffe7b0ee4f35ee9164426e40409494d1a0e72ff133f",
+              "size": 1106
+            },
+            "torch-fp16": {
+              "path": "florence2_detect/large-ft/2026-11-25/torch-fp16.pth",
+              "sha256": "beb9ef1b37ae41b8ecfc602a419929fe02167c789f7a8053237badbfbd1d3e6a",
+              "size": 1541171047
+            }
+          },
+          "license": "MIT"
+        }
+      }
+    },
     "granite_embedding_r2/small": {
       "latest": "2026-11-24",
       "revisions": {

@@ -20,7 +20,7 @@ Three details are where a restatement goes wrong, and each moves pixels:
   167x1336. Same idea, different pixels; this module follows the processor the checkpoint ships.
 
 :func:`fit_square` is mozo's rather than upstream's: scaled to fit a fixed square and padded, with
-a mask saying which pixels are padding, because a compiled graph runs at one shape. The model
+a mask saying which pixels are padding, for callers who want one shape (``input_size``). The model
 reads the mask as it reads the padding of a training batch, so it attends only to the picture --
 but the picture is smaller than the resize would make it, so the answers differ.
 """

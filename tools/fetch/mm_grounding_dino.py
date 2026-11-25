@@ -36,7 +36,6 @@ from __future__ import annotations
 import gzip
 import json
 import sys
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,7 +44,8 @@ import torch
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
-from common import digest, download_verified, require_licence, variant_parser  # noqa: E402
+from common import (  # noqa: E402
+    digest, download_verified, hub_lfs_sha256s, require_licence, variant_parser)
 
 _HF = "https://huggingface.co"
 
@@ -86,21 +86,6 @@ CHECKPOINTS: dict[str, Checkpoint] = {
                    "Objects365 v2, OpenImages v6, GoldG and GroundingCap-1M", "51.1"),
     )
 }
-
-
-def recorded_sha256(entry: Checkpoint) -> str:
-    """The sha256 the Hub records for ``model.safetensors`` at the pinned commit.
-
-    Read from the API rather than typed here: a digest transcribed by hand verifies the
-    transcription, not the file.
-    """
-    url = f"{_HF}/api/models/{entry.repo}/revision/{entry.commit}?blobs=true"
-    with urllib.request.urlopen(url, timeout=60) as response:
-        listing = json.load(response)
-    for sibling in listing["siblings"]:
-        if sibling["rfilename"] == "model.safetensors":
-            return sibling["lfs"]["sha256"]
-    raise SystemExit(f"{entry.repo}@{entry.commit} has no model.safetensors")
 
 
 def _notice(entry: Checkpoint, sha256: str) -> str:
@@ -144,7 +129,9 @@ def fetch(variant: str, revision: str, weights_dir: Path) -> None:
     target = weights_dir / "mm_grounding_dino" / variant / revision / "torch-fp32.pth"
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    sha256 = recorded_sha256(entry)
+    # Read from the Hub at the pinned commit, not typed here: a transcribed digest verifies the
+    # transcription, not the file.
+    sha256 = hub_lfs_sha256s(entry.repo, entry.commit)["model.safetensors"]
     part = target.with_name("model.safetensors")
     if not target.is_file():
         download_verified(f"{_HF}/{entry.repo}/resolve/{entry.commit}/model.safetensors", part,

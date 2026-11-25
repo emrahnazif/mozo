@@ -360,13 +360,6 @@ def test_fit_square_fills_the_long_side_and_masks_the_rest(height, width):
     assert (canvas[:, h:, :] == 0).all() and (canvas[:, :, w:] == 0).all()
 
 
-def test_a_compiled_forward_needs_a_square():
-    from mozo.vendors.mm_grounding_dino_deploy import Predictor
-
-    with pytest.raises(ValueError, match="input_size"):
-        Predictor(None, SPECS[SMALLEST], forward=lambda *inputs: None)
-
-
 def test_input_size_is_checked():
     from mozo.adapters.mm_grounding_dino import MMGroundingDinoPredictor
 

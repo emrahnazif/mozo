@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Write the network as an ONNX graph, for a compiled runtime to build from.
+"""Write MM-Grounding-DINO as an ONNX graph, for measuring ONNX Runtime and TensorRT on it.
 
-Not upstream's: upstream ships no graph. This exists because a TensorRT engine is built from a
-graph, and this model's input size is the user's choice (:func:`~.image.fit_square`), so the
-graph cannot be published ahead of time -- it is written on the user's machine, once per size.
+Bootstrap tooling, not shipped: mozo offers neither runtime for this family (see the vendor's
+PROVENANCE, under Runtimes), and this is what the bench builds them from to re-measure. The image
+is fitted into a fixed square (:func:`~mozo.vendors.mm_grounding_dino_deploy.image.fit_square`).
 
 **One square input size, any caption length.** The image is fitted into a fixed square, so
 height and width are fixed; the caption's token count is left dynamic, up to the model's
 256-token budget, so one graph serves every prompt. The padding mask is an input, as
-:meth:`~.network.MMGroundingDino.forward` takes it.
+:meth:`~mozo.vendors.mm_grounding_dino_deploy.network.MMGroundingDino.forward` takes it.
 
 **Through ``torch.export``**, the exporter torch has defaulted to since 2.9. The TorchScript
 exporter before it is deprecated and slated for removal, and it baked shape arithmetic into the
@@ -34,11 +34,11 @@ from pathlib import Path
 
 import torch
 
-from .network import MMGroundingDino
+from mozo.vendors.mm_grounding_dino_deploy.network import MMGroundingDino
 
 __all__ = ["INPUTS", "OUTPUTS", "example", "export", "profile", "require_exporter"]
 
-#: Graph input names, in :meth:`~.network.MMGroundingDino.forward`'s order.
+#: Graph input names, in :meth:`~mozo.vendors.mm_grounding_dino_deploy.network.MMGroundingDino.forward`'s order.
 INPUTS = ("image", "input_ids", "token_type_ids", "token_mask", "attention", "position_ids",
           "pixel_mask")
 OUTPUTS = ("logits", "boxes")

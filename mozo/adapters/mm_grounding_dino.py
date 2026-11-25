@@ -59,7 +59,7 @@ class MMGroundingDinoPredictor:
             authors report it. Larger is slower and finds more.
         device: Where to run. Defaults to the best available.
         runtime: Which artifact to execute. ``auto`` picks the fastest published one: on CUDA
-            that is ``torch-fp16``. No TensorRT runtime is offered -- measured, it moved 3-7% of
+            that is ``torch-fp16``. No TensorRT runtime is offered -- measured, it moved 3-6% of
             detections, where Grounding DINO's moves 0.1%; see the family's documentation.
         input_size: Fit every image into this square, padded, instead of upstream's resize to a
             short side of 800. ``None`` -- the default -- is upstream's resize. A smaller square

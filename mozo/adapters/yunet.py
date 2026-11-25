@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Union
 
 import numpy as np
+import torch
 
 from .. import registry
 from ..image import load_image
@@ -101,24 +102,36 @@ class YuNetPredictor:
             # A checkpoint mozo did not publish: the architecture is known, the graph is not.
             self.runtime = "torch-fp32"
 
-        forward = None
+        framework = framework_of(self.runtime)
+        # TensorRT reads the checkpoint too: images larger than its engine accepts run through the
+        # torch network instead, from the same 0.3 MB file (``registry.NEEDS``).
         weights = None
-        if framework_of(self.runtime) == "tensorrt":
-            # Built once per GPU and TensorRT version from the published graph it derives from
-            # (``registry.DERIVES``), for any image up to the size the profile allows.
-            forward = TensorRTRunner(
-                parts("yunet", variant, self.runtime, revision=revision)[""], self.device,
-                shapes={"input": _TENSORRT_SHAPES})
-        elif not self.runtime.startswith("torch"):
-            runner = make_runner(resolve("yunet", variant, self.runtime, revision=revision),
-                                 self.runtime, device=self.device)
+        if framework in ("torch", "tensorrt"):
+            weights = (Path(checkpoint_path) if checkpoint_path
+                       else resolve("yunet", variant, "torch-fp32", revision=revision))
+        self._large = None
+        forward = None
+        if framework != "torch":
+            if framework == "tensorrt":
+                # Built once per GPU and TensorRT version from the published graph it derives
+                # from (``registry.DERIVES``), for padded sizes up to ``_TENSORRT_SHAPES``.
+                runner = TensorRTRunner(
+                    parts("yunet", variant, self.runtime, revision=revision)[""], self.device,
+                    shapes={GRAPH_INPUT: _TENSORRT_SHAPES})
+                self._large, weights = weights, None
+            else:
+                runner = make_runner(resolve("yunet", variant, self.runtime, revision=revision),
+                                     self.runtime, device=self.device)
+            # By name, not position: the exporter names the outputs, so the mapping travels with
+            # the artifact.
+            order = [runner.outputs.index(name) for name in GRAPH_OUTPUTS]
 
             def forward(batch):
-                import torch
-                return [torch.from_numpy(out) for out in runner(batch.cpu().numpy())]
-        else:
-            weights = (Path(checkpoint_path) if checkpoint_path
-                       else resolve("yunet", variant, self.runtime, revision=revision))
+                if framework == "tensorrt":  # torch tensors on the device, in and out
+                    raw = runner(batch)
+                else:
+                    raw = [torch.from_numpy(out) for out in runner(batch.cpu().numpy())]
+                return [raw[index] for index in order]
         self._predictor = Predictor(weights, variant, device=self.device, forward=forward)
 
         self._labels = labels_for(
@@ -153,11 +166,39 @@ class YuNetPredictor:
             subject's right first -- each with ``confidence=None``: the model places them but
             does not score them.
         """
-        faces = self._predictor.predict(load_image(image), threshold)
+        image = load_image(image)
+        predictor = self._predictor
+        if self._large is not None and not _fits(image.shape, self._predictor.spec.size_divisor):
+            predictor = self._torch_for_large_images()
+        faces = predictor.predict(image, threshold)
         return detections(faces.boxes, faces.scores, faces.keypoints,
                           labels if labels is not None else self._labels)
 
 
-#: The image sizes a TensorRT engine accepts, as ``(min, preferred, max)`` batches, after the pad
-#: to a multiple of 32. Placeholder until measured; see the family's PROVENANCE.
-_TENSORRT_SHAPES = ((1, 3, 32, 32), (1, 3, 736, 1280), (1, 3, 2048, 2048))
+    def _torch_for_large_images(self) -> Predictor:
+        """The torch network on the same device, built on first need, for images the TensorRT
+        engine was not built to take."""
+        if not isinstance(self._large, Predictor):
+            _log.info("YuNet: an image larger than %d px on a side runs on torch, not TensorRT.",
+                      _TENSORRT_SHAPES[2][2])
+            self._large = Predictor(self._large, self.variant, device=self.device)
+        return self._large
+
+
+#: The graphs' input and outputs, as ``tools/export/yunet.py`` names them: the twelve maps in the
+#: order :class:`~mozo.vendors.yunet_deploy.network.YuNet` returns them.
+GRAPH_INPUT = "input"
+GRAPH_OUTPUTS = tuple(f"{kind}_{stride}" for kind in ("cls", "bbox", "obj", "kps")
+                      for stride in (8, 16, 32))
+
+#: The padded sizes a TensorRT engine accepts, as ``(min, preferred, max)`` batches. The largest
+#: is what the engine reserves device memory for -- 625 MB at 4096 x 4096 (measured, RTX 3090,
+#: TensorRT 11.5), 2.5 GB at 8192 -- so it covers 4K video and 12-megapixel phone photos either
+#: way up, and anything larger runs on torch. Tuned for 720p.
+_TENSORRT_SHAPES = ((1, 3, 32, 32), (1, 3, 736, 1280), (1, 3, 4096, 4096))
+
+
+def _fits(shape: tuple, divisor: int) -> bool:
+    """Whether an image of *shape*, padded to *divisor*, is within the TensorRT engine's range."""
+    limit = _TENSORRT_SHAPES[2]
+    return -(-shape[0] // divisor) * divisor <= limit[2] and -(-shape[1] // divisor) * divisor <= limit[3]

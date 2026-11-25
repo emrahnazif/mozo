@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: BSD-3-Clause
-# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu. See LICENSE.
+# SPDX-License-Identifier: Apache-2.0
+# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu (BSD-3-Clause: see LICENSE).
 """The picture the network sees: the image at its own size, BGR, padded to a multiple of 32.
 
 Upstream's evaluation in "origin" mode (``build_eval_transforms(image_size=None,

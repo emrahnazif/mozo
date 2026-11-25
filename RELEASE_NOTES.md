@@ -1,5 +1,19 @@
 ## Unreleased
 
+- **YuNet, a new family: fast face detection with five landmarks.** The tiny face detector behind
+  OpenCV's `FaceDetectorYN`, in two sizes: `small` (the network OpenCV ships) and `base` (a little
+  larger, better on small faces). `mozo.get_model("yunet/small").predict(photo)` returns one
+  detection per face, class `face`, with the eyes, nose tip and mouth corners attached as
+  keypoints; they carry no confidence, because the model does not score them. It runs at the
+  image's own size, so it finds faces a dozen pixels wide but misses faces much larger than about
+  300 px: shrink a close-up selfie first. It has a workflow node, `yunet`, and blurring every face
+  is that node into `blur_regions`. Scores are the authors' (OpenCV reports their square root, so
+  its 0.9 is 0.81 here). Bit-identical to the authors' PyTorch on CPU. On CUDA with TensorRT 11 or
+  later, `auto` runs an fp32 engine built from the published ONNX graph: on WIDER Face's 3,226
+  validation images no face changed and AP was identical, and a whole call was 1.8 to 2.1 times
+  faster than torch. On the CPU `runtime="onnx-fp32"` is the fast one. Code and weights are
+  BSD-3-Clause, a first for mozo's catalogue; the permissive `MOZO_ENABLE` example now includes it.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

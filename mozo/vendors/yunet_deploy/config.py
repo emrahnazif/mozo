@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: BSD-3-Clause
-# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu. See LICENSE.
+# SPDX-License-Identifier: Apache-2.0
+# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu (BSD-3-Clause: see LICENSE).
 """YuNet's two published geometries, as frozen data.
 
 Upstream keeps these as ``YuNetModelConfig`` instances in ``yunet_train/models/config.py``; they

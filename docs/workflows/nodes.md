@@ -1,7 +1,7 @@
 # Every built-in workflow node
 
 <!--
-summary: All 50 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
+summary: All 51 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
 label: Nodes
 keywords: mozo, workflow nodes, node catalogue, workflow editor, pipeline
 -->
@@ -44,6 +44,7 @@ what runs.
 | `yolov12` | image → detections | `variant`=nano, `threshold`=0.5 | YOLO12 by Ultralytics: attention-centric real-time object detection. |
 | `yolov26` | image → detections | `variant`=nano, `threshold`=0.5 | YOLO26 by Ultralytics: NMS-free detection, and instance masks on the seg variants. |
 | `rfdetr` | image → detections | `variant`=nano, `threshold`=0.5 | RF-DETR by Roboflow: NMS-free transformer detection, under a permissive licence. |
+| `yunet` | image → detections | `variant`=small, `threshold`=0.5 | YuNet: faces with five landmarks each, from a network of under 80k parameters. |
 | `rfdetr_checkpoint` | image → detections | `checkpoint`, `architecture`=nano, `labels`, `threshold`=0.5 | RF-DETR from a checkpoint of your own: a model you trained, run like a published one. |
 | `owlv2` | image → detections | `text` (a list of phrases), `variant`=base-ensemble, `threshold`=0.1 | OWLv2 by Google: find anything you can name, with no training. |
 | `grounding_dino` | image → detections | `text` (a list of phrases), `variant`=tiny, `threshold`=0.3 | Grounding DINO by IDEA: open-vocabulary detection from a phrase. |

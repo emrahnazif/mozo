@@ -167,7 +167,7 @@ def test_each_family_counts_its_own_variants_correctly():
 
 #: The licences under which the README's MOZO_ENABLE example may serve weights. Only the README's
 #: claim needs this word; mozo itself reports identifiers and leaves the judgement to its caller.
-PERMISSIVE = frozenset({"Apache-2.0", "MIT"})
+PERMISSIVE = frozenset({"Apache-2.0", "MIT", "BSD-3-Clause"})
 
 
 def licences() -> dict[tuple[str, str], str]:
@@ -330,7 +330,7 @@ def test_the_permissive_deployment_offers_what_it_claims(deploy, document):
     shown = (ROOT / document).read_text()
     example = re.search(r"```bash\nMOZO_ENABLE=(.*?)\n```", shown, re.S)
     assert example, f"{document} no longer shows a MOZO_ENABLE example -- update this test"
-    stated = re.search(r"That is the (\d+) Apache-2\.0 and MIT variants", shown)
+    stated = re.search(r"That is the (\d+) Apache-2\.0, MIT and BSD-3-Clause variants", shown)
     assert stated, f"{document} no longer states what that line offers -- update this test"
 
     deployment = deploy(example.group(1).replace("\\\n", ""))

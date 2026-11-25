@@ -2746,6 +2746,11 @@
               "sha256": "92b2e2a964186d537911bef8b2dc4819c92a3355a42820c6ca869563fe612924",
               "size": 309
             },
+            "onnx-fp32": {
+              "path": "yunet/base/2026-11-25/onnx-fp32.onnx",
+              "sha256": "e2fe9cffeb711ea0fc4fb1b768196528cf658454039472a6f53b57adf71076fb",
+              "size": 326206
+            },
             "torch-fp32": {
               "path": "yunet/base/2026-11-25/torch-fp32.pth",
               "sha256": "83ed40f398c3dbf21be573bcaa169663e0e31767c21c0734f05fa24622138ff8",
@@ -2775,6 +2780,11 @@
               "path": "yunet/small/2026-11-25/labels.json",
               "sha256": "92b2e2a964186d537911bef8b2dc4819c92a3355a42820c6ca869563fe612924",
               "size": 309
+            },
+            "onnx-fp32": {
+              "path": "yunet/small/2026-11-25/onnx-fp32.onnx",
+              "sha256": "4451c307ce597a9fba6cbcbbb00b5d95124a711d342d8d0f2201ab4a271fa551",
+              "size": 238794
             },
             "torch-fp32": {
               "path": "yunet/small/2026-11-25/torch-fp32.pth",

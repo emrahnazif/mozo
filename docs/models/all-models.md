@@ -1,4 +1,4 @@
-# All 82 models, by task
+# All 84 models, by task
 
 <!--
 summary: Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size.
@@ -6,7 +6,7 @@ label: All models
 keywords: mozo, model catalogue, computer vision models, licences, runtimes
 -->
 
-Mozo serves 82 variants across 18 families. A model is named `family/variant`, the same in Python
+Mozo serves 84 variants across 19 families. A model is named `family/variant`, the same in Python
 (`mozo.get_model("rfdetr/medium")`) and over HTTP (`/predict/rfdetr/medium`). Each family's page
 has examples, every parameter, and how the model behaves.
 
@@ -24,6 +24,7 @@ A box, a class and a confidence for each object.
 | [YOLO11](/docs/models/yolov11.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx | 6–115 MB |
 | [YOLO12](/docs/models/yolov12.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx, coreml | 6–119 MB |
 | [YOLO26](/docs/models/yolov26.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx | 6–119 MB |
+| [YuNet](/docs/models/yunet.md) (faces, 5 landmarks each) | `small` `base` | BSD-3-Clause | torch, onnx; tensorrt on CUDA | 0.3–0.4 MB |
 
 ## Instance segmentation
 

@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: BSD-3-Clause
-# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu. See LICENSE.
+# SPDX-License-Identifier: Apache-2.0
+# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu (BSD-3-Clause: see LICENSE).
 """From the network's raw maps to faces: priors, decode, score, threshold, NMS.
 
 ``YuNetPostprocessor`` (``tasks/face/postprocess.py``), ``MlvlPointGenerator``
@@ -19,6 +19,7 @@ rounding from the obvious rewrite and none of them raises:
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 
 __all__ = ["decode", "grid_priors", "nms"]
@@ -48,30 +49,66 @@ def _flatten(preds: list[torch.Tensor]) -> torch.Tensor:
     return torch.cat([p.permute(0, 2, 3, 1).reshape(1, -1, p.shape[1]) for p in preds], dim=1)[0]
 
 
+#: Above this many candidates :func:`nms` walks upstream's loop instead of building the IoU
+#: matrix, whose size grows with the square: at a threshold near 0 an 8K image makes every one of
+#: ~170k cells a candidate. Below it the matrix is at most 4 MB per intermediate.
+MATRIX_LIMIT = 1024
+
+
 def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float) -> torch.Tensor:
-    """Greedy NMS, best first; indices of the kept boxes in the order they were kept."""
+    """Greedy NMS, best first; indices of the kept boxes in the order they were kept.
+
+    Upstream's ``nms`` loops on the device, one IoU row per kept box -- a dozen small kernels and
+    a sync per face, 1.2 ms on CUDA for 32 candidates. For up to :data:`MATRIX_LIMIT` candidates
+    every IoU is computed at once instead, with the same operations in the same order (so the
+    same float32 values: ``max``, ``min``, ``clamp``, ``+``, ``-``, ``*`` and ``/`` round
+    identically one element at a time or many), compared with upstream's ``<=``, and only the
+    greedy walk over the resulting booleans runs on the host. Past it, upstream's loop. The gate
+    holds both to upstream's indices.
+    """
     if boxes.numel() == 0:
         return torch.empty((0,), dtype=torch.long, device=boxes.device)
 
     x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
     areas = (x2 - x1).clamp(min=0) * (y2 - y1).clamp(min=0)
     order = scores.argsort(descending=True)
+    eps = torch.finfo(boxes.dtype).eps
+    if len(order) > MATRIX_LIMIT:
+        keep = []
+        while order.numel() > 0:
+            # A plain int, where upstream keeps ``order[0]`` -- a view that holds all of ``order``
+            # alive, one copy per kept box: at a threshold of 0 on an 8K image that exhausted a
+            # 24 GB GPU. The values indexed are the same.
+            i = int(order[0])
+            keep.append(i)
+            if order.numel() == 1:
+                break
+            rest = order[1:]
+            xx1 = torch.maximum(x1[i], x1[rest])
+            yy1 = torch.maximum(y1[i], y1[rest])
+            xx2 = torch.minimum(x2[i], x2[rest])
+            yy2 = torch.minimum(y2[i], y2[rest])
+            inter = (xx2 - xx1).clamp(min=0) * (yy2 - yy1).clamp(min=0)
+            union = areas[i] + areas[rest] - inter
+            order = rest[inter / union.clamp(min=eps) <= iou_threshold]
+        return torch.tensor(keep, device=order.device)
+
+    x1, y1, x2, y2, areas = x1[order], y1[order], x2[order], y2[order], areas[order]
+    xx1 = torch.maximum(x1[:, None], x1[None, :])
+    yy1 = torch.maximum(y1[:, None], y1[None, :])
+    xx2 = torch.minimum(x2[:, None], x2[None, :])
+    yy2 = torch.minimum(y2[:, None], y2[None, :])
+    inter = (xx2 - xx1).clamp(min=0) * (yy2 - yy1).clamp(min=0)
+    union = areas[:, None] + areas[None, :] - inter
+    suppresses = (~(inter / union.clamp(min=eps) <= iou_threshold)).cpu().numpy()
+
     keep = []
-    while order.numel() > 0:
-        i = order[0]
-        keep.append(i)
-        if order.numel() == 1:
-            break
-        rest = order[1:]
-        xx1 = torch.maximum(x1[i], x1[rest])
-        yy1 = torch.maximum(y1[i], y1[rest])
-        xx2 = torch.minimum(x2[i], x2[rest])
-        yy2 = torch.minimum(y2[i], y2[rest])
-        inter = (xx2 - xx1).clamp(min=0) * (yy2 - yy1).clamp(min=0)
-        union = areas[i] + areas[rest] - inter
-        ious = inter / union.clamp(min=torch.finfo(boxes.dtype).eps)
-        order = rest[ious <= iou_threshold]
-    return torch.stack(keep)
+    removed = np.zeros(len(order), dtype=bool)
+    for i in range(len(order)):
+        if not removed[i]:
+            keep.append(i)
+            removed |= suppresses[i]
+    return order[torch.tensor(keep, device=order.device)]
 
 
 def decode(outputs, strides: tuple[int, ...], threshold: float, iou_threshold: float

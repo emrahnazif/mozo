@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: BSD-3-Clause
-# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu. See LICENSE.
+# SPDX-License-Identifier: Apache-2.0
+# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu (BSD-3-Clause: see LICENSE).
 """YuNet, extracted for deployment: an image in, faces with five landmarks out.
 
 The tiny face detector behind OpenCV's ``FaceDetectorYN``, from the authors' PyTorch training

@@ -109,6 +109,13 @@ def rfdetr(image: Image, models: Models, variant: variants("rfdetr") = "nano",
 
 
 @node(category="Detect", exclusive=True)
+def yunet(image: Image, models: Models, variant: variants("yunet") = "small",
+          threshold: float = 0.5) -> Detections:
+    """YuNet -- faces with five landmarks each, from a network of under 80k parameters."""
+    return models("yunet", variant).predict(image, threshold=threshold)
+
+
+@node(category="Detect", exclusive=True)
 def rfdetr_checkpoint(image: Image, models: Models, checkpoint: Optional[FilePath] = None,
                       architecture: architectures("rfdetr") = "nano", labels: list[str] = [],
                       threshold: float = 0.5) -> Detections:

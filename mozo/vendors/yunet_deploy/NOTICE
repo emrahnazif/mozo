@@ -1,0 +1,32 @@
+yunet_deploy
+Copyright (c) 2022-2026, Shiqi Yu <shiqi.yu@gmail.com>. All rights reserved.
+
+This product includes software developed by Shiqi Yu and contributors, published
+as libfacedetection.train (https://github.com/ShiqiYu/libfacedetection.train,
+commit dca340aa082c71081a68d17db8e58b33a58a914b) and described in "YuNet: A Tiny
+Millisecond-level Face Detector" (Wu, Peng, Yu; Machine Intelligence Research
+20(5), 2023, doi:10.1007/s11633-023-1423-y).
+
+The modules here are extracted from that repository's YuNet model, evaluation
+transforms and post-processing. It is licensed under the BSD 3-Clause License;
+see the LICENSE file in this directory, which is the text the repository
+publishes at that commit, and whose copyright notice, conditions and disclaimer
+travel with this extraction as that licence requires. mozo's changes are
+Apache-2.0, as the rest of mozo is.
+
+The published checkpoints are files of the same repository and carry no
+separate terms, so they are under its licence: BSD-3-Clause at the commit above
+(Apache-2.0 when they were committed, in 2022 and 2023). OpenCV Zoo distributes
+the "small" network (yunet_s) as face_detection_yunet_2023mar.onnx under the MIT
+License. They were trained on WIDER FACE, with the landmark annotations SCRFD
+published; the dataset's own terms (non-commercial research) govern the dataset.
+
+The five landmark names in the published labels.json are OpenCV's, from the
+FaceDetectorYN documentation (right eye, left eye, nose tip, right and left
+corner of the mouth), in the order the checkpoints' landmark channels emit them.
+
+NOT INCLUDED
+------------
+Training, the dataset readers, the augmentations, the losses, the assigner,
+weight initialisation, the export tools and YuNet-pose are not part of this
+package. See PROVENANCE.md for the full list and for why.

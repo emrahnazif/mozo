@@ -127,6 +127,12 @@ DERIVES: dict[str, dict[str, str]] = {
     # (``seg-nano``) torch fp32 -- RF-DETR is launch-bound at batch 1. fp16 only where an fp16
     # graph is published (the detection variants), and only on request.
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # ``tensorrt-fp32`` from the published graph, chosen by ``auto`` on CUDA. On an RTX 3090,
+    # WIDER Face val (3,226 images), against torch fp32 on the CPU: WIDER AP identical, no face
+    # changed, boxes within 0.0002 px; a whole call 1.8x (VGA) to 2.1x (4K) faster than torch on
+    # CUDA -- which leaves TF32 on and moves boxes by up to 4 px. No fp16: slower than fp32 for a
+    # whole call up to 1080p (YuNet is launch-bound), and it moves boxes by up to 22 px.
+    "yunet": {"tensorrt-fp32": "onnx-fp32"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -146,8 +152,10 @@ NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
        for family in ("yolov8", "yolov11", "yolov12", "yolov26")},
     "rfdetr": {"*": ("labels",)},
     "vitpose": {"*": ("labels",)},
-    # The checkpoint carries no names; its landmarks' names are only in the published labels.
-    "yunet": {"*": ("labels",)},
+    # The checkpoint carries no names; its landmarks' names are only in the published labels. A
+    # TensorRT engine is built for images up to 4096 px a side, and YuNet runs every image at its
+    # own size, so larger ones run through the torch network from the 0.3 MB checkpoint.
+    "yunet": {"*": ("labels",), "tensorrt": ("torch-fp32",)},
     "sam3": {"onnx": ("torch-fp32",), "coreml": ("torch-fp32",)},
     "owlv2": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},
 }

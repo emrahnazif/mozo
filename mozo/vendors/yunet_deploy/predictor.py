@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: BSD-3-Clause
-# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu. See LICENSE.
+# SPDX-License-Identifier: Apache-2.0
+# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu (BSD-3-Clause: see LICENSE).
 """The deployable surface: an image in, faces out -- boxes, scores and five landmarks each."""
 
 from __future__ import annotations

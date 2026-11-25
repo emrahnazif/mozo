@@ -18,6 +18,7 @@ itself; this page says what exists, how the choice is made, and when to override
 | YOLOv8, YOLO12 | every variant | every variant | every variant |
 | YOLO11, YOLO26 | every variant | every variant | none |
 | ViTPose | every variant | every variant except `huge` | none |
+| YuNet | every variant | every variant (the whole network; fastest on the CPU, on request) | none |
 | SAM 3 | yes | none | yes (the image encoder) |
 | Granite Embedding R2 | yes | none | yes |
 | OWLv2 | yes, and fp16 on CUDA | every variant (the image tower in fp16, to build TensorRT engines from) | none |
@@ -44,7 +45,7 @@ packages can run:
 CoreML needs `pip install 'mozo[coreml]'` and ONNX needs `pip install 'mozo[onnx]'`. Without them,
 `auto` simply never picks those graphs. In practice: on Apple silicon with the CoreML extra, RF-DETR,
 YOLOv8, YOLO12, SAM 3 and Granite Embedding R2 run as CoreML graphs, and everything else runs on
-torch. On CUDA, RF-DETR runs as `tensorrt-fp32` when TensorRT 11 or later is installed, OWLv2 and
+torch. On CUDA, RF-DETR and YuNet run as `tensorrt-fp32` when TensorRT 11 or later is installed, OWLv2 and
 Grounding DINO run as `torch-fp16`, and everything else runs on torch in fp32.
 
 ## Choose one yourself
@@ -92,6 +93,11 @@ publishes a graph and `tensorrt-fp16` on its four detection variants. Its fp32 e
 detection on 500 COCO images and runs 1.7 to 2.6 times faster than torch, because RF-DETR is
 limited by kernel launches at one image at a time; its fp16 engine is about 6 times faster and
 changes 0.2–0.5% of detections.
+
+[YuNet](/docs/models/yunet.md#runtimes) offers `tensorrt-fp32` on both variants. On WIDER Face's
+3,226 validation images it changed no face and left AP identical, and a whole call ran 1.8 to 2.1
+times faster than torch on CUDA. It offers no fp16 engine: YuNet is too small for half precision
+to pay.
 
 [OWLv2](/docs/models/owlv2.md#on-cuda-half-precision-and-tensorrt) and
 [Grounding DINO](/docs/models/grounding-dino.md#on-cuda-half-precision-and-tensorrt) offer both;

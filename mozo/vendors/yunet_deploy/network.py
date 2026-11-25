@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: BSD-3-Clause
-# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu. See LICENSE.
+# SPDX-License-Identifier: Apache-2.0
+# Derived from libfacedetection.train, Copyright (c) 2022-2026, Shiqi Yu (BSD-3-Clause: see LICENSE).
 """YuNet's network: a depthwise-separable backbone, a tiny top-down FPN and a decoupled head.
 
 Extracted from ``yunet_train/models/{layers,backbone,neck}.py`` and ``tasks/face/head.py`` at

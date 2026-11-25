@@ -346,6 +346,14 @@ found traps it had not predicted, and the predicted ones were mostly real.
   not include it.
 - **Second passes are part of the model.** EasyOCR re-runs low-contrast crops and keeps the better
   read.
+- **A rewrite that looks like a rounding change may not be one.** OpenCV decodes YuNet's centre as
+  `(col + offset) * stride`, upstream as `offset * stride + col * stride`; with power-of-two
+  strides scaling is exact and the two are bit-identical. Measure before calling it a divergence;
+  a falsifier built on it caught nothing.
+- **An NMS loop that holds views.** YuNet's upstream NMS appends `order[0]` per kept box -- a view
+  that keeps all of `order` alive. At a threshold of 0 on an 8K image that exhausted a 24 GB GPU.
+  Keep plain ints; an IoU matrix (RTMO, YuNet) is faster but grows with the square, so cap it and
+  fall back to the loop.
 
 ### Things that are upstream's behaviour, not bugs to fix
 
@@ -364,6 +372,14 @@ Reproduce them, and record them:
 - **Two entry points that disagree.** EasyOCR's array path documents BGR and its path entry decodes
   greyscale with libjpeg directly — 27 and 7 grey levels apart. Hand both sides the same array.
 - **Mutable module globals** (`imgH`) become spec fields when vendored.
+- **A TensorRT engine fed a shape outside its profile does not raise.** `set_input_shape` returns
+  `False`, `TensorRTRunner` does not check it, and the engine returns plausible garbage: six WIDER
+  Face images taller than YuNet's profile lost up to 96% of their faces (112 to 5), and the AP drop looked
+  like fp32 drift until the images were listed. A family with dynamic shapes must check the shape
+  against the profile itself (YuNet runs larger images on torch).
+- **torch on CUDA is TF32 for convolutions by default.** For YuNet that moves boxes by up to 3.5 px
+  against the CPU; an fp32 TensorRT engine (TF32 cleared) was 0.0005 px from the CPU. Compare a
+  graph against the CPU, not against torch on CUDA.
 
 ---
 

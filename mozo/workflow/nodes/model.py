@@ -179,6 +179,19 @@ def omdet_turbo(image: Image, models: Models, text: Prompts = ["person", "car", 
         image, text=prompt_list(text), threshold=threshold)
 
 
+@node(category="Detect", exclusive=True)
+def mm_grounding_dino(image: Image, models: Models, text: Prompts = ["person", "car", "dog"],
+                      variant: variants("mm_grounding_dino") = "llmdet-tiny",
+                      threshold: float = 0.4) -> Detections:
+    """LLMDet on MM-Grounding-DINO -- open-vocabulary detection, strongest on the long tail.
+
+    One prompt per entry, taken as given; each result's ``class_id`` is its prompt's index and its
+    ``class_name`` that prompt.
+    """
+    return models("mm_grounding_dino", variant).predict(
+        image, text=prompt_list(text), threshold=threshold)
+
+
 # --- Segmentation --------------------------------------------------------------------------------
 
 @node(category="Segment", exclusive=True)

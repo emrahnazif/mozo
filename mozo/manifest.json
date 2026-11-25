@@ -1186,6 +1186,81 @@
         }
       }
     },
+    "mm_grounding_dino/llmdet-base": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "mm_grounding_dino/llmdet-base/2026-11-25/LICENSE",
+              "sha256": "465ed5f2f9d61880f2f37c7b8de6c7342813c80c92bc3542ea7dd55422c4637c",
+              "size": 13764
+            },
+            "NOTICE": {
+              "path": "mm_grounding_dino/llmdet-base/2026-11-25/NOTICE",
+              "sha256": "2f0748ddf2a7a53fb6e2a107a24ac720b87b379dfde616bc12da9246ea6b3255",
+              "size": 2053
+            },
+            "torch-fp32": {
+              "path": "mm_grounding_dino/llmdet-base/2026-11-25/torch-fp32.pth",
+              "sha256": "b445c9b4991367e589c99e1538d2b6bafc3f7f04d09dee72e449e7665102af6e",
+              "size": 936316959
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "mm_grounding_dino/llmdet-large": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "mm_grounding_dino/llmdet-large/2026-11-25/LICENSE",
+              "sha256": "465ed5f2f9d61880f2f37c7b8de6c7342813c80c92bc3542ea7dd55422c4637c",
+              "size": 13764
+            },
+            "NOTICE": {
+              "path": "mm_grounding_dino/llmdet-large/2026-11-25/NOTICE",
+              "sha256": "13f810bcbb3b6845478c3e926edee4833afa9f12cb3e87c71de2def6c8d9d8d5",
+              "size": 2063
+            },
+            "torch-fp32": {
+              "path": "mm_grounding_dino/llmdet-large/2026-11-25/torch-fp32.pth",
+              "sha256": "1d6df667a350abc048a945d2954584c2f75c32c05bba573fb0f60c542f6d7fc2",
+              "size": 1376623659
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "mm_grounding_dino/llmdet-tiny": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "mm_grounding_dino/llmdet-tiny/2026-11-25/LICENSE",
+              "sha256": "465ed5f2f9d61880f2f37c7b8de6c7342813c80c92bc3542ea7dd55422c4637c",
+              "size": 13764
+            },
+            "NOTICE": {
+              "path": "mm_grounding_dino/llmdet-tiny/2026-11-25/NOTICE",
+              "sha256": "7b28e632b3f3bbbe5401cd5211323c406984750bb6dca8a9db2fdcca148f0094",
+              "size": 2059
+            },
+            "torch-fp32": {
+              "path": "mm_grounding_dino/llmdet-tiny/2026-11-25/torch-fp32.pth",
+              "sha256": "c6b5a5d471380192f5c10318b4556df2cede4c8f91780e79d3658746bbf7652d",
+              "size": 692229487
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
     "moebius/general": {
       "latest": "2026-08-26",
       "revisions": {

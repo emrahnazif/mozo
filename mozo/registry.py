@@ -97,6 +97,9 @@ EXECUTES: dict[str, tuple[str, ...]] = {
     # A TensorRT engine exported from the checkpoint at the input size the user picks.
     "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
+    # The same arrangement as Grounding DINO's: an engine exported from the checkpoint at the
+    # input size the user picks.
+    "mm_grounding_dino": ("torch", "tensorrt"),
     # The graph is the image path; the text tower always runs in torch, once per vocabulary.
     "omdet_turbo": ("torch", "onnx", "tensorrt"),
     # Not "onnx": the vision graph is published to build TensorRT engines from, and ONNX Runtime
@@ -123,6 +126,7 @@ EXECUTES: dict[str, tuple[str, ...]] = {
 DERIVES: dict[str, dict[str, str]] = {
     "owlv2": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp16"},
     "grounding_dino": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "torch-fp32"},
+    "mm_grounding_dino": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "torch-fp32"},
     # ``tensorrt-fp32`` from the published graph, for every variant that publishes one, and
     # ``auto`` takes it on CUDA where TensorRT is installed: on an RTX 3090, 500 COCO images per
     # variant, not one detection changed and AP was identical, at 1.65x (``large``) to 2.55x
@@ -368,6 +372,23 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'weights are both Apache-2.0; the street training labels were made with SAM 3.'
         ),
         'variants': ['street-nano', 'street-medium', 'street-seg-nano', 'street-seg-medium'],
+    },
+
+    'mm_grounding_dino': {
+        'adapter_class': 'MMGroundingDinoPredictor',
+        'module': 'mozo.adapters.mm_grounding_dino',
+        'task_type': 'open_vocabulary_detection',
+        'description': (
+            'LLMDet by iSEE Laboratory, on OpenMMLab\'s MM-Grounding-DINO architecture — '
+            'open-vocabulary detection. Describe anything in words and it returns boxes for it, '
+            'with no class list and no training. Grounding DINO\'s design, re-trained in the '
+            'open and then fine-tuned with a language model writing captions for it: 44.7, 48.3 '
+            'and 51.1 AP on LVIS minival zero-shot as the authors report it. 3 variants: '
+            'llmdet-tiny (Swin-T), llmdet-base (Swin-B) and llmdet-large (Swin-L). Reach for it '
+            'over Grounding DINO for long-tail objects. Boxes, not masks — pair it with SAM 2 or '
+            'EdgeTAM for those. Code and weights are both Apache 2.0.'
+        ),
+        'variants': ['llmdet-tiny', 'llmdet-base', 'llmdet-large'],
     },
 
     'moebius': {

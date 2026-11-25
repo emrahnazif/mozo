@@ -41,33 +41,33 @@ class Beams:
         sequence: The best hypothesis, decoder start token first, as ``generate`` returns it.
         beam_indices: For each generated token, which of the flattened beams it came from.
         scores: Each step's processed log-probabilities, ``(beams, vocab)``, as ``output_scores``.
-        forced_end: Whether the sequence ends because ``max_new_tokens`` ran out -- its last token
-            is the ``</s>`` the length limit forces, not one the model chose.
     """
 
     sequence: torch.Tensor
     beam_indices: torch.Tensor
     scores: list[torch.Tensor]
-    forced_end: bool
 
 
 def _no_repeat_ngram(ids: torch.Tensor, scores: torch.Tensor, size: int) -> torch.Tensor:
     """``NoRepeatNGramLogitsProcessor``: ban any token that would repeat an n-gram already written.
 
     Upstream builds each hypothesis's n-grams from the *whole* decoder sequence, the start token
-    included, and indexes by the last ``size - 1`` tokens.
+    included, and bans what followed every earlier occurrence of the last ``size - 1`` tokens. One
+    linear scan per hypothesis finds the same set without building the n-gram table each step.
     """
     hypotheses, length = ids.shape
     out = scores.clone()
     if length + 1 < size:
         return out
-    for row in range(hypotheses):
-        tokens = ids[row].tolist()
-        seen: dict[tuple[int, ...], list[int]] = {}
-        for ngram in zip(*[tokens[i:] for i in range(size)]):
-            seen.setdefault(tuple(ngram[:-1]), []).append(ngram[-1])
-        banned = seen.get(tuple(tokens[length + 1 - size:length]), [])
-        out[row, banned] = -float("inf")
+    rows, banned = [], []
+    for row, tokens in enumerate(ids.tolist()):
+        prefix = tokens[length + 1 - size:length]
+        for start in range(length - size + 1):
+            if tokens[start:start + size - 1] == prefix:
+                rows.append(row)
+                banned.append(tokens[start + size - 1])
+    if banned:
+        out[rows, banned] = -float("inf")
     return out
 
 
@@ -103,20 +103,20 @@ def beam_search(language, encoded: torch.Tensor, max_new_tokens: int,
     beams, vocab = rules.num_beams, language.spec.vocab
     cur_len = prompt_len = 1
     max_length = prompt_len + max_new_tokens
-    keep = max(2, 1 + 1) * beams  # one end-of-sequence id
+    keep = 2 * beams  # upstream: max(2, 1 + number of end-of-sequence ids) * beams
     top_mask = torch.cat((torch.ones(beams, dtype=torch.bool),
                           torch.zeros(keep - beams, dtype=torch.bool))).to(device)
 
     running = torch.full((1, beams, max_length), rules.pad, dtype=torch.int64, device=device)
     running[:, :, :cur_len] = rules.decoder_start
-    sequences = running.detach().clone()
+    sequences = running.clone()
     running_scores = torch.zeros((1, beams), dtype=torch.float, device=device)
     running_scores[:, 1:] = -1e9
     beam_scores = torch.full((1, beams), -1e9, dtype=torch.float, device=device)
     finished = torch.zeros((1, beams), dtype=torch.bool, device=device)
     running_indices = torch.full((1, beams, max_length - cur_len), -1, dtype=torch.int32,
                                  device=device)
-    beam_indices = running_indices.detach().clone()
+    beam_indices = running_indices.clone()
 
     cross = language.cross_cache(encoded.repeat_interleave(beams, dim=0))
     past = None
@@ -126,7 +126,7 @@ def beam_search(language, encoded: torch.Tensor, max_new_tokens: int,
         logits, past = language.step(flat[:, -1:], cross, past, cur_len - 1)
         logits = logits[:, -1, :].to(copy=True, dtype=torch.float32)
         log_probs = _process(flat, F.log_softmax(logits, dim=-1), max_length, rules)
-        all_scores.append(log_probs.clone())
+        all_scores.append(log_probs)  # rebound below, never mutated
 
         log_probs = log_probs.reshape(1, beams, vocab) + running_scores[:, :, None]
         log_probs = log_probs.reshape(1, beams * vocab)
@@ -140,9 +140,9 @@ def beam_search(language, encoded: torch.Tensor, max_new_tokens: int,
         topk_running_indices[:, :, cur_len - prompt_len] = topk_beams
 
         # stopping criteria: max length, or the token just chosen is </s>
-        hits = (torch.full((keep,), cur_len + 1 >= max_length, dtype=torch.bool, device=device)
-                | torch.isin(topk_sequences[0, :, cur_len], torch.tensor([rules.eos], device=device)))
-        hits = hits.reshape(1, keep)
+        hits = topk_sequences[:, :, cur_len] == rules.eos
+        if cur_len + 1 >= max_length:
+            hits = torch.ones_like(hits)
 
         # _get_running_beams_for_next_iteration
         topk_running_log_probs = topk_log_probs + hits.to(torch.float32) * -1.0e9
@@ -184,8 +184,7 @@ def beam_search(language, encoded: torch.Tensor, max_new_tokens: int,
     indices = beam_indices[0, :1, :]
     generated = int(((indices + 1).bool()).sum(dim=1).max())
     sequence = sequences[0, 0, :prompt_len + generated]
-    return Beams(sequence, indices[:, :generated], all_scores,
-                 forced_end=sequence.shape[0] >= max_length)
+    return Beams(sequence, indices[:, :generated], all_scores)
 
 
 def transition_scores(beams: Beams, vocab: int) -> torch.Tensor:

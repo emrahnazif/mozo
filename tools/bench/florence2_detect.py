@@ -29,6 +29,8 @@ Everything on CUDA runs with TF32 off: the reference is IEEE fp32.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import random
 import statistics
@@ -43,15 +45,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
+from common import FIXTURES, synchronise  # noqa: E402
+from fetch.florence2_detect import published  # noqa: E402
+
 from mozo.image import load_image  # noqa: E402
+from mozo.runtimes import free_device_memory  # noqa: E402
 from mozo.vendors.florence2_deploy import VARIANTS, Florence2Predictor  # noqa: E402
 
-REVISION = "2026-11-25"
 DTYPES = {"torch-fp32": torch.float32, "torch-fp16": torch.float16}
-
-
-def published(variant: str) -> Path:
-    return ROOT / "weights" / "florence2_detect" / variant / REVISION / "torch-fp16.pth"
 
 
 def _iou(a, b) -> float:
@@ -73,9 +74,6 @@ def _coco(root: Path):
 def accuracy(args) -> None:
     from pycocotools.coco import COCO
     from pycocotools.cocoeval import COCOeval
-
-    import contextlib
-    import io
 
     with contextlib.redirect_stdout(io.StringIO()):
         coco = COCO(str(_coco(args.coco)))
@@ -126,8 +124,7 @@ def accuracy(args) -> None:
                   f"{matched}/{boxes_total} boxes carry a COCO name, "
                   f"{row['seconds_per_image']} s/image", flush=True)
             del model
-            if args.device == "cuda":
-                torch.cuda.empty_cache()
+            free_device_memory()
         if "torch-fp32" in answers and "torch-fp16" in answers:
             full, half = answers["torch-fp32"], answers["torch-fp16"]
             kept = total = same = 0
@@ -146,11 +143,6 @@ def accuracy(args) -> None:
                   flush=True)
     if args.out:
         Path(args.out).write_text(json.dumps(results, indent=1))
-
-
-def _synchronise(device: str) -> None:
-    if device == "cuda":
-        torch.cuda.synchronize()
 
 
 def _reference(model_dir: str, device: str, dtype):
@@ -178,7 +170,7 @@ def latency(args) -> None:
     With ``--reference VARIANT=DIR`` the reference runs too, interleaved call by call with mozo's
     vendored path so drift moves both alike.
     """
-    image = load_image(str(ROOT / "tests" / "fixtures" / "images" / "example.jpg"))
+    image = load_image(str(FIXTURES / "example.jpg"))
     references = dict(item.split("=", 1) for item in args.reference)
     for variant in args.variants:
         for runtime in args.runtimes:
@@ -194,17 +186,16 @@ def latency(args) -> None:
             times = {side: [] for side in sides}
             for _ in range(args.runs):
                 for side, work in sides.items():
-                    _synchronise(args.device)
+                    synchronise(args.device)
                     started = time.perf_counter()
                     work(image)
-                    _synchronise(args.device)
+                    synchronise(args.device)
                     times[side].append(time.perf_counter() - started)
             print(f"{variant:9s} {runtime:10s} {args.device}: " + ", ".join(
                 f"{side} {statistics.median(t) * 1e3:.1f} ms" for side, t in times.items())
                   + f" (median of {args.runs})", flush=True)
             del sides
-            if args.device == "cuda":
-                torch.cuda.empty_cache()
+            free_device_memory()
 
 
 def main() -> int:

@@ -34,13 +34,14 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from common import FIXTURES, median_ms  # noqa: E402
 
+from fetch.florence2_detect import published  # noqa: E402
+
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import TensorRTRunner, providers_for  # noqa: E402
 from mozo.vendors.florence2_deploy import SPECS, Florence2Predictor  # noqa: E402
 from mozo.vendors.florence2_deploy.image import preprocess  # noqa: E402
 from mozo.vendors.florence2_deploy.tokenizer import PROMPTS  # noqa: E402
 
-REVISION = "2026-11-25"
 
 
 class Encoder(nn.Module):
@@ -70,7 +71,7 @@ def main() -> int:
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
 
-    weights = ROOT / "weights" / "florence2_detect" / args.variant / REVISION / "torch-fp16.pth"
+    weights = published(args.variant)
     model = Florence2Predictor(weights, args.variant, "cpu")
     encoder = Encoder(model.model).eval()
     rgb = load_image(str(FIXTURES / "example.jpg"))

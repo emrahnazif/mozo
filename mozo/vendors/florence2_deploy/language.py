@@ -149,10 +149,6 @@ class LanguageModel(nn.Module):
         self.model = _Model(spec)
         self.register_buffer("final_logits_bias", torch.zeros((1, spec.vocab)))
 
-    @property
-    def positions(self) -> int:
-        return self.spec.positions
-
     def embed(self, ids: torch.Tensor) -> torch.Tensor:
         return self.model.shared(ids)
 

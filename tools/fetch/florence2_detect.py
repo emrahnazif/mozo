@@ -66,6 +66,11 @@ ADDED = (["<od>", "</od>", "<ocr>", "</ocr>"] + [f"<loc_{x}>" for x in range(100
             "<poly>", "</poly>", "<and>"])
 
 
+def published(variant: str, revision: str = REVISION, weights_dir: Path = ROOT / "weights") -> Path:
+    """Where this tool places *variant*'s checkpoint: what the verify, bench and export tools read."""
+    return weights_dir / FAMILY / variant / revision / "torch-fp16.pth"
+
+
 def resolve(repo: str, commit: str, name: str) -> str:
     return f"{_HF}/{repo}/resolve/{commit}/{name}"
 
@@ -95,20 +100,16 @@ def _notice(variant: str, sha: str) -> str:
 def fetch(variant: str, revision: str, weights_dir: Path) -> None:
     """Download one variant's checkpoint, verify it, and place it with its licence and notice."""
     repo, commit, name = SOURCES[variant]
-    target = weights_dir / FAMILY / variant / revision / "torch-fp16.pth"
+    target = published(variant, revision, weights_dir)
     target.parent.mkdir(parents=True, exist_ok=True)
     sha = hub_lfs_sha256s(repo, commit)[name]
     if not target.is_file():
         staged = target.with_name(name)
-        if not staged.is_file() or digest(staged) != sha:
-            download_verified(resolve(repo, commit, name), staged, sha, label=variant, width=8,
-                              detail="MIT")
-        if name.endswith(".safetensors"):
-            from safetensors.torch import load_file
+        download_verified(resolve(repo, commit, name), staged, sha, label=variant, width=8,
+                          detail="MIT")
+        from safetensors.torch import load_file
 
-            state = load_file(staged)
-        else:
-            state = torch.load(staged, map_location="cpu", weights_only=True)
+        state = load_file(staged)
         dtypes = {str(t.dtype) for t in state.values()}
         if dtypes != {"torch.float16"}:
             raise SystemExit(f"expected every tensor in float16, found {sorted(dtypes)}")

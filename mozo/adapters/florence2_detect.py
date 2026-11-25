@@ -95,15 +95,15 @@ class Florence2DetectPredictor:
             raise ValueError(f"Unsupported variant {variant!r}. Choose from: {list(self.VARIANTS)}")
         self.variant = variant
         self.device = device or get_default_device()
-        self.runtime = (
-            "torch-fp32" if checkpoint_path is not None
-            else select_runtime(self.device, artifacts(FAMILY, variant, revision=revision), runtime,
-                                executes=self.EXECUTES, derives=self.DERIVES)
-        )
-        # One file either way: Microsoft's float16 checkpoint, which torch-fp32 upcasts at load.
-        weights = (Path(checkpoint_path) if checkpoint_path
-                   else resolve(FAMILY, variant, "torch-fp16", revision=revision))
-        self.revision = None if checkpoint_path else revision_of(FAMILY, variant, revision=revision)
+        if checkpoint_path is not None:
+            self.runtime, weights, self.revision = "torch-fp32", Path(checkpoint_path), None
+        else:
+            self.runtime = select_runtime(
+                self.device, artifacts(FAMILY, variant, revision=revision), runtime,
+                executes=self.EXECUTES, derives=self.DERIVES)
+            # One file either way: Microsoft's float16 checkpoint, which torch-fp32 upcasts.
+            weights = resolve(FAMILY, variant, "torch-fp16", revision=revision)
+            self.revision = revision_of(FAMILY, variant, revision=revision)
         self._model = Florence2Predictor(weights, variant, self.device, _DTYPES[self.runtime])
         _log.info("Florence-2 %s ready on %s via %s.", variant, self.device, self.runtime)
 

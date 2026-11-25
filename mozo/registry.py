@@ -106,8 +106,8 @@ EXECUTES: dict[str, tuple[str, ...]] = {
 #: Runtimes a family builds at load time from another published artifact, rather than
 #: downloading as a file of their own: derived runtime -> the artifact it is built from.
 #:
-#: ``torch-fp16`` is the fp32 checkpoint with part of the network cast to half precision, so it
-#: has no file to publish. A TensorRT engine is specific to the GPU and the TensorRT version that
+#: ``torch-fp16`` is usually the fp32 checkpoint with part of the network cast to half precision,
+#: so it has no file to publish (Florence-2 is the exception: it publishes fp16 and derives fp32). A TensorRT engine is specific to the GPU and the TensorRT version that
 #: built it, so it *cannot* be published: it is built on first load and cached -- from a published
 #: fp16 ONNX graph (OWLv2), or from a graph exported from the checkpoint there and then, where the
 #: graph depends on an input size the user chooses (Grounding DINO). A derived runtime is offered

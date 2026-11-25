@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 import torch
 
-from conftest import FIXTURE, require_weights
+from conftest import FIXTURE, require_present
 from mozo.registry import DERIVES, EXECUTES, get_model_info
 from mozo.vendors.florence2_deploy.config import DECODING, SPECS
 from mozo.vendors.florence2_deploy.decoding import _no_repeat_ngram, _process
@@ -24,7 +24,6 @@ from mozo.vendors.florence2_deploy.parse import parse_ocr, parse_od
 from mozo.vendors.florence2_deploy.tokenizer import PROMPTS, Vocabulary
 
 FAMILY = "florence2_detect"
-TEXT_FIXTURES = FIXTURE.parent.parent / "text"
 
 
 @pytest.fixture(scope="module")
@@ -181,32 +180,36 @@ def test_a_variant_that_does_not_exist_is_refused_before_any_download():
 
 @pytest.fixture(scope="module")
 def base():
-    require_weights(FAMILY, "base", "torch-fp16")
+    require_present(FAMILY, "base", "torch-fp16")
     from mozo.adapters.florence2_detect import Florence2DetectPredictor
 
     return Florence2DetectPredictor("base", device="cpu")
+
+
+@pytest.fixture(scope="module")
+def found(base):
+    """One decode of the photograph, shared: each is a full 3-beam search on the CPU."""
+    return base.predict(FIXTURE)
 
 
 def test_the_cpu_runs_the_exact_upcast(base):
     assert base.runtime == "torch-fp32"
 
 
-def test_boxes_are_named_in_the_models_words_with_no_class_id(base):
-    found = base.predict(FIXTURE)
+def test_boxes_are_named_in_the_models_words_with_no_class_id(found):
     names = {d.class_name for d in found}
     assert {"laptop", "human face"} <= names
     assert all(d.class_id is None for d in found)
     assert all(0.0 < d.confidence <= 1.0 for d in found)
 
 
-def test_the_same_image_gives_the_same_boxes(base):
-    first, second = base.predict(FIXTURE), base.predict(FIXTURE)
-    assert [(d.bbox, d.class_name, d.confidence) for d in first] == [
+def test_the_same_image_gives_the_same_boxes(base, found):
+    second = base.predict(FIXTURE)
+    assert [(d.bbox, d.class_name, d.confidence) for d in found] == [
         (d.bbox, d.class_name, d.confidence) for d in second]
 
 
-def test_threshold_keeps_boxes_at_or_above_it(base):
-    found = base.predict(FIXTURE)
+def test_threshold_keeps_boxes_at_or_above_it(base, found):
     kept = base.predict(FIXTURE, threshold=0.4)
     assert len(kept) == sum(d.confidence >= 0.4 for d in found) < len(found)
 
@@ -216,8 +219,8 @@ def test_labels_are_refused_because_there_is_no_class_list(base):
         base.predict(FIXTURE, labels=["person"])
 
 
-def test_detections_serialise_with_their_names(base):
+def test_detections_serialise_with_their_names(base, found):
     payload = base.predict(np.full((64, 64, 3), 255, np.uint8)).to_dict()
     assert isinstance(payload, list)
-    entry = base.predict(FIXTURE).to_dict()[0]
+    entry = found.to_dict()[0]
     assert entry["class_name"] and entry["class_id"] is None and len(entry["bbox"]) == 4

@@ -56,7 +56,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 
-from fetch.florence2_detect import REVISION  # noqa: E402
+from fetch.florence2_detect import published  # noqa: E402
 
 from mozo.image import load_image  # noqa: E402
 from mozo.vendors.florence2_deploy import Florence2Predictor  # noqa: E402
@@ -292,8 +292,6 @@ def _reducing_gap(image):
 
 def _channel_scale_by_group():
     """Channel attention scaled by the group width instead of the token count."""
-    original = vvision._ChannelAttention.forward
-
     def forward(self, x, size):
         batch, tokens, channels = x.shape
         qkv = self.qkv(x).reshape(batch, tokens, 3, self.groups, channels // self.groups)
@@ -302,7 +300,6 @@ def _channel_scale_by_group():
         attention = (q.transpose(-1, -2) @ k).softmax(dim=-1)
         x = (attention @ v.transpose(-1, -2)).transpose(-1, -2)
         return self.proj(x.transpose(1, 2).reshape(batch, tokens, channels)), size
-    del original
     return mock.patch.object(vvision._ChannelAttention, "forward", forward)
 
 
@@ -332,14 +329,15 @@ def _decoder_norm_eps():
     original = vlanguage._DecoderLayer.forward
 
     def forward(self, hidden, cross, past):
-        for norm in (self.self_attn_layer_norm, self.encoder_attn_layer_norm, self.final_layer_norm):
+        norms = (self.self_attn_layer_norm, self.encoder_attn_layer_norm, self.final_layer_norm)
+        saved = [norm.eps for norm in norms]
+        for norm in norms:
             norm.eps = 1e-6
         try:
             return original(self, hidden, cross, past)
         finally:
-            for norm in (self.self_attn_layer_norm, self.encoder_attn_layer_norm,
-                         self.final_layer_norm):
-                norm.eps = 1e-5
+            for norm, eps in zip(norms, saved):
+                norm.eps = eps
     return mock.patch.object(vlanguage._DecoderLayer, "forward", forward)
 
 
@@ -370,7 +368,7 @@ def _no_forced_eos():
 
 
 def _label_scores():
-    """``<OD>`` scored by its label's tokens (upstream's other mode) instead of its box's."""
+    """``<OD>``'s score averaged over tokens one position off its box's four location tokens."""
     original = vparse._overlapping
 
     def overlapping(span, spans):
@@ -436,7 +434,7 @@ def falsify(names: list[str], reference: Reference, vendor: Florence2Predictor, 
 
 
 def weights(variant: str) -> Path:
-    return ROOT / "weights" / "florence2_detect" / variant / REVISION / "torch-fp16.pth"
+    return published(variant)
 
 
 def main() -> int:
@@ -472,7 +470,7 @@ def main() -> int:
                 continue
             want = reference.run(case)
             checks, failures = compare(case, want, vendor, depth)
-            if not args.no_mozo and case.task == "<OD>" and case.max_new_tokens == 1024:
+            if not args.no_mozo and case.task == "<OD>" and case.max_new_tokens == Case.max_new_tokens:
                 more, extra = against_mozo(variant, case, want)
                 checks += more
                 failures += extra

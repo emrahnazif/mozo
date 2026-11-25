@@ -116,7 +116,7 @@ def parse_od(text: str, spans: list[tuple[int, int]] | None, scores: list[float]
 
 
 def parse_ocr(text: str, size: tuple[int, int]) -> list[Line]:
-    """Upstream's ``ocr`` parse of *text* (from :meth:`~.tokenizer.Vocabulary.decode`)."""
+    """Upstream's ``ocr`` parse of *text* (from :meth:`~.tokenizer.Vocabulary.decode_with_spans`)."""
     text = text.replace("<s>", "")
     out = []
     for line in re.findall(_OCR_LINE, text):

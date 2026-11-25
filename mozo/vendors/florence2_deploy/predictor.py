@@ -28,7 +28,7 @@ from .image import preprocess
 from .parse import Box, Line, parse_ocr, parse_od
 from .tokenizer import PROMPTS, Vocabulary
 
-__all__ = ["Florence2Predictor", "Output"]
+__all__ = ["Florence2Predictor"]
 
 
 @dataclass
@@ -51,7 +51,8 @@ class Florence2Predictor:
     """
 
     def __init__(self, weights: str | Path, variant: str, device: str = "cpu",
-                 dtype: torch.dtype = torch.float32, max_new_tokens: int = 1024) -> None:
+                 dtype: torch.dtype = torch.float32,
+                 max_new_tokens: int = DECODING.max_new_tokens) -> None:
         self.spec = SPECS[variant]
         self.device = device
         self.dtype = dtype

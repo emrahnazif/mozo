@@ -114,7 +114,9 @@ def get_default_device() -> str:
 #: that regression silently to everyone on a Mac.
 #:
 #: One fp16 entry appears here, ``torch-fp16`` on CUDA, and it only exists for families that
-#: derive it (:data:`mozo.registry.DERIVES`), each measured first. OWLv2's is 4.4x faster on an
+#: derive it (:data:`mozo.registry.DERIVES`) or publish it as their checkpoint (Florence-2, whose
+#: published weights are fp16: COCO AP moved by at most 0.28 on 500 images, at about twice fp32's
+#: speed on an RTX 3060), each measured first. OWLv2's is 4.4x faster on an
 #: RTX 3090 (5.5x for ``large``) at unchanged COCO AP, changing 0.4-1.4% of detections across a
 #: 0.3 threshold against fp32. Elsewhere, where fp16 was tried for a whole-file runtime, it
 #: measured worse on accuracy and no better on speed; and ``coreml-fp16``, which SAM 2's three

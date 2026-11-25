@@ -83,15 +83,15 @@ class Spec:
     language: LanguageSpec
 
 
-_BASE_VISION = VisionSpec(dims=(128, 256, 512, 1024), heads=(4, 8, 16, 32), groups=(4, 8, 16, 32),
-                          projection=768)
+_BASE_VISION = VisionSpec(dims=(128, 256, 512, 1024), heads=(4, 8, 16, 32), groups=(4, 8, 16, 32))
+_BASE_LANGUAGE = LanguageSpec(768, 6, 12, 3072, 1024)
 _LARGE_VISION = VisionSpec(dims=(256, 512, 1024, 2048), heads=(8, 16, 32, 64),
                            groups=(8, 16, 32, 64), projection=1024)
 
 SPECS: dict[str, Spec] = {
-    "base": Spec(_BASE_VISION, LanguageSpec(768, 6, 12, 3072, 1024)),
+    "base": Spec(_BASE_VISION, _BASE_LANGUAGE),
     "large": Spec(_LARGE_VISION, LanguageSpec(1024, 12, 16, 4096, 4096)),
-    "base-ft": Spec(_BASE_VISION, LanguageSpec(768, 6, 12, 3072, 1024)),
+    "base-ft": Spec(_BASE_VISION, _BASE_LANGUAGE),
     "large-ft": Spec(_LARGE_VISION, LanguageSpec(1024, 12, 16, 4096, 1024)),
 }
 

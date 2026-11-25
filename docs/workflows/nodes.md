@@ -69,6 +69,7 @@ what runs.
 | Node | Inputs → outputs | Parameters | What it does |
 |---|---|---|---|
 | `vitpose` | image, detections → detections | `variant`=small | ViTPose++: the joints of everyone you point it at. Wire a detector into `detections`. |
+| `rtmo` | image → detections | `variant`=small, `threshold`=0.5 | RTMO by OpenMMLab: everyone's joints in one pass, no detector needed. |
 
 ## Classify
 

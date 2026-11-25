@@ -1,4 +1,4 @@
-# All 82 models, by task
+# All 86 models, by task
 
 <!--
 summary: Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size.
@@ -6,7 +6,7 @@ label: All models
 keywords: mozo, model catalogue, computer vision models, licences, runtimes
 -->
 
-Mozo serves 82 variants across 18 families. A model is named `family/variant`, the same in Python
+Mozo serves 86 variants across 19 families. A model is named `family/variant`, the same in Python
 (`mozo.get_model("rfdetr/medium")`) and over HTTP (`/predict/rfdetr/medium`). Each family's page
 has examples, every parameter, and how the model behaves.
 
@@ -38,12 +38,13 @@ masks come back.
 
 ## Keypoints
 
-COCO's 17 joints for each person, in pixels of your image. RF-DETR finds people and their joints in
-one pass; ViTPose adds joints to boxes you already have.
+COCO's 17 joints for each person, in pixels of your image. RF-DETR and RTMO find people and their
+joints in one pass; ViTPose adds joints to boxes you already have.
 
 | Family | Variants | Licence | Runtimes | Size |
 |---|---|---|---|---|
 | [RF-DETR](/docs/models/rfdetr.md) | `keypoint-preview` | Apache-2.0 | torch | 164 MB |
+| [RTMO](/docs/models/rtmo.md) | `tiny` `small` `medium` `large` | Apache-2.0 | torch, onnx; tensorrt on CUDA | 28–179 MB |
 | [ViTPose](/docs/models/vitpose.md) | `small` `base` `large` `huge` | Apache-2.0 | torch, onnx (not `huge`) | 133 MB–3.6 GB |
 
 ## Detection from words

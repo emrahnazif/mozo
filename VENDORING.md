@@ -315,6 +315,11 @@ found traps it had not predicted, and the predicted ones were mostly real.
 - **Batched and unbatched forwards are not bit-identical.** 2.5e-07 for OWLv2; **1.4e-05** for
   EasyOCR's recogniser, enough to flip a character. Batch exactly as upstream does — which may mean
   *not* batching.
+- **A second stage batched over survivors depends on how many survived.** RTMO's DCC runs once
+  over every person NMS kept, so lowering the score threshold adds rows and moves the joints of the
+  people already found in the last bits (0.0017 px on the fixture under MKL's default dispatch, zero
+  under `MKL_CBWR=AVX2,STRICT`), while their boxes and scores stay put. Upstream does the same; the gate has to compare at one threshold per call, and a test that "a lower threshold only
+  adds rows" has to allow the joints that float noise.
 
 ### Checkpoint and geometry
 
@@ -333,6 +338,10 @@ found traps it had not predicted, and the predicted ones were mostly real.
   nobody can account for.
 - **`mmap=True` makes every tensor a view into one whole-file mapping.** Returning a 4-byte scalar
   from it keeps 1.5–7.5 GB resident for the life of the process. `.clone()` small reads.
+- **An OpenMMLab checkpoint pickles more than tensors.** Its `meta` carries numpy arrays and the
+  training config, so it loads only with `weights_only=False` -- arbitrary code on load. Verify the
+  hash, unpickle once in the fetch tool, and republish the `state_dict` alone (RTMO). The publisher's
+  hash is the 8-hex sha256 prefix in the filename; pin the full digest and check it starts with that.
 
 ### Postprocessing
 
@@ -364,6 +373,14 @@ Reproduce them, and record them:
 - **Two entry points that disagree.** EasyOCR's array path documents BGR and its path entry decodes
   greyscale with libjpeg directly — 27 and 7 grey levels apart. Hand both sides the same array.
 - **Mutable module globals** (`imgH`) become spec fields when vendored.
+- **An mmcv reference without compiling mmcv.** `mmcv-lite` (no compiled ops) plus `mmdet --no-deps`
+  and `mmpose --no-deps` stands MMPose up on a current torch, except that `mmpose.models` imports
+  EDPose, which imports `mmcv.ops.MultiScaleDeformableAttention` at module level. Stub `mmcv.ops` in
+  the harness when the model never calls it, and let the module-by-module comparison show the stub
+  reached nothing (RTMO). mmengine also needs `setuptools<81` for `pkg_resources`.
+- **`tools/` is a namespace package, so any installed regular `tools` package wins.** One conda env
+  on this machine has one, and `from tools.fetch.<family> import ...` then fails there. Check
+  `python -c "import tools; print(tools.__path__)"` before blaming the tool.
 
 ---
 
@@ -387,6 +404,9 @@ Ask, in order:
    neither model converts. Enumerating would be 6,241 combinations.
 4. **How much of the call is even in the graph?** If postprocessing is OpenCV either way, a graph
    buys less than it would for a single-forward detector.
+5. **Does the fp16 engine build at all?** TensorRT 11.5 has no fp16 kernel for a grouped
+   convolution with an odd number of channels per group (RTMO `tiny`: 13, `medium`: 27) and refuses
+   the whole engine. Holding those convolutions in fp32 inside the autocast export builds it.
 
 Record the answer in the plan's Results and in PROVENANCE, with numbers. "Not exported" with a
 measured reason is a finding; without one it is a gap.

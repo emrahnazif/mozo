@@ -1,5 +1,16 @@
 ## Unreleased
 
+- **RTMO, a new family: everyone's joints in one pass, no detector needed.** OpenMMLab's one-stage
+  multi-person pose estimator, in four sizes (`tiny`, `small`, `medium`, `large`), trained on body7.
+  `mozo.get_model("rtmo/small").predict(frame)` returns one detection per person, class `person`,
+  with COCO's 17 joints attached, the same answer `rfdetr/keypoint-preview` gives, so it is called
+  and served like any detector (`/predict/rtmo/small`) and has a workflow node. Each joint's
+  confidence is the model's estimate that it is visible. Bit-identical to MMPose v1.3.2 on CPU,
+  module by module, with no mmcv or mmpose installed. On CUDA with TensorRT 11 or later, `auto`
+  runs an fp32 engine built from the published ONNX graph: on 500 COCO images no person changed
+  and AP was identical, with the network 1.5 to 4.1 times faster than torch. Code Apache-2.0; the
+  weights are taken to be Apache-2.0 too, as MMPose states no separate terms for them.
+
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a
   TensorRT engine in full fp32 from the published ONNX graph: on 500 COCO images no detection

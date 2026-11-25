@@ -1,6 +1,6 @@
 """mozo -- models that run from a pip install.
 
-Eighty-two published variants across eighteen families, served over HTTP or called from Python. No
+Eighty-four published variants across nineteen families, served over HTTP or called from Python. No
 Docker, no cluster, no configuration: weights are fetched and verified on first use and cached
 under ``~/.cache/mozo``.
 
@@ -28,8 +28,8 @@ from __future__ import annotations
 # pyproject.toml reads this via [tool.setuptools.dynamic] version.attr
 __version__ = "1.14.0"
 
-__all__ = ["MODEL_REGISTRY", "ModelManager", "__version__", "clear", "configure", "get_model",
-           "get_model_info", "unload"]
+__all__ = ["Generation", "MODEL_REGISTRY", "ModelManager", "__version__", "clear", "configure",
+           "get_model", "get_model_info", "unload"]
 
 import logging as _logging
 
@@ -39,6 +39,7 @@ import logging as _logging
 # of its own, which is why ``mozo start`` and ``mozo run`` still print.
 _logging.getLogger(__name__).addHandler(_logging.NullHandler())
 
+from mozo.generation import Generation
 from mozo.manager import ModelManager
 from mozo.registry import MODEL_REGISTRY, get_model_info
 from mozo.weights import configure

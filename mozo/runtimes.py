@@ -164,7 +164,10 @@ _AVAILABLE = {"tensorrt": lambda: _tensorrt_usable()}
 #: Runtimes that run on one kind of device only, by runtime name or by framework. TensorRT is
 #: NVIDIA's. ``torch-fp16`` is offered on CUDA alone because that is the only device it was
 #: measured on: half precision on a CPU is slower than fp32, and on MPS it is unmeasured.
-_DEVICES: dict[str, tuple[str, ...]] = {"torch-fp16": ("cuda",), "tensorrt": ("cuda",)}
+#: ``torch-bf16`` likewise: Qwen3-VL in bfloat16 on a CPU measured 2.7x slower than fp32 *and*
+#: changed the answer from its second token.
+_DEVICES: dict[str, tuple[str, ...]] = {
+    "torch-fp16": ("cuda",), "torch-bf16": ("cuda",), "tensorrt": ("cuda",)}
 
 
 def _devices_for(runtime: str) -> tuple[str, ...] | None:

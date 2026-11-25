@@ -117,7 +117,7 @@ body {
   text-transform: uppercase;
 }
 
-select, input[type="text"], input[type="number"] {
+select, textarea, input[type="text"], input[type="number"] {
   width: 100%;
   padding: 6px 8px;
   background: var(--stage);
@@ -528,6 +528,13 @@ canvas.picking { cursor: crosshair; }
         <div class="chips" id="text-chips"></div>
       </div>
 
+      <div class="field group" id="group-question">
+        <label for="question">Ask about the image</label>
+        <textarea id="question" rows="3" placeholder="Describe this image."></textarea>
+        <label for="max-new-tokens">Most tokens to write</label>
+        <input type="number" id="max-new-tokens" min="1" step="1" value="128">
+      </div>
+
       <div class="field group" id="group-prompt">
         <span class="legend">Prompt</span>
         <div class="toggle group" id="prompt-mode">
@@ -697,8 +704,12 @@ function onFamily() {
   // A floor is the point for a detector, and wrong for a classifier: dropping a phrase below
   // it drops a class, and a classifier that drops a class has not classified.
   show("group-threshold",
-       (task === "object_detection" || entry.prompted) && task !== "zero_shot_classification");
-  show("group-text", entry.prompted);
+       (task === "object_detection" || entry.prompted)
+       && task !== "zero_shot_classification" && task !== "image_to_text");
+  // A model that answers in words takes one question, not a list of concepts to find.
+  const answers = task === "image_to_text";
+  show("group-text", entry.prompted && !answers);
+  show("group-question", answers);
   show("group-prompt", promptable || boxed);
   show("prompt-mode", promptable);
   show("group-name", promptable);
@@ -764,7 +775,17 @@ async function run() {
   if (threshold !== "" && $("group-threshold").classList.contains("on")) {
     params.set("threshold", threshold);
   }
-  if (prompted()) {
+  if (current === "image_to_text") {
+    const question = $("question").value.trim();
+    if (!question) {
+      showStatus("failed", "This model needs a question",
+        `${family} answers in words. Type what you want to know about the image above.`);
+      return;
+    }
+    params.set("text", question);
+    const budget = $("max-new-tokens").value.trim();
+    if (budget) params.set("max_new_tokens", budget);
+  } else if (prompted()) {
     if (!state.texts.length) {
       showStatus("failed", "This model needs a concept",
         `${family} looks for what you name. Type one above and press enter.`);
@@ -828,6 +849,8 @@ async function run() {
       // task would silently render an inpainting story about itself.
       if (task() === "depth_estimation") await takeDepth(response);
       else await takeImage(response, task());
+    } else if (task() === "image_to_text") {
+      takeAnswer(await response.text());
     } else {
       takeDetections(await response.text());
     }
@@ -871,6 +894,33 @@ function takeDetections(text) {
   renderList();
   renderJSON();
   decodeMasks();
+  draw();
+}
+
+/* An answer in words: drawn as text, with whether it finished. Built as nodes, because the text is
+   the model's and not the page's to interpret. */
+function takeAnswer(text) {
+  state.raw = text;
+  state.depth = state.edited = null;
+  state.detections = [];
+  state.masks.clear();
+  const answer = JSON.parse(text);
+  tally.count = `${answer.generated_tokens} tokens written, ${answer.prompt_tokens} read`;
+  showTally();
+  const pane = $("pane-list");
+  pane.textContent = "";
+  const box = document.createElement("div");
+  box.className = "status";
+  const headline = document.createElement("div");
+  headline.className = "headline";
+  headline.textContent = answer.finish_reason === "length"
+    ? `Cut off at ${answer.generated_tokens} tokens` : "Answer";
+  const body = document.createElement("div");
+  body.style.whiteSpace = "pre-wrap";
+  body.textContent = answer.text;
+  box.append(headline, body);
+  pane.append(box);
+  renderJSON();
   draw();
 }
 

@@ -25,8 +25,13 @@ from typing import Any
 #: missing prompt has to be refused. Named here rather than in the server because it is a
 #: statement about the task vocabulary, and this is the module that owns those strings; the
 #: endpoint and the tests both read it from here rather than keeping copies in step.
+#:
+#: ``image_to_text`` is the one member that answers in words rather than about regions or labels:
+#: one prompt, a question or an instruction, rather than a list of concepts -- but a request with
+#: no words is the same mistake, refused the same way before anything loads.
 PROMPTED = frozenset({
-    "concept_segmentation", "open_vocabulary_detection", "zero_shot_classification"})
+    "concept_segmentation", "image_to_text", "open_vocabulary_detection",
+    "zero_shot_classification"})
 
 #: Task types whose model is told *where* to look and cannot answer without being told. Two of
 #: them, needing a box for opposite reasons: a top-down pose model has no detector and is handed
@@ -93,7 +98,8 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 #: The adapters read it from here, so there is one statement of it.
 EXECUTES: dict[str, tuple[str, ...]] = {
     **{family: ("torch",)
-       for family in ("ben2", "clip", "easyocr", "edgetam", "moebius", "sam2", "siglip2")},
+       for family in ("ben2", "clip", "easyocr", "edgetam", "moebius", "qwen3_vl", "sam2",
+                      "siglip2")},
     # A TensorRT engine exported from the checkpoint at the input size the user picks.
     "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
@@ -127,6 +133,10 @@ DERIVES: dict[str, dict[str, str]] = {
     # (``seg-nano``) torch fp32 -- RF-DETR is launch-bound at batch 1. fp16 only where an fp16
     # graph is published (the detection variants), and only on request.
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # The other way round: Qwen publishes bfloat16 and so does mozo, and ``torch-fp32`` is that
+    # file upcast at load -- exact, since every bfloat16 value is a float32 value, and the path the
+    # gate holds bit-identical to ``transformers``.
+    "qwen3_vl": {"torch-fp32": "torch-bf16"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -296,6 +306,23 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'EdgeTAM for those. Unlike SAM 3, the code and all four checkpoints are Apache 2.0.'
         ),
         'variants': ['base-ensemble', 'base', 'large-ensemble', 'large'],
+    },
+
+    'qwen3_vl': {
+        'adapter_class': 'Qwen3VLPredictor',
+        'module': 'mozo.adapters.qwen3_vl',
+        'task_type': 'image_to_text',
+        'description': (
+            'Qwen3-VL by Alibaba Qwen — ask about an image in words and it answers in words: '
+            'describe it, count what is in it, read the text in it, say what is wrong with it. '
+            '2 variants, the 2B and 4B Instruct models, sharing one vision tower. mozo\'s first '
+            'model that writes: the answer comes a token at a time and says whether it finished '
+            'or reached max_new_tokens. Greedy by default, so the same question gets the same '
+            'answer; pass a temperature (and a seed) to sample. The image is most of the cost — '
+            'one token per 32x32 pixels, up to max_pixels. The text is fluent, not checked: '
+            'there is no confidence number. Code and weights are both Apache-2.0.'
+        ),
+        'variants': ['2b', '4b'],
     },
 
     'rfdetr': {

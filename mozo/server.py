@@ -485,7 +485,23 @@ def predict(
     ),
     seed: int = Query(
         0, description="Which sample to draw, for generative models. The same seed gives the "
-                       "same picture; a different one gives a different, equally valid result."),
+                       "same picture (or answer); a different one gives a different, equally "
+                       "valid result."),
+    max_new_tokens: int = Query(
+        128, description="For models that answer in words: the most tokens to write. An answer "
+                         "that reaches it is cut off, and finish_reason says \"length\"."),
+    temperature: float = Query(
+        0.0, description="For models that answer in words: 0 takes the most likely word every "
+                         "time, the same answer on every call; above 0 samples, with ?seed=."),
+    top_p: float = Query(
+        1.0, description="For models that answer in words, when sampling: keep the most likely "
+                         "tokens whose probabilities add up to this. 1 keeps all."),
+    top_k: int = Query(
+        0, description="For models that answer in words, when sampling: keep this many most "
+                       "likely tokens. 0 keeps all."),
+    max_pixels: Optional[int] = Query(
+        None, description="For models that answer in words: resize the image to at most this many "
+                          "pixels first. Omitted, the family's own default applies."),
     multimask: bool = Query(
         True,
         description="For promptable models, return three candidate masks ranked by the model's "
@@ -523,9 +539,15 @@ def predict(
         seed: Which sample to draw, for generative models. Ignored by the rest -- they
             are deterministic functions of their input and have nothing to vary.
         multimask: Return three candidate masks ranked by predicted IoU rather than one.
+        max_new_tokens: For ``image_to_text``: the most tokens to write.
+        temperature: For ``image_to_text``: 0 is greedy, above 0 samples with *seed*.
+        top_p: For ``image_to_text``, when sampling: the nucleus. 1 keeps every token.
+        top_k: For ``image_to_text``, when sampling: how many tokens to keep. 0 keeps all.
+        max_pixels: For ``image_to_text``: the most pixels the image is resized to.
 
     Returns:
-        Detections as JSON, or a depth map as a 16-bit PNG -- see :func:`_depth_response`.
+        Detections as JSON, a :class:`~mozo.generation.Generation` as JSON for a model that
+        answers in words, or a depth map as a 16-bit PNG -- see :func:`_depth_response`.
     """
     # A family that only embeds has no answer to give here, so it is sent to /encode before
     # anything else -- even the missing-file 422 below, which would otherwise tell a caller with a
@@ -583,6 +605,14 @@ def predict(
                    + (" Or point at something: ?point=x,y with a ?label=1, or "
                       "?box=x1,y1,x2,y2." if family in CLICKABLE else ""),
         )
+
+    # One question per request for a model that answers in words: two ?text= would be two answers,
+    # and this endpoint returns one. Refused before the load, like the missing prompt above.
+    if task == "image_to_text" and len(text) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{family} answers one question per request, and this one has {len(text)} "
+                   "?text= parameters. Send one; ask the next in its own request.")
 
     # Same reasoning as above: settled before the image is decoded and the weights are loaded,
     # because a forgotten prompt should not cost a multi-gigabyte load to be told about. Parsed
@@ -656,6 +686,13 @@ def predict(
                 image, points=points, labels=marks, boxes=corners,
                 multimask_output=multimask, name=name,
             ).to_dict())
+        if task == "image_to_text":
+            # Before the PROMPTED arm it is a member of: one prompt rather than a list, and no
+            # threshold -- an answer in words has no confidence to cut at.
+            budget = {} if max_pixels is None else {"max_pixels": max_pixels}
+            return JSONResponse(content=model.predict(
+                image, text[0], max_new_tokens=max_new_tokens, temperature=temperature,
+                top_p=top_p, top_k=top_k, seed=seed, **budget).to_dict())
         if task in PROMPTED:
             return JSONResponse(content=model.predict(image, text, **floor).to_dict())
         if task == "pose_estimation":

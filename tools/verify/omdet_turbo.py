@@ -107,6 +107,12 @@ CONFIG = {
     "vision_features_channels": [256, 256, 256],
 }
 
+#: The published ``preprocessor_config.json``, as image-processor arguments. Written out rather
+#: than read off the vendor, so the reference does not inherit a vendor mistake.
+PROCESSOR = {"do_resize": True, "size": {"height": 640, "width": 640}, "resample": 2,
+             "do_rescale": False, "do_normalize": True, "image_mean": [123.675, 116.28, 103.53],
+             "image_std": [58.395, 57.12, 57.375], "do_pad": False}
+
 COCO_NAMES = [
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
     "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
@@ -175,10 +181,7 @@ def reference(checkpoint: Path):
                               bos_token="<|startoftext|>", eos_token="<|endoftext|>",
                               unk_token="<|endoftext|>", pad_token="<|endoftext|>",
                               model_max_length=77)
-    images = DetrImageProcessorPil(
-        do_resize=True, size={"height": 640, "width": 640}, resample=2, do_rescale=False,
-        do_normalize=True, image_mean=[123.675, 116.28, 103.53],
-        image_std=[58.395, 57.12, 57.375], do_pad=False)
+    images = DetrImageProcessorPil(**PROCESSOR)
     return model, OmDetTurboProcessor(images, tokenizer)
 
 
@@ -260,9 +263,8 @@ def against_upstream(model, processor, detector: Detector, pictures, quiet=False
                         threshold=threshold)[0]
                     got = postprocess(boxes, logits, pixels.shape[:2], threshold)
                     count = max(count, len(got[0]))
-                    stages += [(f"{where}: detections@{threshold} {kind}", want[key], value)
-                               for kind, key, value in zip(("boxes", "scores", "labels"),
-                                                           ("boxes", "scores", "labels"), got)]
+                    stages += [(f"{where}: detections@{threshold} {kind}", want[kind], value)
+                               for kind, value in zip(("boxes", "scores", "labels"), got)]
                 found = _compare(stages)
                 checked += len(stages)
                 problems += found
@@ -386,15 +388,12 @@ def falsify(checkpoint: Path, model, processor, pictures) -> list[str]:
     return failures
 
 
-def torchvision_distance(model, pictures) -> None:
+def torchvision_distance(pictures) -> None:
     """How far transformers 5's default image backend is from the reference's PIL one."""
     from PIL import Image
     from transformers.models.detr import DetrImageProcessor
 
-    default = DetrImageProcessor(
-        do_resize=True, size={"height": 640, "width": 640}, resample=2, do_rescale=False,
-        do_normalize=True, image_mean=[123.675, 116.28, 103.53],
-        image_std=[58.395, 57.12, 57.375], do_pad=False)
+    default = DetrImageProcessor(**PROCESSOR)
     for label, pixels in pictures.items():
         theirs = default(Image.fromarray(pixels), return_tensors="pt")["pixel_values"]
         gap = (theirs - predictor_module.preprocess(pixels)).abs()
@@ -442,7 +441,7 @@ def main() -> int:
 
     if args.torchvision_distance:
         print("\ntransformers' default (torchvision) image backend")
-        torchvision_distance(model, pictures)
+        torchvision_distance(pictures)
 
     missed = []
     if args.falsify:

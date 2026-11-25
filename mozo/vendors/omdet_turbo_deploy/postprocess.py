@@ -5,7 +5,8 @@
 image, op for op -- including the parts that look like they could be simplified:
 
 - every (query, class) pair is a candidate, sigmoid-scored; the best 900 of the 900xC are kept
-  with ``topk(sorted=False)``, whose order is the kernel's;
+  with ``topk(sorted=False)``, whose order is the kernel's. Upstream materialises a 900xC label
+  and box table to index; ``top % C`` and ``top // C`` pick the same rows without it;
 - boxes are (cx, cy, w, h) in [0, 1], scaled by the *original* image's width and height;
 - ``> threshold``, then class-wise NMS at 0.5 with torchvision's ``batched_nms``, then clipping.
 
@@ -39,10 +40,9 @@ def postprocess(boxes: Tensor, logits: Tensor, size: tuple[int, int],
     """
     queries, classes = logits.shape
     scores = torch.sigmoid(logits)
-    labels = torch.arange(classes, device=logits.device).unsqueeze(0).repeat(queries, 1).flatten(0, 1)
     scores, top = scores.flatten(0, 1).topk(queries, sorted=False)
-    labels = labels[top]
-    boxes = boxes.view(-1, 1, 4).repeat(1, classes, 1).view(-1, 4)[top]
+    labels = top % classes
+    boxes = boxes[top // classes]
 
     cx, cy, w, h = boxes.unbind(-1)
     boxes = torch.stack([cx - 0.5 * w, cy - 0.5 * h, cx + 0.5 * w, cy + 0.5 * h], dim=-1)

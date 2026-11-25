@@ -34,10 +34,10 @@ class ConvNorm(nn.Module):
     """Convolution without bias, batch norm, optional activation (RT-DETR's ``ConvNormLayer``)."""
 
     def __init__(self, spec: Spec, cin: int, cout: int, kernel: int, stride: int,
-                 padding: int | None = None, activation: type[nn.Module] | None = None):
+                 activation: type[nn.Module] | None = None):
         super().__init__()
         self.conv = nn.Conv2d(cin, cout, kernel, stride,
-                              padding=(kernel - 1) // 2 if padding is None else padding, bias=False)
+                              padding=(kernel - 1) // 2, bias=False)
         self.norm = nn.BatchNorm2d(cout, spec.batch_norm_eps)
         self.activation = activation() if activation is not None else nn.Identity()
 
@@ -49,8 +49,8 @@ class RepVggBlock(nn.Module):
     def __init__(self, spec: Spec):
         super().__init__()
         width = spec.d_model
-        self.conv1 = ConvNorm(spec, width, width, 3, 1, padding=1)
-        self.conv2 = ConvNorm(spec, width, width, 1, 1, padding=0)
+        self.conv1 = ConvNorm(spec, width, width, 3, 1)
+        self.conv2 = ConvNorm(spec, width, width, 1, 1)
         self.activation = nn.SiLU()
 
     def forward(self, x: Tensor) -> Tensor:
@@ -71,7 +71,9 @@ class CSPRepLayer(nn.Module):
 
 
 class MultiheadAttention(nn.Module):
-    """``OmDetTurboMultiheadAttention``: batch-first, separate projections, divide-then-add-mask."""
+    """``OmDetTurboMultiheadAttention``: batch-first, separate projections, divide, then softmax.
+
+    No mask: at batch one nothing is padded, and upstream passes ``None``."""
 
     def __init__(self, width: int, heads: int):
         super().__init__()
@@ -82,15 +84,12 @@ class MultiheadAttention(nn.Module):
         self.value = nn.Linear(width, width)
         self.out_proj = nn.Linear(width, width)
 
-    def forward(self, queries: Tensor, keys: Tensor, values: Tensor,
-                mask: Tensor | None = None) -> Tensor:
+    def forward(self, queries: Tensor, keys: Tensor, values: Tensor) -> Tensor:
         batch = queries.shape[0]
         query = self.query(queries).view(batch, -1, self.heads, self.head_dim).transpose(1, 2)
         key = self.key(keys).view(batch, -1, self.heads, self.head_dim).transpose(1, 2)
         value = self.value(values).view(batch, -1, self.heads, self.head_dim).transpose(1, 2)
         scores = torch.matmul(query, key.transpose(-1, -2)) / math.sqrt(self.head_dim)
-        if mask is not None:
-            scores = scores + mask
         context = torch.matmul(scores.softmax(dim=-1), value)
         context = context.permute(0, 2, 1, 3).contiguous()
         return self.out_proj(context.view(context.shape[:-2] + (-1,)))
@@ -146,7 +145,7 @@ class HybridEncoder(nn.Module):
                           nn.BatchNorm2d(width))
             for cin in spec.encoder_in_channels)
         self.encoder = nn.ModuleList([Encoder(spec)])
-        levels = len(spec.encoder_in_channels)
+        levels = spec.levels
         self.lateral_convs = nn.ModuleList(
             ConvNorm(spec, width, width, 1, 1, activation=nn.GELU) for _ in range(levels - 1))
         self.fpn_blocks = nn.ModuleList(CSPRepLayer(spec) for _ in range(levels - 1))
@@ -163,12 +162,12 @@ class HybridEncoder(nn.Module):
         height, width = projected[index].shape[2:]
         flat = projected[index].flatten(2).permute(0, 2, 1)
         position = sincos_position(width, height, spec.d_model, spec.positional_temperature,
-                                   flat.device, flat.dtype).to(flat.device, flat.dtype)
+                                   flat.device, flat.dtype)
         for layer in self.encoder[0].layers:
             flat = layer(flat, position)
         projected[index] = flat.permute(0, 2, 1).reshape(-1, spec.d_model, height, width).contiguous()
 
-        levels = len(spec.encoder_in_channels)
+        levels = spec.levels
         fpn = [projected[-1]]
         for idx in range(levels - 1, 0, -1):
             high = self.lateral_convs[levels - 1 - idx](fpn[0])

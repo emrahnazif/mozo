@@ -31,7 +31,7 @@ import torch
 
 from .network import OmDetTurbo
 
-__all__ = ["INPUTS", "OUTPUTS", "MAX_CLASSES", "example", "export", "require_exporter"]
+__all__ = ["INPUTS", "OUTPUTS", "MAX_CLASSES", "example", "export", "profile", "require_exporter"]
 
 INPUTS = ("pixels", "classes", "task")
 OUTPUTS = ("boxes", "logits")
@@ -50,6 +50,14 @@ def example(spec, device: str | torch.device = "cpu", classes: int = 3,
     return (torch.randn((1, 3, side, side), generator=generator).to(device),
             torch.randn((classes, 1, spec.class_embed_dim), generator=generator).to(device),
             torch.randn((tokens, 1, spec.class_embed_dim), generator=generator).to(device))
+
+
+def profile(spec, classes: int) -> dict[str, tuple[tuple[int, ...], ...]]:
+    """``(min, preferred, max)`` shapes of the dynamic inputs, for a TensorRT optimisation profile:
+    the axes :func:`export` declares dynamic, tuned for a vocabulary of *classes*."""
+    width, tokens = spec.class_embed_dim, spec.text.context_length
+    return {"classes": ((1, 1, width), (classes, 1, width), (MAX_CLASSES, 1, width)),
+            "task": ((1, 1, width), (tokens, 1, width), (tokens, 1, width))}
 
 
 def require_exporter() -> None:

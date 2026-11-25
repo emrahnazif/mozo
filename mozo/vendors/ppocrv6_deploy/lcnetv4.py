@@ -16,12 +16,6 @@ import torch.nn.functional as F
 from .config import Backbone
 
 
-def _stride(value):
-    # The configs write a stride as ``1``, ``2`` or ``[2, 1]``. Upstream tests ``stride == 1``,
-    # which a list never satisfies, so ``[1, 1]`` would not count as 1 either; no checkpoint has one.
-    return tuple(value) if isinstance(value, (list, tuple)) else value
-
-
 class ConvLayer(nn.Module):
     """Convolution, batch norm, then an optional activation. Never bias, upstream's ``bias=False``."""
 
@@ -105,10 +99,11 @@ class DepthwiseSeparable(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, stride, kernel_size: int,
                  use_se: bool, reduction: int) -> None:
         super().__init__()
+        # ``stride`` is 1, 2 or (2, 1); upstream tests ``stride == 1``, which a tuple never meets.
         self.has_residual = in_channels == out_channels and stride == 1
         # Where upstream's training graph has a re-parameterisable depthwise branch, the
         # published checkpoint holds it already folded: one biased convolution, no norm.
-        if stride == 1 and in_channels == out_channels:
+        if self.has_residual:
             self.token_conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
                                         stride=stride, padding=kernel_size // 2,
                                         groups=in_channels)
@@ -135,7 +130,7 @@ class Stage(nn.Module):
     def __init__(self, blocks, reduction: int) -> None:
         super().__init__()
         self.blocks = nn.ModuleList([
-            DepthwiseSeparable(cin, cout, _stride(stride), kernel, use_se, reduction)
+            DepthwiseSeparable(cin, cout, stride, kernel, use_se, reduction)
             for kernel, cin, cout, stride, use_se in blocks
         ])
 

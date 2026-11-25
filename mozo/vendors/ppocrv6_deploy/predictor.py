@@ -35,6 +35,15 @@ class Region:
     confidence: float
 
 
+def _torch_call(module: torch.nn.Module, device: str) -> Callable[[np.ndarray], np.ndarray]:
+    # Captures the module and the device only: a closure over the Reader would be a reference
+    # cycle, and the weights would wait for the cyclic collector after the Reader is dropped.
+    def run(batch: np.ndarray) -> np.ndarray:
+        with torch.inference_mode():
+            return module(torch.from_numpy(batch).to(device)).float().cpu().numpy()
+    return run
+
+
 class Reader:
     """Detect and read text, as PaddleOCR 3.7.0 does with PP-OCRv6.
 
@@ -51,18 +60,10 @@ class Reader:
         self.alphabet = Alphabet(spec.recogniser.charset)
         if detect is None or recognise is None:
             detector, recogniser = load(checkpoint, spec)
-            self.detector = detector.to(device)
-            self.recogniser = recogniser.to(device)
-            detect = detect or self._torch(self.detector)
-            recognise = recognise or self._torch(self.recogniser)
+            detect = detect or _torch_call(detector.to(device), device)
+            recognise = recognise or _torch_call(recogniser.to(device), device)
         self.detect = detect
         self.recognise = recognise
-
-    def _torch(self, module: torch.nn.Module) -> Callable[[np.ndarray], np.ndarray]:
-        def run(batch: np.ndarray) -> np.ndarray:
-            with torch.inference_mode():
-                return module(torch.from_numpy(batch).to(self.device)).float().cpu().numpy()
-        return run
 
     def find(self, bgr: np.ndarray, box_thresh: float = _boxes.BOX_THRESH) -> list[np.ndarray]:
         """Detected quads, sorted into upstream's reading order."""
@@ -77,7 +78,7 @@ class Reader:
         crops, kept = [], []
         for quad in quads:
             crop = _image.crop_line(bgr, quad)
-            if crop.size > 0 and crop.shape[0] > 0 and crop.shape[1] > 0:
+            if crop.size:
                 crops.append(crop)
                 kept.append(quad)
         order = sorted(range(len(crops)), key=lambda i: crops[i].shape[1] / float(crops[i].shape[0]))

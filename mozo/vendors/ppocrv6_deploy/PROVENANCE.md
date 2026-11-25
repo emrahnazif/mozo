@@ -83,7 +83,7 @@ Each change was verified at zero delta before it was kept.
    `boxes._union` reproduce Clipper 6.4.2's integer output for the convex quadrilaterals DB hands
    it, including the vertex order of the union's output, which `cv2.minAreaRect` is sensitive to
    (see Measured traps). Checked against pyclipper on every candidate of every gated page and on
-   FUZZ_COUNT random boxes. Clipper is Boost-1.0; its terms are in NOTICE.
+   200,000 random boxes. Clipper is Boost-1.0; its terms are in NOTICE.
 4. **No shapely.** Upstream's unclip measures area and perimeter with OpenCV, not shapely, so
    shapely never arises.
 5. **BGR once.** mozo hands RGB; the reader converts once and works in BGR thereafter, as the
@@ -116,7 +116,36 @@ PADDLE_E2E
 
 ## Runtimes
 
-RUNTIMES
+Measured on one RTX 3090 and the 500 ICDAR 2015 test images (`tools/bench/ppocrv6.py`), against
+torch on the CPU, the verified path. Line agreement is identical / quad moved / string reread.
+
+| runtime | tiny | small | medium | published |
+|---|---|---|---|---|
+| torch CUDA, graphs per page | 15.4 ms | 18.6 ms | 37.7 ms | yes (torch-fp32) |
+| ... agreement | 95.0 / 2.3 / 2.5 % | 98.1 / 1.1 / 0.8 % | | |
+| ONNX Runtime CPU, detector vs torch, 1 thread | 2.0x | 1.9x | 1.4x | onnx-fp32, all |
+| ... agreement | 99.7 / 0.3 / 0 % | 99.5 / 0.3 / 0.3 % | | |
+| ONNX Runtime CUDA | (not run on CUDA) | 108 ms | 136 ms | no: 4-6x slower than torch |
+| TensorRT fp32 | 6.5 ms, 100 % identical | 9.4 ms, 100 % identical | 34.1 ms | no, see below |
+| TensorRT fp16 | finds nothing | 12.4 ms (slower than fp32) | 18.7 ms | medium only, on request |
+| ... agreement | | 89.8 / 6.2 / 4.0 % | 89.8 / 5.8 / 4.1 % vs TRT fp32 | |
+
+ICDAR accuracy (detection hmean / word recall) does not move with any published runtime: medium
+0.4932 / 0.6673 on torch CUDA, 0.4924 / 0.6663 on TensorRT fp16.
+
+- **torch on CUDA is not the CPU's arithmetic.** cuDNN convolutions run in TF32 by default
+  (`torch.backends.cudnn.allow_tf32`), a process-wide setting this package does not write; it
+  rereads 1-2.5% of lines.
+- **TensorRT fp32 reads exactly what the CPU reads** (TF32 off in the builder) but is not offered:
+  for `medium`, the default, it is 1.08x per page, and an engine must fix a maximum page. Sized for
+  the pipeline's own 4000-pixel limit, `medium`'s detector engine reserves 4.8 GB and ran slower
+  than torch at 3008x4000 (323 ms against 274), and `tiny`'s failed outright at that size (a Cask
+  deconvolution error). The fp16 runtime caps pages at 2048 and refuses larger ones.
+- **TensorRT 11.5's strongly typed fp16 engine for the tiny detector outputs ~1e-5 everywhere**,
+  while ONNX Runtime runs the same fp16 graph within 1e-2 of fp32. Not published for tiny; for
+  small, fp16 was slower than fp32. Both graphs are exported under CUDA fp16 autocast, opset 18.
+- CPU timings were taken on a machine shared with other jobs (load average ~45 on 20 threads), at
+  one thread, interleaved, in one process; the ratios are the claim, not the milliseconds.
 
 ## Measured traps
 

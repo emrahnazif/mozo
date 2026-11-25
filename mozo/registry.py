@@ -127,6 +127,11 @@ DERIVES: dict[str, dict[str, str]] = {
     # (``seg-nano``) torch fp32 -- RF-DETR is launch-bound at batch 1. fp16 only where an fp16
     # graph is published (the detection variants), and only on request.
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # ``medium`` only, from its published fp16 det/rec graphs, and only on request: on an RTX 3090
+    # the two networks run 2.0x faster than torch fp32 (a page 1.6x), and ICDAR 2015 accuracy does
+    # not move, but 10% of lines come out differently. No ``tensorrt-fp32``: it reads every line as
+    # the CPU does, but buys ``medium`` 8% and needs a page cap torch does not have. See the page.
+    "ppocrv6": {"tensorrt-fp16": "onnx-fp16"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -313,6 +318,22 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             'seg-nano', 'seg-small', 'seg-medium', 'seg-large',
             'keypoint-preview',
         ],
+    },
+
+    'ppocrv6': {
+        'adapter_class': 'PPOCRv6Predictor',
+        'module': 'mozo.adapters.ppocrv6',
+        'task_type': 'text_recognition',
+        'description': (
+            'PP-OCRv6 by PaddlePaddle — text detection and recognition. Finds every line of '
+            'text and reads it, returning the string, the four corners and a confidence. Two '
+            'graphs: a DB detector locates, an SVTR/CTC recogniser reads. One recogniser per '
+            'size covers about 50 languages at once (Chinese, Japanese, Korean, Latin, '
+            'Cyrillic, Arabic and more), so a variant is a size: medium (PaddleOCR\'s default), '
+            'small, and tiny (no Japanese kana). Detections carry text, not a class name. Code '
+            'and weights are Apache 2.0.'
+        ),
+        'variants': ['medium', 'small', 'tiny'],
     },
 
     'sam2': {

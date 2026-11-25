@@ -52,6 +52,13 @@ class Head(nn.Module):
         return torch.sigmoid(self.conv_final(self.conv_up(self.conv_down(x))))
 
 
+def _upsample_and_stack(features: list[torch.Tensor]) -> torch.Tensor:
+    """Both necks' tail: each level brought to the finest by nearest-neighbour, deepest first."""
+    upsampled = [F.interpolate(f, scale_factor=s, mode="nearest") if s > 1 else f
+                 for f, s in zip(features, (1, 2, 4, 8))]
+    return torch.cat(upsampled[::-1], dim=1)
+
+
 # -- medium: large-kernel PAN with intra-class blocks ----------------------------------------------
 
 #: ``intraclass_block_config`` in the medium detector's config: Conv2d (kernel, stride, padding).
@@ -122,20 +129,15 @@ class LargeKernelNeck(nn.Module):
             top_down[i] = adjusted[i] + F.interpolate(top_down[i + 1], scale_factor=2,
                                                       mode="nearest")
 
-        projected = [conv(top_down[i] if i < n - 1 else adjusted[-1])
-                     for i, conv in enumerate(self.input_feature_projection_convolution)]
+        projected = [conv(t) for conv, t in zip(self.input_feature_projection_convolution, top_down)]
 
         bottom_up = [projected[0]]
         for i in range(1, n):
             bottom_up.append(projected[i] + self.path_aggregation_head_convolution[i - 1](
                 bottom_up[i - 1]))
 
-        lateral = [conv(projected[0] if i == 0 else bottom_up[i])
-                   for i, conv in enumerate(self.path_aggregation_lateral_convolution)]
-        refined = [block(f) for block, f in zip(self.intraclass_blocks, lateral)]
-        upsampled = [F.interpolate(f, scale_factor=s, mode="nearest") if s > 1 else f
-                     for f, s in zip(refined, (1, 2, 4, 8))]
-        return torch.cat(upsampled[::-1], dim=1)
+        lateral = [conv(b) for conv, b in zip(self.path_aggregation_lateral_convolution, bottom_up)]
+        return _upsample_and_stack([block(f) for block, f in zip(self.intraclass_blocks, lateral)])
 
 
 # -- small and tiny: residual squeeze-excitation neck ----------------------------------------------
@@ -197,10 +199,7 @@ class ResidualSENeck(nn.Module):
         fused = [conv(f) for conv, f in zip(self.insert_conv, features)]
         for i in range(2, -1, -1):
             fused[i] = fused[i] + F.interpolate(fused[i + 1], scale_factor=2, mode="nearest")
-        refined = [conv(f) for conv, f in zip(self.input_conv, fused)]
-        upsampled = [F.interpolate(f, scale_factor=s, mode="nearest") if s != 1 else f
-                     for f, s in zip(refined, (1, 2, 4, 8))]
-        return torch.cat(upsampled[::-1], dim=1)
+        return _upsample_and_stack([conv(f) for conv, f in zip(self.input_conv, fused)])
 
 
 class _Body(nn.Module):

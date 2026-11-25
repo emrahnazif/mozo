@@ -39,7 +39,7 @@ def quads(prob: np.ndarray, shape: np.ndarray, box_thresh: float = BOX_THRESH) -
     width_scale = dest_width / width
     height_scale = dest_height / height
 
-    contours, _ = cv2.findContours((bitmap * 255).astype(np.uint8), cv2.RETR_LIST,
+    contours, _ = cv2.findContours(bitmap.astype(np.uint8) * 255, cv2.RETR_LIST,
                                    cv2.CHAIN_APPROX_SIMPLE)
     boxes, scores = [], []
     for contour in contours[:MAX_CANDIDATES]:

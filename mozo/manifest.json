@@ -801,6 +801,121 @@
         }
       }
     },
+    "ppocrv6/medium": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "ppocrv6/medium/2026-11-25/LICENSE",
+              "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e",
+              "size": 11376
+            },
+            "NOTICE": {
+              "path": "ppocrv6/medium/2026-11-25/NOTICE",
+              "sha256": "44eec671dd6b3c154b7035e2a3b3c859b5ef645bbecbc4e322f6aba4ce880a5a",
+              "size": 854
+            },
+            "onnx-fp16-det": {
+              "path": "ppocrv6/medium/2026-11-25/onnx-fp16-det.onnx",
+              "sha256": "ea0a032c24ceafdd73f86afac05732c4c3744d8fa714cad8c532f77b32a5c8c3",
+              "size": 44261589
+            },
+            "onnx-fp16-rec": {
+              "path": "ppocrv6/medium/2026-11-25/onnx-fp16-rec.onnx",
+              "sha256": "27bb8517f1d03683c227a2d83a948742d18eb1c7c56ee8c0e9e9e398da49bcb9",
+              "size": 38658122
+            },
+            "onnx-fp32-det": {
+              "path": "ppocrv6/medium/2026-11-25/onnx-fp32-det.onnx",
+              "sha256": "a123aab3bbe30ce5f08303cb08e4fecb60346551bd97479131dc4b31c7fce48a",
+              "size": 87847957
+            },
+            "onnx-fp32-rec": {
+              "path": "ppocrv6/medium/2026-11-25/onnx-fp32-rec.onnx",
+              "sha256": "07311f9dd180ab9e8b29b7900566735d819834fda593ce16cfd999445e9c1dba",
+              "size": 76555771
+            },
+            "torch-fp32": {
+              "path": "ppocrv6/medium/2026-11-25/torch-fp32.pth",
+              "sha256": "076d3d9e3e10747aab8145d402dfba20ce15829fb650598dadb5f55e9bf8e876",
+              "size": 164893436
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "ppocrv6/small": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "ppocrv6/small/2026-11-25/LICENSE",
+              "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e",
+              "size": 11376
+            },
+            "NOTICE": {
+              "path": "ppocrv6/small/2026-11-25/NOTICE",
+              "sha256": "1af1ee03e2c1c9c1b1635fa759eef0009864ac8c7c75db2ea2ef55042e5f2365",
+              "size": 850
+            },
+            "onnx-fp32-det": {
+              "path": "ppocrv6/small/2026-11-25/onnx-fp32-det.onnx",
+              "sha256": "ecb51e302f5c67d0c4b343dcc01abb79376cc5579dfa26ae89a2826079b6e68d",
+              "size": 9909606
+            },
+            "onnx-fp32-rec": {
+              "path": "ppocrv6/small/2026-11-25/onnx-fp32-rec.onnx",
+              "sha256": "31601bad28bcdb81042f8a0f6f505801ea9953c723e97cf2198e85cb697a5df2",
+              "size": 21162506
+            },
+            "torch-fp32": {
+              "path": "ppocrv6/small/2026-11-25/torch-fp32.pth",
+              "sha256": "bc18c999af93d2bc256ac47e995ce13aa004b3a91c0b1424e697d4a122598b63",
+              "size": 31251290
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
+    "ppocrv6/tiny": {
+      "latest": "2026-11-25",
+      "revisions": {
+        "2026-11-25": {
+          "artifacts": {
+            "LICENSE": {
+              "path": "ppocrv6/tiny/2026-11-25/LICENSE",
+              "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e",
+              "size": 11376
+            },
+            "NOTICE": {
+              "path": "ppocrv6/tiny/2026-11-25/NOTICE",
+              "sha256": "30868d771898f661e8751c10c1b63d1811602fe4a394d89cb6f0156d6ea144e4",
+              "size": 846
+            },
+            "onnx-fp32-det": {
+              "path": "ppocrv6/tiny/2026-11-25/onnx-fp32-det.onnx",
+              "sha256": "59c5ce3798fe7cd5d126fe807f97e5824f0dca391c07da912da670d91ddfd6e5",
+              "size": 1809600
+            },
+            "onnx-fp32-rec": {
+              "path": "ppocrv6/tiny/2026-11-25/onnx-fp32-rec.onnx",
+              "sha256": "60b22842b15ddc65784384eeb2577a866b2364e0d0c28c75904f30aa64093c39",
+              "size": 4454254
+            },
+            "torch-fp32": {
+              "path": "ppocrv6/tiny/2026-11-25/torch-fp32.pth",
+              "sha256": "7441adbd2d7cbfd3ef091028b872caadbd7447fdb60e06cc3c1414bbbdfd58d7",
+              "size": 6350262
+            }
+          },
+          "license": "Apache-2.0"
+        }
+      }
+    },
     "rfdetr/keypoint-preview": {
       "latest": "2026-08-25",
       "revisions": {

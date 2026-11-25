@@ -44,6 +44,7 @@ import torch
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
+sys.path.insert(0, str(ROOT / "tools"))
 
 from mozo.image import load_image  # noqa: E402
 from mozo.vendors.ppocrv6_deploy import SPECS, VARIANTS, Reader  # noqa: E402
@@ -53,12 +54,8 @@ from mozo.weights import resolve  # noqa: E402
 
 from conftest import FIXTURE, TEXT_FIXTURES  # noqa: E402
 
-#: The Hub commits tools/fetch/ppocrv6.py fuses, so the reference loads the same tensors.
-from importlib import util as _util  # noqa: E402
-
-_spec = _util.spec_from_file_location("_fetch", ROOT / "tools" / "fetch" / "ppocrv6.py")
-_fetch = _util.module_from_spec(_spec)
-_spec.loader.exec_module(_fetch)
+# The Hub commits tools/fetch/ppocrv6.py fuses, so the reference loads the same tensors.
+from fetch.ppocrv6 import COMMITS, _repo  # noqa: E402
 
 
 #: Extra pages from ``--images``: the fixtures have at most three lines, so a dense page is
@@ -114,8 +111,7 @@ def _transformers(variant: str, kind: str):
     from huggingface_hub import snapshot_download
     from transformers import AutoModelForObjectDetection, AutoModelForTextRecognition
 
-    repo = f"PaddlePaddle/PP-OCRv6_{variant}_{kind}_safetensors"
-    path = snapshot_download(repo, revision=_fetch.COMMITS[(variant, kind)])
+    path = snapshot_download(_repo(variant, kind), revision=COMMITS[(variant, kind)])
     cls = AutoModelForObjectDetection if kind == "det" else AutoModelForTextRecognition
     return cls.from_pretrained(path).eval()
 
@@ -205,7 +201,12 @@ def against_upstream(variant: str, checkpoint: Path, comparison: Comparison) -> 
         result = next(iter(ocr.predict(bgr))).json["res"]
         mine_rec = []
         mine_recognise = mine.recognise
-        mine.recognise = lambda batch: mine_rec.append(mine_recognise(batch)) or mine_rec[-1]
+
+        def record(batch):
+            mine_rec.append(mine_recognise(batch))
+            return mine_rec[-1]
+
+        mine.recognise = record
         regions = mine(rgb)
         mine.recognise = mine_recognise
         for i, (a, b) in enumerate(zip(rec_runner.outputs, mine_rec)):

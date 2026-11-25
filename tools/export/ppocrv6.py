@@ -42,6 +42,7 @@ OPSET = 18                     # 17's TorchScript path cannot carry autocast's c
 INPUT_NAME = "pixels"
 OUTPUT_NAME = {"det": "probability", "rec": "probabilities"}
 DYNAMIC = {"det": {0: "batch", 2: "height", 3: "width"}, "rec": {0: "batch", 3: "width"}}
+DYNAMIC_OUT = {"det": {0: "batch", 2: "height", 3: "width"}, "rec": {0: "batch", 1: "steps"}}
 EXAMPLE = {"det": (1, 3, 736, 1280), "rec": (6, 3, 48, 640)}
 CHECK_SHAPES = {"det": [(1, 3, 224, 640), (1, 3, 96, 1920)], "rec": [(1, 3, 48, 320), (6, 3, 48, 1208)]}
 
@@ -50,18 +51,21 @@ CHECK_SHAPES = {"det": [(1, 3, 224, 640), (1, 3, 96, 1920)], "rec": [(1, 3, 48, 
 #: the network that also moves most between Paddle and torch at the same weights.
 FP32_TOLERANCE = 1e-3
 
+#: The fp16 graph's bar is only that it is the same network: probabilities within this on noise,
+#: measured 3.7e-06 to 3.4e-02 (the tiny detector the farthest). Whether it is good enough to
+#: publish is the bench's ICDAR 2015 run, not this.
+FP16_TOLERANCE = 5e-2
+
 
 def export(module: torch.nn.Module, kind: str, destination: Path, fp16: bool) -> None:
     device = "cuda" if fp16 else "cpu"
     module = module.to(device).eval()
     example = torch.randn(*EXAMPLE[kind], device=device)
-    names = [INPUT_NAME, OUTPUT_NAME[kind]]
     with torch.no_grad(), torch.autocast("cuda", torch.float16, enabled=fp16):
-        torch.onnx.export(module, (example,), str(destination), input_names=names[:1],
-                          output_names=names[1:], opset_version=OPSET, dynamo=False,
-                          dynamic_axes={INPUT_NAME: DYNAMIC[kind], OUTPUT_NAME[kind]: {
-                              0: "batch", **({2: "height", 3: "width"} if kind == "det"
-                                             else {1: "steps"})}})
+        torch.onnx.export(module, (example,), str(destination), input_names=[INPUT_NAME],
+                          output_names=[OUTPUT_NAME[kind]], opset_version=OPSET, dynamo=False,
+                          dynamic_axes={INPUT_NAME: DYNAMIC[kind],
+                                        OUTPUT_NAME[kind]: DYNAMIC_OUT[kind]})
     require_one_file(destination)
 
 
@@ -94,10 +98,8 @@ def main() -> int:
             with tempfile.TemporaryDirectory() as scratch:
                 staged = Path(scratch) / f"onnx-{precision}-{kind}.onnx"
                 export(module, kind, staged, args.fp16)
-                # fp16 is held to its purpose, a TensorRT source, by the bench's accuracy run;
-                # here only that it is the same network (probabilities within 5e-2 on noise;
-                # measured 3.7e-06 to 3.4e-02, the tiny detector the farthest).
-                worst = check(module, kind, staged, 5e-2 if args.fp16 else FP32_TOLERANCE)
+                worst = check(module, kind, staged,
+                              FP16_TOLERANCE if args.fp16 else FP32_TOLERANCE)
                 revision_dir.mkdir(parents=True, exist_ok=True)
                 target = revision_dir / staged.name
                 target.write_bytes(staged.read_bytes())

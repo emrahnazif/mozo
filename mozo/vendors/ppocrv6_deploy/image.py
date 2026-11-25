@@ -18,10 +18,11 @@ import math
 import cv2
 import numpy as np
 
+from .boxes import mini_box
+
 #: ``OCR.yaml``'s TextDetection settings in PaddleOCR 3.7.0: scale the page up until its short
 #: side is at least 64, never let the long side pass 4000, round both to multiples of 32.
-LIMIT_SIDE_LEN = 64
-LIMIT_TYPE = "min"
+LIMIT_SIDE_LEN = 64   # limit_type "min"
 MAX_SIDE_LIMIT = 4000
 
 #: ``RecResizeImg.image_shape`` in every PP-OCRv6 recogniser's inference.yml.
@@ -43,11 +44,10 @@ def resize_for_detector(bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         img = padded
 
     h, w, _ = img.shape
-    if LIMIT_TYPE == "min":
-        if min(h, w) < LIMIT_SIDE_LEN:
-            ratio = float(LIMIT_SIDE_LEN) / h if h < w else float(LIMIT_SIDE_LEN) / w
-        else:
-            ratio = 1.0
+    if min(h, w) < LIMIT_SIDE_LEN:
+        ratio = float(LIMIT_SIDE_LEN) / h if h < w else float(LIMIT_SIDE_LEN) / w
+    else:
+        ratio = 1.0
     resize_h = int(h * ratio)
     resize_w = int(w * ratio)
     if max(resize_h, resize_w) > MAX_SIDE_LIMIT:
@@ -81,20 +81,13 @@ def normalize_for_detector(img: np.ndarray) -> np.ndarray:
     return cv2.merge(planes).transpose((2, 0, 1))
 
 
-def _ordered_box(rect) -> np.ndarray:
-    points = sorted(list(cv2.boxPoints(rect)), key=lambda x: x[0])
-    a, d = (0, 1) if points[1][1] > points[0][1] else (1, 0)
-    b, c = (2, 3) if points[3][1] > points[2][1] else (3, 2)
-    return np.array([points[a], points[b], points[c], points[d]])
-
-
 def crop_line(bgr: np.ndarray, quad: np.ndarray) -> np.ndarray:
     """``CropByPolys.get_minarea_rect_crop``: rectify one detected quad to an upright line.
 
     A crop at least 1.5 times taller than wide is turned a quarter, so vertical text reads
     left to right. Pixels outside the page are replicated from its edge, bicubic in between.
     """
-    points = _ordered_box(cv2.minAreaRect(np.array(quad).astype(np.int32)))
+    points = np.array(mini_box(np.array(quad).astype(np.int32))[0])
     width = int(max(np.linalg.norm(points[0] - points[1]), np.linalg.norm(points[2] - points[3])))
     height = int(max(np.linalg.norm(points[0] - points[3]), np.linalg.norm(points[1] - points[2])))
     target = np.float32([[0, 0], [width, 0], [width, height], [0, height]])

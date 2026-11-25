@@ -38,28 +38,19 @@ import torch
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
+sys.path.insert(0, str(ROOT / "tools"))
+
+from common import synchronise  # noqa: E402
+from mozo.adapters.ppocrv6 import TENSORRT_SHAPES, _onnx_call, _tensorrt_call  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.vendors.ppocrv6_deploy import SPECS, Reader  # noqa: E402
 from mozo.weights import resolve  # noqa: E402
 
-#: TensorRT optimisation profiles: (min, preferred, max). The detector's maximum is a
-#: 2048-pixel page, the recogniser's a batch of six 3200-pixel lines.
-TRT_SHAPES = {
-    "det": {"pixels": ((1, 3, 32, 32), (1, 3, 736, 1280), (1, 3, 2048, 2048))},
-    "rec": {"pixels": ((1, 3, 48, 320), (6, 3, 48, 640), (6, 3, 48, 3200))},
-}
-
-
-def _sync(device: str) -> None:
-    if device.startswith("cuda"):
-        torch.cuda.synchronize()
-
-
 def build_reader(variant: str, runtime: str, device: str, graphs: Path | None) -> Reader:
+    """The adapter's own wiring, on graphs from a local folder rather than the cache."""
     spec = SPECS[variant]
-    checkpoint = resolve("ppocrv6", variant, "torch-fp32")
     if runtime == "torch-fp32":
-        return Reader(checkpoint, spec, device=device)
+        return Reader(resolve("ppocrv6", variant, "torch-fp32"), spec, device=device)
     precision = runtime.split("-")[1]
     paths = {kind: graphs / f"onnx-{precision}-{kind}.onnx" for kind in ("det", "rec")}
     if runtime.startswith("onnx"):
@@ -69,22 +60,18 @@ def build_reader(variant: str, runtime: str, device: str, graphs: Path | None) -
 
         if device.startswith("cuda") and hasattr(onnxruntime, "preload_dlls"):
             # onnxruntime-gpu 1.23 is built against CUDA 12; with a CUDA 13 torch the CUDA 12
-            # libraries come from the nvidia-*-cu12 wheels, which this loads.
+            # libraries come from the nvidia-*-cu12 wheels, which this loads. An environment
+            # matter, not mozo's: without it ONNX Runtime warns and runs on the CPU.
             onnxruntime.preload_dlls()
-        det, rec = (OnnxRunner(paths[k], device=device) for k in ("det", "rec"))
-        return Reader(None, spec, device=device,
-                      detect=lambda x: det(x)[0].astype(np.float32),
-                      recognise=lambda x: rec(x)[0].astype(np.float32))
-    from mozo.runtimes import TensorRTRunner
+        calls = {kind: _onnx_call(OnnxRunner(paths[kind], device=device)) for kind in paths}
+    else:
+        from mozo.runtimes import TensorRTRunner
 
-    engines = graphs / "engines"
-    det = TensorRTRunner(paths["det"], device, engines=engines, shapes=TRT_SHAPES["det"])
-    rec = TensorRTRunner(paths["rec"], device, engines=engines, shapes=TRT_SHAPES["rec"])
-
-    def run(engine):
-        return lambda x: engine(torch.from_numpy(x))[0].float().cpu().numpy()
-
-    return Reader(None, spec, device=device, detect=run(det), recognise=run(rec))
+        calls = {kind: _tensorrt_call(TensorRTRunner(paths[kind], device,
+                                                     engines=graphs / "engines",
+                                                     shapes=TENSORRT_SHAPES[kind]), kind == "det")
+                 for kind in paths}
+    return Reader(None, spec, device=device, detect=calls["det"], recognise=calls["rec"])
 
 
 def run(reader: Reader, images: list[Path], device: str) -> tuple[dict, dict]:
@@ -94,10 +81,10 @@ def run(reader: Reader, images: list[Path], device: str) -> tuple[dict, dict]:
 
     def timed(fn):
         def wrapper(x):
-            _sync(device)
+            synchronise(device)
             start = time.perf_counter()
             out = fn(x)
-            _sync(device)
+            synchronise(device)
             spent[0] += time.perf_counter() - start
             return out
         return wrapper
@@ -146,6 +133,12 @@ def _areas(a, b) -> tuple[float, float, float]:
     return float((masks[0] & masks[1]).sum()), float(masks[0].sum()), float(masks[1].sum())
 
 
+def _covers(cover, quad, share: float, strict: bool = False) -> bool:
+    """Whether *cover* overlaps at least *share* of *quad*'s area (more than, if *strict*)."""
+    inter, area, _ = _areas(quad, cover)
+    return area > 0 and (inter / area > share if strict else inter / area >= share)
+
+
 def _norm(text: str) -> str:
     return re.sub(r"^[^\w]+|[^\w]+$", "", text.lower())
 
@@ -156,8 +149,7 @@ def icdar(predictions: dict, gt: dict) -> dict:
         found = [(np.asarray(q, float), t) for q, t, *_ in predictions.get(name, [])]
         care = [(q, t) for q, t in rows if t != "###"]
         dont = [q for q, t in rows if t == "###"]
-        kept = [(q, t) for q, t in found
-                if not any((lambda i, ap: ap > 0 and i / ap > 0.5)(*_areas(q, d)[:2]) for d in dont)]
+        kept = [(q, t) for q, t in found if not any(_covers(d, q, 0.5, strict=True) for d in dont)]
         n_pred += len(kept)
         n_gt += len(care)
         pairs = []
@@ -174,8 +166,8 @@ def icdar(predictions: dict, gt: dict) -> dict:
                 tp += 1
         for g, t in care:
             words += 1
-            if any((lambda i, ag: ag > 0 and i / ag >= 0.5)(*_areas(g, q)[:2])
-                   and _norm(t) in [_norm(x) for x in pt.split()] for q, pt in found):
+            if any(_covers(q, g, 0.5) and _norm(t) in [_norm(x) for x in pt.split()]
+                   for q, pt in found):
                 hits += 1
     p, r = tp / max(n_pred, 1), tp / max(n_gt, 1)
     return {"precision": p, "recall": r, "hmean": 2 * p * r / max(p + r, 1e-9),
@@ -214,7 +206,10 @@ def agreement(mine: dict, other: dict) -> dict:
             if best is None:
                 unpaired += 1
             else:
-                moved, reread = (moved + 1, reread) if ours.pop(best)[1] == t else (moved, reread + 1)
+                if ours.pop(best)[1] == t:
+                    moved += 1
+                else:
+                    reread += 1
         unpaired += len(ours)
     share = lambda n: round(n / max(total, 1), 4)  # noqa: E731
     return {"lines": total, "identical": share(identical), "moved": share(moved),
@@ -241,7 +236,7 @@ def main() -> int:
         torch.set_num_threads(args.threads)
 
     images = sorted(args.images.glob("*.jpg"))[:args.limit]
-    reader = build_reader(args.variant, args.runtime, args.device, args.graphs)
+    reader = build_reader(args.variant, args.runtime, args.device.split(":")[0], args.graphs)
     predictions, timing = run(reader, images, args.device)
     report = {"variant": args.variant, "runtime": args.runtime, "device": args.device,
               "images": len(images), **timing}

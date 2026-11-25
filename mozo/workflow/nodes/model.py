@@ -312,6 +312,12 @@ def easyocr(image: Image, models: Models, variant: variants("easyocr") = "englis
     return models("easyocr", variant).predict(image)
 
 
+@node(category="Read", exclusive=True)
+def ppocrv6(image: Image, models: Models, variant: variants("ppocrv6") = "medium") -> Detections:
+    """PP-OCRv6 by PaddlePaddle -- find text in an image and read it, in about 50 languages."""
+    return models("ppocrv6", variant).predict(image)
+
+
 # --- Depth ---------------------------------------------------------------------------------------
 
 @node(category="Depth", exclusive=True)

@@ -31,6 +31,7 @@ WITHOUT_A_NODE = {
     "sam2": "prompted with point and box coordinates; no widget for that yet",
     "edgetam": "prompted with point and box coordinates; no widget for that yet",
     "granite_embedding_r2": "embeds text and answers nothing about an image; not in v1",
+    "qwen3_vl": "answers in words; there is no Text port type yet",
 }
 
 #: What a family's task implies it produces. Seven rules rather than one row per family -- the same

@@ -233,3 +233,77 @@ class TestAFamilyThatOnlyEmbeds:
                                files={"file": ("x.jpg", FIXTURE.read_bytes(), "image/jpeg")})
         assert response.status_code == 400
         assert "text" in response.json()["detail"]
+
+
+class TestAFamilyThatAnswersInWords:
+    """``image_to_text``: one ``?text=``, the answer as JSON, the refusals before any load."""
+
+    class Model:
+        """Stands in for Qwen3-VL, so these run without four gigabytes of weights."""
+
+        def __init__(self, error=None):
+            self.calls, self.error = [], error
+
+        def predict(self, image, prompt, **kwargs):
+            from mozo.generation import Generation
+
+            self.calls.append((image.shape, prompt, kwargs))
+            if self.error:
+                raise self.error
+            return Generation("Five people at a table.", "stop", 2414, 7)
+
+    @pytest.fixture
+    def served(self, client, monkeypatch):
+        model = self.Model()
+        loads = []
+
+        def get_model(family, variant, **kw):
+            loads.append((family, variant))
+            return model
+
+        monkeypatch.setattr(client.app.state.model_manager, "get_model", get_model)
+        return client, model, loads
+
+    @staticmethod
+    def upload():
+        return {"file": ("x.jpg", FIXTURE.read_bytes(), "image/jpeg")}
+
+    def test_the_answer_comes_back_as_json(self, served):
+        client, model, _ = served
+        response = client.post("/predict/qwen3_vl/2b", params={"text": "Who is there?"},
+                               files=self.upload())
+        assert response.status_code == 200
+        assert response.json() == {"text": "Five people at a table.", "finish_reason": "stop",
+                                   "prompt_tokens": 2414, "generated_tokens": 7}
+        _, prompt, kwargs = model.calls[0]
+        assert prompt == "Who is there?"
+        assert kwargs == {"max_new_tokens": 128, "temperature": 0.0, "top_p": 1.0, "top_k": 0,
+                          "seed": 0}  # max_pixels omitted: the adapter's own default applies
+
+    def test_every_setting_is_forwarded(self, served):
+        client, model, _ = served
+        params = {"text": "Go", "max_new_tokens": 9, "temperature": 0.7, "top_p": 0.8, "top_k": 20,
+                  "seed": 4, "max_pixels": 262144}
+        assert client.post("/predict/qwen3_vl/2b", params=params,
+                           files=self.upload()).status_code == 200
+        assert model.calls[0][2] == {"max_new_tokens": 9, "temperature": 0.7, "top_p": 0.8,
+                                     "top_k": 20, "seed": 4, "max_pixels": 262144}
+
+    @pytest.mark.parametrize("params", [{}, {"text": "  "}, {"text": ["one?", "two?"]}])
+    def test_no_question_or_two_is_refused_before_loading(self, served, params):
+        client, _, loads = served
+        response = client.post("/predict/qwen3_vl/2b", params=params, files=self.upload())
+        assert response.status_code == 400
+        assert loads == []
+
+    def test_an_adapter_refusal_is_a_400(self, client, monkeypatch):
+        model = self.Model(ValueError("max_new_tokens must be a whole number of at least 1"))
+        monkeypatch.setattr(client.app.state.model_manager, "get_model", lambda *a, **k: model)
+        response = client.post("/predict/qwen3_vl/2b", params={"text": "Hi", "max_new_tokens": 0},
+                               files=self.upload())
+        assert response.status_code == 400 and "max_new_tokens" in response.json()["detail"]
+
+    def test_models_says_it_is_prompted(self, client):
+        entry = client.get("/models").json()["qwen3_vl"]
+        assert entry["task_type"] == "image_to_text" and entry["prompted"] is True
+        assert entry["variants"] == ["2b", "4b"]

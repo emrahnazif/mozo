@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -60,12 +60,8 @@ class Predictor:
             documentation (``docs/models/mm-grounding-dino.md``).
         input_size: Letterbox every image into this square, with a padding mask, instead of
             upstream's aspect-preserving resize. ``None`` -- the default -- is upstream's resize.
-            A square is what a compiled graph needs; it changes the answers, because the picture
-            is then smaller than the resize makes it. See :func:`~.image.fit_square`.
-        forward: A compiled replacement for the network, called as the network is, with the
-            pixel mask last: ``forward(image, input_ids, token_type_ids, token_mask, attention,
-            position_ids, pixel_mask) -> (logits, boxes)``. The checkpoint is then not loaded at
-            all, and *weights* may be ``None``. Requires *input_size*: a graph has one shape.
+            A smaller square is faster and changes the answers, because the picture is then
+            smaller than the resize makes it. See :func:`~.image.fit_square`.
 
     Attributes:
         spec: The variant's geometry.
@@ -76,11 +72,8 @@ class Predictor:
         >>> model(image, ["a cat", "a laptop"])             # doctest: +SKIP
     """
 
-    def __init__(self, weights: str | Path | None, spec: Spec, device: str = "cpu",
-                 autocast: bool = False, input_size: int | None = None,
-                 forward: Callable | None = None) -> None:
-        if forward is not None and input_size is None:
-            raise ValueError("a compiled forward runs at one shape; give it an input_size")
+    def __init__(self, weights: str | Path, spec: Spec, device: str = "cpu",
+                 autocast: bool = False, input_size: int | None = None) -> None:
         self.spec = spec
         self.device = device
         self.autocast = autocast
@@ -90,8 +83,7 @@ class Predictor:
         self._separators = torch.tensor(
             self.tokenizer.convert_tokens_to_ids(list(SEPARATORS)), dtype=torch.long
         )
-        self.model = build(spec, weights, device=device) if forward is None else None
-        self._forward = forward or self.model
+        self.model = build(spec, weights, device=device)
 
     def __call__(
         self,
@@ -131,12 +123,12 @@ class Predictor:
         source_height, source_width = image.shape[:2]
         if self.input_size is None:
             batch = preprocess(image, self.spec.short_side, self.spec.max_side)[None]
-            padding = ()
+            pixel_mask = None
         else:
             # The boxes come back normalised to the picture, not to the square -- the mask is what
             # tells the model where the picture ends -- so decoding below is the same either way.
             canvas, mask_2d = fit_square(image, self.input_size)
-            batch, padding = canvas[None], (mask_2d[None].to(self.device),)
+            batch, pixel_mask = canvas[None], mask_2d[None].to(self.device)
         batch = batch.to(self.device)
 
         # The text setup is built on the CPU and moved once, rather than built where the model
@@ -159,14 +151,14 @@ class Predictor:
         # machine without CUDA, and the fp32 path should be exactly what it was.
         half = torch.autocast("cuda", torch.float16) if self.autocast else nullcontext()
         with torch.inference_mode(), half:
-            logits, boxes = self._forward(
+            logits, boxes = self.model(
                 batch,
                 input_ids.to(self.device),
                 torch.tensor([types], dtype=torch.long, device=self.device),
                 torch.tensor([mask], dtype=torch.bool, device=self.device),
                 attention.to(self.device),
                 position_ids.to(self.device),
-                *padding,
+                pixel_mask,
             )
 
         return decode(

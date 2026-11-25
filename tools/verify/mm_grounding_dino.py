@@ -44,6 +44,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 
 from common import fixtures  # noqa: E402
+from fetch.mm_grounding_dino import CHECKPOINTS  # noqa: E402
 from conftest import as_pixelflow_reports  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.vendors.mm_grounding_dino_deploy import SEPARATORS, SPECS, Predictor  # noqa: E402
@@ -55,14 +56,6 @@ from mozo.vendors.mm_grounding_dino_deploy.text.tokenizer import Tokenizer  # no
 from mozo.weights import WeightsError, resolve  # noqa: E402
 
 FAMILY = "mm_grounding_dino"
-
-#: Where the reference loads each variant from: the authors' repositories, at the commits
-#: ``tools/fetch/mm_grounding_dino.py`` publishes.
-REPOS = {
-    "llmdet-tiny": ("iSEE-Laboratory/llmdet_tiny", "d05199165a19320a9236396e20fca0a5e065189c"),
-    "llmdet-base": ("iSEE-Laboratory/llmdet_base", "3537869413e7dca01cfd86d6ab10553b72e4fe29"),
-    "llmdet-large": ("iSEE-Laboratory/llmdet_large", "bec37f296f05b22f6c6b39bc05a6c611239f4e31"),
-}
 
 #: Prompt sets: one phrase, several, multi-word phrases whose tokens must stay grouped, mixed case
 #: and inner punctuation (which the caption lowercases and BERT splits), and one matching nothing.
@@ -200,7 +193,8 @@ def require_reference():
 def reference(variant: str):
     """The upstream model and processor at the pinned commit, parameters re-allocated."""
     transformers = require_reference()
-    repo, commit = REPOS[variant]
+    # The commit tools/fetch publishes, so the two cannot drift apart.
+    repo, commit = CHECKPOINTS[variant].repo, CHECKPOINTS[variant].commit
     model = transformers.MMGroundingDinoForObjectDetection.from_pretrained(
         repo, revision=commit).eval()
     # ``from_pretrained`` leaves tensors at the checkpoint's offsets; BLAS picks vector paths by
@@ -295,7 +289,6 @@ def against_reference(variant: str, checkpoint: Path, falsify: str | None) -> tu
         ours = mutate(build(spec, checkpoint))
         vendor = Predictor(checkpoint, spec)
         vendor.model = mutate(vendor.model)
-        vendor._forward = vendor.model
         tokenizer = Tokenizer()
         separators = torch.tensor(tokenizer.convert_tokens_to_ids(list(SEPARATORS)))
         mine: dict = {}

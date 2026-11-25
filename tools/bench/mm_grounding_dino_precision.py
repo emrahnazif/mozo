@@ -56,7 +56,7 @@ from mozo.adapters.mm_grounding_dino import MMGroundingDinoPredictor  # noqa: E4
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import TensorRTRunner  # noqa: E402
 from mozo.vendors.mm_grounding_dino_deploy import SPECS  # noqa: E402
-from mozo.vendors.mm_grounding_dino_deploy.export import example, export, profile  # noqa: E402
+from mm_grounding_dino_export import example, export, profile  # noqa: E402
 from mozo.vendors.mm_grounding_dino_deploy.image import fit_square, preprocess  # noqa: E402
 from mozo.vendors.mm_grounding_dino_deploy.network import phrase_masks  # noqa: E402
 from mozo.vendors.mm_grounding_dino_deploy.predictor import caption_for  # noqa: E402

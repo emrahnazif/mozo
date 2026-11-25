@@ -39,9 +39,9 @@ _PREFIXES = (
 )
 
 
-def load_state_dict(path: str | Path) -> dict[str, torch.Tensor]:
-    """Read a published checkpoint: a plain dict of tensors, so ``weights_only`` suffices."""
-    return torch.load(path, map_location="cpu", weights_only=True)
+def load_state_dict(path: str | Path, device: str = "cpu") -> dict[str, torch.Tensor]:
+    """Read a published checkpoint onto *device*: a plain dict of tensors, so ``weights_only``."""
+    return torch.load(path, map_location=device, weights_only=True)
 
 
 def rename(state: dict[str, torch.Tensor], spec: Spec) -> dict[str, torch.Tensor]:
@@ -75,7 +75,9 @@ def build(spec: Spec, weights: str | Path, device: str = "cpu") -> MMGroundingDi
     Raises:
         RuntimeError: If the checkpoint does not fit the architecture.
     """
-    state = rename(load_state_dict(weights), spec)
+    # Read straight onto the device and adopted there (``assign=True``), rather than held whole in
+    # host memory and copied across.
+    state = rename(load_state_dict(weights, device), spec)
     # Built on the meta device, so its parameters are described rather than allocated and
     # initialised, then adopt the loaded tensors (``assign=True``). The load stays strict, so a
     # tensor left on ``meta`` -- which is what a missing key would look like -- is an error.

@@ -96,8 +96,8 @@ def _inside(index: Tensor, valid: Tensor) -> Tensor:
     on it both say no -- but a compiled graph need not round a division the way torch does, and the
     question is asked exactly on the bound at every edge whose width is a multiple of 50:
     ``49.5 / 50`` is 0.99. TensorRT 11 answered yes there, which made a column of proposals at each
-    such edge selectable, and moved 3-6% of detections on COCO. In integers there is nothing to
-    round. ``tests/families/test_mm_grounding_dino.py`` holds the two to agreeing for every width up
+    such edge selectable -- one of the reasons its engines are not offered (see PROVENANCE). In
+    integers there is nothing to round. ``tests/families/test_mm_grounding_dino.py`` holds the two to agreeing for every width up
     to 2,048.
 
     Args:

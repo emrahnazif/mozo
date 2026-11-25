@@ -6,9 +6,9 @@ of the image pyramid, instead of attending to every location. ``transformers`` c
 compiled kernel from its kernel hub; the pure-torch path is the one carried, because it runs on
 every device mozo targets and it is the path the parity gate compares.
 
-**Level sizes travel as Python integers** (``level_shapes``) beside the ``spatial_shapes`` tensor.
-``torch.export`` cannot follow a value read back off a tensor, and the read would be a device sync
-per call. Upstream carries the same pair (``spatial_shapes_list``) for the same reason.
+**Level sizes travel as Python integers** (``level_shapes``) beside the ``spatial_shapes`` tensor,
+as upstream carries ``spatial_shapes_list``: reading them back off the tensor would be a device
+sync per call, and a value ``torch.export`` cannot follow.
 """
 
 from __future__ import annotations

@@ -83,11 +83,12 @@ which Python runs it. (mozo's `grounding_dino` tokenizer has the same exposure; 
 here.) The one interpreter-dependent step left is upstream's own: the processor lowercases each
 label with `str.lower` before tokenizing, and `caption_for` does the same.
 
-### 4. Written to export
+### 4. An optional fixed square
 
-Level sizes travel as Python integers beside the `spatial_shapes` tensor (upstream carries the same
-`spatial_shapes_list`), `forward` takes an optional padding mask for the fixed-square path
-(`fit_square`), and `export.py` is mozo's. None changes a number on upstream's path.
+`forward` takes an optional padding mask, and `fit_square` fits an image into a fixed square with
+one -- mozo's `input_size` option. Level sizes travel as Python integers beside the
+`spatial_shapes` tensor, as upstream carries `spatial_shapes_list`. Neither changes a number on
+upstream's path.
 
 ### 5. The proposal bounds test is decided in integers
 
@@ -130,7 +131,7 @@ Each runs, produces plausible output, and is wrong.
 (tiny/base/large, forward), AP unchanged (58.79 vs 58.54, 61.55 vs 61.63, 62.57 vs 62.52), 0-4
 detections of about 2,600 change -- the rate at which fp32 changes when only its input is rounded.
 
-**ONNX is not published.** The graph `export.py` writes (fixed square, any caption) runs under ONNX
+**ONNX is not published.** The graph `tools/bench/mm_grounding_dino_export.py` writes (fixed square, any caption) runs under ONNX
 Runtime 1.23 with no detection changed against torch on the same square (20 images, CPU and CUDA),
 at the same speed as torch: 3.20 s vs 3.15 s on a loaded CPU, 116 ms vs 106 ms on CUDA (tiny). It
 would add a runtime that is no faster.

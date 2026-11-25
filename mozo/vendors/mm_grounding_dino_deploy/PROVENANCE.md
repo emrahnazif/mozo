@@ -133,8 +133,8 @@ detections of about 2,600 change -- the rate at which fp32 changes when only its
 
 **ONNX is not published.** The graph `tools/bench/mm_grounding_dino_export.py` writes (fixed square, any caption) runs under ONNX
 Runtime 1.23 with no detection changed against torch on the same square (20 images, CPU and CUDA),
-at the same speed as torch: 3.20 s vs 3.15 s on a loaded CPU, 116 ms vs 106 ms on CUDA (tiny). It
-would add a runtime that is no faster.
+at best the same speed as torch: tiny 3.20 s vs 3.15 s on a loaded CPU and 116 ms vs 106 ms on
+CUDA; large 26.0 s vs 19.2 s and 460 ms vs 470 ms. It would add a runtime that is no faster.
 
 **TensorRT is not offered.** Engines built from that graph with TensorRT 11.5 were 2.9-3.5x faster
 than fp32 torch and changed 3-6% of detections (150, 104 and 77 of about 2,500, against 0-4 for

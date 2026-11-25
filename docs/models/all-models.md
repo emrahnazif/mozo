@@ -1,4 +1,4 @@
-# All 82 models, by task
+# All 85 models, by task
 
 <!--
 summary: Every model mozo serves, grouped by task, with its variants, weights licence, runtimes and download size.
@@ -6,7 +6,7 @@ label: All models
 keywords: mozo, model catalogue, computer vision models, licences, runtimes
 -->
 
-Mozo serves 82 variants across 18 families. A model is named `family/variant`, the same in Python
+Mozo serves 85 variants across 19 families. A model is named `family/variant`, the same in Python
 (`mozo.get_model("rfdetr/medium")`) and over HTTP (`/predict/rfdetr/medium`). Each family's page
 has examples, every parameter, and how the model behaves.
 
@@ -103,6 +103,7 @@ A depth map at the image's resolution, in metres or relative.
 | [Depth Anything V2](/docs/models/depth-anything-v2.md) | `small` (relative) | Apache-2.0 | torch | 99 MB |
 | | `base` `large` (relative) | CC-BY-NC-4.0 | torch | 390 MB–1.3 GB |
 | | `indoor-` and `outdoor-`, three sizes each (metres) | Apache-2.0 | torch | 99 MB–1.3 GB |
+| [Depth Anything 3](/docs/models/depth-anything-v3.md) | `small` `base` `mono-large` (relative) | Apache-2.0 | torch, onnx, tensorrt | 100 MB–1.3 GB |
 
 ## Background removal
 

@@ -364,6 +364,32 @@ Reproduce them, and record them:
 - **Two entry points that disagree.** EasyOCR's array path documents BGR and its path entry decodes
   greyscale with libjpeg directly — 27 and 7 grey levels apart. Hand both sides the same array.
 - **Mutable module globals** (`imgH`) become spec fields when vendored.
+- **Autocast inside the reference's API.** Depth Anything 3's `forward` always wraps the network in
+  `torch.autocast` (bf16 or fp16, on the CPU too). Gate the fp32 network by calling it directly,
+  and gate the API's autocast path separately with the vendor under the same autocast.
+- **The global RNG inside a forward.** Depth Anything 3's sky fill draws `torch.randint` from the
+  global generator: the output depends on the caller's RNG state and moves it. Give the vendor its
+  own seeded generator; seed the reference's global one the same way, and the gate is exact.
+- **A non-strict hub loader.** `PyTorchModelHubMixin.from_pretrained` loads with `strict=False`;
+  Depth Anything 3's small/base leave six LayerNorm tensors at init. Enumerate what is missing
+  before trusting the reference, and load the vendor strict.
+
+### Export traps (dynamic shapes)
+
+- **Python arithmetic on a size freezes it.** `int(h * 14 / 1)`, `int(x.shape[-2] * 2)`,
+  `F.interpolate(scale_factor=float(...))` on a traced size, `int(tensor.max())`, a dict keyed by
+  shape: each specialises the graph to the traced shape, and the ONNX exporter does it *silently*
+  (`torch.export.export` alone raises "Specializations unexpectedly required"). Run
+  `torch.export.export(..., dynamic_shapes=...)` first to see the error, then rewrite each spot
+  with the same integers (`//`, no `int()` on an int), or compute float-on-shape tensors outside
+  the graph and pass them in, gated equal to the network computing them itself.
+- **A view as an example input** (a permuted tensor) is fakified with its base's shape and pins
+  the dynamic dims. Pass `.contiguous()` example inputs.
+- **Size-1 and size-2 dims specialise** (torch.export's 0/1 rule and stride checks): Depth Anything
+  3's graphs take 3 to 36 patches a side, not 1.
+- **Check an fp16 graph through the runtime it is published for.** ONNX Runtime's CPU kernels and
+  TensorRT land in different places from torch autocast and from each other; noise inputs inflate
+  every fp16 difference. Check on photographs and measure task accuracy (here AbsRel on NYUv2).
 
 ---
 

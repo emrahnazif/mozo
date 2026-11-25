@@ -322,8 +322,9 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         'description': (
             'SAM 2 by Meta — promptable segmentation. Click a point or draw a box and it '
             'returns the thing you pointed at, with a mask, a box and the model\'s own '
-            'predicted IoU. 4 variants (tiny/small/base_plus/large); the image path only, not '
-            'the video tracker. Unlike SAM 3, the weights are Apache 2.0 like the code.'
+            'predicted IoU; or mark objects on one frame of a video and it follows them through '
+            'the frames after (tracker()). 4 variants (tiny/small/base_plus/large). Unlike SAM 3, '
+            'the weights are Apache 2.0 like the code.'
         ),
         'variants': ['tiny', 'small', 'base_plus', 'large'],
     },

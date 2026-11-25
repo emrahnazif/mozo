@@ -14,7 +14,9 @@ host running the workflow supplied its own. Either way it caches, so a node that
 images loads the checkpoint once.
 
 Every family is here. SAM 2 and EdgeTAM come as box segmenters: they take the boxes another node
-found -- a detector's, or annotations read from a file -- and add a mask to each. Their other
+found -- a detector's, or annotations read from a file -- and add a mask to each. SAM 2 also comes
+as a tracker, ``sam2_track``, which takes a detector's boxes on the first frame that has any and
+follows those objects through the frames after. Their other
 prompt, a click, is still not a node: it is a pixel picked on the image, and the editor has no way
 to express one yet. A tool that clicks calls the model directly.
 
@@ -39,7 +41,7 @@ import pixelflow as pf
 from mozo.registry import get_model_info
 from mozo.text import prompt_list, text_list
 
-from ..node import (Classifications, Depth, Detections, FilePath, Image, Models, Prompts,
+from ..node import (Classifications, Depth, Detections, FilePath, Image, Models, Prompts, State,
                     Weights)
 from ..registry import node
 
@@ -218,6 +220,35 @@ def edgetam_boxes(image: Image, detections: Detections, models: Models,
     Everything ``sam2_boxes`` promises, at a fraction of the cost.
     """
     return _segment_boxes(models, "edgetam", variant, image, detections)
+
+
+@node(category="Track", ordered=True)
+def sam2_track(image: Image, detections: Detections, models: Models, state: State,
+               variant: variants("sam2") = "tiny") -> Detections:
+    """SAM 2 by Meta -- follow objects through a video with a mask on every frame.
+
+    On the first frame where ``detections`` has any rows, each row's box starts an object; from
+    then on SAM 2 follows those objects frame by frame from its memory of the frames before, and
+    the detections wired in are not read again (a detector's later boxes do not add objects). Each
+    object keeps its ``tracker_id`` for the whole run, and the ``class_id`` and ``class_name`` of
+    the row that started it; ``confidence`` is SAM 2's probability that the object is visible. An
+    object out of view has no row on that frame and returns under the same id. Frames before the
+    first detection pass through empty. Every object costs a pass of SAM 2's memory attention per
+    frame, so ten objects are about ten times the work of one.
+    """
+    if "tracker" not in state:
+        if len(detections) == 0:
+            return pf.Detections()
+        rows = list(detections)
+        state["classes"] = [(row.class_id, row.class_name) for row in rows]
+        state["tracker"] = models("sam2", variant).tracker()
+        found = state["tracker"].update(image, boxes=np.array([row.bbox for row in rows],
+                                                               dtype=np.float32))
+    else:
+        found = state["tracker"].update(image)
+    for row in found:
+        row.class_id, row.class_name = state["classes"][row.tracker_id]
+    return found
 
 
 @node(category="Segment", exclusive=True)

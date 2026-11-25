@@ -290,6 +290,13 @@ found traps it had not predicted, and the predicted ones were mostly real.
 
 ### Tokenisation
 
+- **Unicode properties belong to whoever ships the tables.** A WordPiece tokenizer written against
+  `unicodedata` disagreed with `BertTokenizerFast` (Rust, `tokenizers` 0.22) on 826 assigned
+  codepoints on Python 3.12 -- marks one side strips and the other keeps, punctuation the Rust
+  tables predate -- and on all 825,345 codepoints Python calls unassigned, which it dropped as
+  control characters where Rust emits `[UNK]`. Probe the reference once per codepoint and ship the
+  answers as a table (MM-Grounding-DINO's `bert_chars.json.gz`); then fuzz multi-character strings.
+
 - **Case handling is often undocumented or wrong in the config.** SigLIP 2's repos declare
   `do_lower_case: true` on a tokenizer class that ignores it, so `AutoTokenizer` preserves case
   while training lowercased — worth a factor of 350 on a capitalised prompt.
@@ -331,6 +338,11 @@ found traps it had not predicted, and the predicted ones were mostly real.
   *not* batching.
 
 ### Checkpoint and geometry
+
+- **The reference library's next major version may load the checkpoint wrongly.** `transformers`
+  5.x ties MM-Grounding-DINO's six per-layer box heads to the first on load (a
+  `_tied_weights_keys` regex), so every layer refines with layer 0's head; 4.57 loads each layer's
+  own. Compare loaded tensors against the file before trusting any version as the reference.
 
 - **Load strict.** Upstream often uses `strict=False`, which lets a key you named differently stay
   silently at its initialisation. Enumerate what is genuinely absent and drop it by prefix.
@@ -464,6 +476,15 @@ Reproduce them, and record them:
   every fp16 difference. Check on photographs and measure task accuracy (here AbsRel on NYUv2).
 
 ---
+
+### Compiled graphs
+
+- **A float comparison exactly on its bound is a coin a compiler may flip.** MM-Grounding-DINO keeps
+  a proposal when `0.01 < (x + 0.5) / w < 0.99`; at every edge whose width is a multiple of 50 the
+  quotient is exactly 0.99, torch says no and TensorRT 11.5 said yes, and a column of proposals
+  became selectable. Decide such tests in integers -- equivalent, and checkable exhaustively.
+- **An fp32 engine that drifts as much as the fp16 one is not a precision problem.** Run the same
+  graph under ONNX Runtime: if it agrees with torch, the compiler is the cause, not the export.
 
 ## 6. Runtimes and export
 

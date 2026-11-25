@@ -89,6 +89,17 @@ Level sizes travel as Python integers beside the `spatial_shapes` tensor (upstre
 `spatial_shapes_list`), `forward` takes an optional padding mask for the fixed-square path
 (`fit_square`), and `export.py` is mozo's. None changes a number on upstream's path.
 
+### 5. The proposal bounds test is decided in integers
+
+Query selection discards every proposal whose centre `(x + 0.5) / w` is not strictly inside
+(0.01, 0.99). Upstream asks that of the float32 quotient; `network._inside` asks it of integers,
+`100 (2x + 1)` against `2w` and `198w`. The answers are the same for every width to 2,048 and every
+cell -- a test checks all of them -- because a quotient of small integers is never within a
+rounding of either bound unless it is exactly on it, where both say no. It matters only to a
+compiled graph: the question is asked exactly on 0.99 at every edge whose width is a multiple of 50
+(`49.5 / 50`), and TensorRT 11.5 answered it the other way, making a column of proposals
+selectable at each such edge.
+
 ## Traps
 
 Each runs, produces plausible output, and is wrong.
@@ -112,11 +123,39 @@ Each runs, produces plausible output, and is wrong.
 - **`SwinBackbone` passes `always_partition=True`**, so `SwinLayer`'s window-shrinking branch --
   which mutates the layer's window size in place on a small feature map -- is never taken.
 
+## Runtimes
+
+`torch-fp32`, and `torch-fp16` (the checkpoint under autocast, `auto` on CUDA). Measured on an RTX
+3090, 500 COCO val2017 images, 80 class names as one caption: fp16 is 1.48x/1.63x/1.58x faster
+(tiny/base/large, forward), AP unchanged (58.79 vs 58.54, 61.55 vs 61.63, 62.57 vs 62.52), 0-4
+detections of about 2,600 change -- the rate at which fp32 changes when only its input is rounded.
+
+**ONNX is not published.** The graph `export.py` writes (fixed square, any caption) runs under ONNX
+Runtime 1.23 with no detection changed against torch on the same square (20 images, CPU and CUDA),
+at the same speed as torch: 3.20 s vs 3.15 s on a loaded CPU, 116 ms vs 106 ms on CUDA (tiny). It
+would add a runtime that is no faster.
+
+**TensorRT is not offered.** Engines built from that graph with TensorRT 11.5 were 2.9-3.5x faster
+than fp32 torch and changed 3-6% of detections (150, 104 and 77 of about 2,500, against 0-4 for
+torch fp16 on the same square), losing up to 2.5 AP on tiny. fp32 engines drift as much as fp16
+ones, and ONNX Runtime on the same graph does not drift at all, so it is TensorRT's compilation,
+not the graph and not precision. One cause was found (divergence 5) and removed; with it removed,
+tiny still changed 37 of 541 detections on 100 images. A per-stage probe puts the rest inside
+TensorRT's compilation of the encoder: built alone the encoder matches torch to 1.6e-05, built as
+part of the whole graph it differs by 0.18 on picture tokens. Grounding DINO's engine, from the
+same kind of graph, moves 0.1%.
+
 ## Numbers
 
 Parity, on the fixture photograph and three crops of it (a panorama that makes the size cap bind,
 a portrait strip, a 37x45 corner), five prompt sets each, CPU, `MKL_CBWR=AVX2,STRICT`:
 pixels, token ids, BERT, projected text, every Swin level, encoder image and text memory, each
 decoder layer's output and reference boxes, logits, boxes, and post-processed detections --
-every one `torch.equal`. The tokenizer fuzz adds 20,020 prompts per run. See the family's plan
-results for counts per variant and the falsification runs.
+every one `torch.equal`: 480 comparisons for `llmdet-tiny` and `llmdet-base`, 500 for
+`llmdet-large` (one more pyramid level), plus 20 adapter-against-vendor checks each, and 20,020
+tokenizer prompts per variant. Six perturbations each fail the gate first at the stage they touch:
+Swin LayerNorm eps (Swin level 0, 1.2e-03), image position temperature 20 -> 21 (encoder memory,
+5.0e-02; Swin, BERT and text pass), BERT eager instead of SDPA (BERT, 6.0e-07), every decoder
+layer on layer 0's box head as `transformers` 5 loads it (decoder layer 2, 4.1), the contrastive
+scale dropped (logits only -- query selection ranks by a monotone map of the same score), and
+Grounding DINO's resize rounding (pixels, on the panorama crop only).

@@ -93,7 +93,8 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 #: The adapters read it from here, so there is one statement of it.
 EXECUTES: dict[str, tuple[str, ...]] = {
     **{family: ("torch",)
-       for family in ("ben2", "clip", "easyocr", "edgetam", "moebius", "sam2", "siglip2")},
+       for family in ("ben2", "clip", "easyocr", "edgetam", "mm_grounding_dino", "moebius",
+                      "sam2", "siglip2")},
     # A TensorRT engine exported from the checkpoint at the input size the user picks.
     "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
@@ -126,6 +127,10 @@ EXECUTES: dict[str, tuple[str, ...]] = {
 DERIVES: dict[str, dict[str, str]] = {
     "owlv2": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp16"},
     "grounding_dino": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "torch-fp32"},
+    # torch-fp16 only. TensorRT was measured and is not offered: on 500 COCO images its engines
+    # -- fp32 as much as fp16 -- moved 3-6% of detections and up to 2.5 AP, where ONNX Runtime
+    # on the same graph moved none. See the family's page.
+    "mm_grounding_dino": {"torch-fp16": "torch-fp32"},
     "mm_grounding_dino": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "torch-fp32"},
     # ``tensorrt-fp32`` from the published graph, for every variant that publishes one, and
     # ``auto`` takes it on CUDA where TensorRT is installed: on an RTX 3090, 500 COCO images per

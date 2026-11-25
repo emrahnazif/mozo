@@ -88,16 +88,39 @@ def _valid_ratio(valid: Tensor) -> Tensor:
     return torch.stack([ratio_w, ratio_h], -1)
 
 
+def _inside(index: Tensor, valid: Tensor) -> Tensor:
+    """Whether ``(index + 0.5) / valid`` lies strictly inside (0.01, 0.99), decided in integers.
+
+    Upstream asks this of the float quotient. The answer is the same -- the quotient of two
+    integers below a million is never within a rounding of either bound unless it is *on* it, and
+    on it both say no -- but a compiled graph need not round a division the way torch does, and the
+    question is asked exactly on the bound at every edge whose width is a multiple of 50:
+    ``49.5 / 50`` is 0.99. TensorRT 11 answered yes there, which made a column of proposals at each
+    such edge selectable, and moved 3-6% of detections on COCO. In integers there is nothing to
+    round. ``tests/families/test_mm_grounding_dino.py`` holds the two to agreeing for every width up
+    to 2,048.
+
+    Args:
+        index: ``(cells,)`` integer positions along one axis.
+        valid: ``(batch,)`` how many of them are picture rather than padding.
+
+    Returns:
+        ``(batch, cells)`` boolean.
+    """
+    twice = 100 * (2 * index + 1)
+    return (twice[None, :] > 2 * valid[:, None]) & (twice[None, :] < 198 * valid[:, None])
+
+
 def _proposals(memory: Tensor, padding: Tensor,
                level_shapes: list[tuple[int, int]]) -> tuple[Tensor, Tensor]:
     """Turn every image token into a candidate box centred on itself.
 
     Each level proposes boxes of a fixed size -- 0.05 of the image, doubling per level -- centred
-    on each cell. Tokens that are padding, or whose proposal escapes [0.01, 0.99], are zeroed in
+    on each cell. Tokens that are padding, or whose proposal escapes (0.01, 0.99), are zeroed in
     the memory and pushed to ``inf`` in the proposals so selection cannot pick them.
     """
     batch = memory.shape[0]
-    proposals = []
+    proposals, insides = [], []
     start = 0
     for level, (height, width) in enumerate(level_shapes):
         level_mask = padding[:, start : start + height * width].view(batch, height, width, 1)
@@ -112,10 +135,16 @@ def _proposals(memory: Tensor, padding: Tensor,
         grid = (grid.unsqueeze(0).expand(batch, -1, -1, -1) + 0.5) / scale
         size = torch.ones_like(grid) * 0.05 * (2.0**level)
         proposals.append(torch.cat((grid, size), -1).view(batch, -1, 4))
+        # The box size is a constant per level, so its half of upstream's bounds test is too.
+        sized = 0.01 < 0.05 * 2.0**level < 0.99
+        cells = torch.arange(max(height, width), device=memory.device)
+        inside = (_inside(cells[:height], valid_h)[:, :, None]
+                  & _inside(cells[:width], valid_w)[:, None, :])
+        insides.append((inside if sized else torch.zeros_like(inside)).view(batch, -1, 1))
         start += height * width
 
     output_proposals = torch.cat(proposals, 1)
-    inside = ((output_proposals > 0.01) & (output_proposals < 0.99)).all(-1, keepdim=True)
+    inside = torch.cat(insides, 1)
     output_proposals = torch.log(output_proposals / (1 - output_proposals))
     output_proposals = output_proposals.masked_fill(padding.unsqueeze(-1), float("inf"))
     output_proposals = output_proposals.masked_fill(~inside, float("inf"))

@@ -56,7 +56,8 @@ class TestTheCatalogue:
         marked = sorted(name for name, node in offered.items()
                         if any(p.get("prompts") for p in node["parameters"])
                         and node["category"] != "Test")
-        assert marked == ["clip", "grounding_dino", "omdet_turbo", "owlv2", "sam3", "siglip2"]
+        assert marked == ["clip", "grounding_dino", "mm_grounding_dino", "omdet_turbo", "owlv2",
+                          "sam3", "siglip2"]
         [text] = [p for p in offered["sam3"]["parameters"] if p.get("prompts")]
         assert text["name"] == "text" and text["kind"] == "list"
 

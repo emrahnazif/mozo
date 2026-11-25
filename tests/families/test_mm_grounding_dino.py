@@ -90,17 +90,18 @@ def test_every_published_variant_ships_its_terms(variant):
 
 
 @pytest.mark.parametrize("variant", ALL)
-def test_only_torch_is_published(variant):
-    """The input size is the user's to choose, so no graph is published: a TensorRT engine is
-    exported from the checkpoint at the chosen size."""
+def test_only_torch_is_published_and_run(variant):
+    """No graph is published and no TensorRT runtime offered: measured, TensorRT engines built from
+    this model's graph -- fp32 as much as fp16 -- moved 3-6% of COCO detections where ONNX Runtime
+    on the same graph moved none. If that changes, this is the reminder to measure it again."""
     from mozo.adapters.mm_grounding_dino import MMGroundingDinoPredictor
 
     keys = published(FAMILY, variant)
     if not keys:
         pytest.skip(f"{FAMILY}/{variant} publishes nothing")
     assert keys == ["torch-fp32"]
-    assert MMGroundingDinoPredictor.EXECUTES == ("torch", "tensorrt")
-    assert all(source == "torch-fp32" for source in MMGroundingDinoPredictor.DERIVES.values())
+    assert MMGroundingDinoPredictor.EXECUTES == ("torch",)
+    assert MMGroundingDinoPredictor.DERIVES == {"torch-fp16": "torch-fp32"}
 
 
 # --- the checkpoint ---
@@ -294,6 +295,22 @@ def test_the_resize_is_the_processors_not_grounding_dinos():
     assert resized_size(100, 100, 800, 1333) == (800, 800)
 
 
+def test_the_integer_bounds_test_is_upstreams_float_one_at_every_size():
+    """``_inside`` replaces upstream's ``0.01 < (x + 0.5) / w < 0.99`` on float32 with integers,
+    so a compiled graph cannot round its way across a bound. Every width to 2,048 and every cell,
+    padding included, must get upstream's answer -- the ones exactly on 0.01 and 0.99 above all."""
+    import torch
+
+    from mozo.vendors.mm_grounding_dino_deploy.network import _inside
+
+    index = torch.arange(2048)
+    valid = torch.arange(0, 2049)
+    quotient = (torch.linspace(0, 2047, 2048, dtype=torch.float32)[None, :] + 0.5) / valid[:, None]
+    upstream = (quotient > 0.01) & (quotient < 0.99)
+    assert torch.equal(_inside(index, valid), upstream)
+    assert not bool(upstream[50, 49]) and not bool(upstream[50, 0])   # 0.99 and 0.01 exactly
+
+
 def test_large_reads_four_backbone_stages_into_five_levels():
     """The one geometry difference between the sizes, and a different path through the neck."""
     assert SPECS["llmdet-large"].return_stages == (0, 1, 2, 3)
@@ -303,7 +320,17 @@ def test_large_reads_four_backbone_stages_into_five_levels():
         assert SPECS[variant].num_feature_levels == 4
 
 
-# --- reduced precision, a fixed square, and TensorRT ---
+# --- reduced precision and a fixed square ---
+
+
+def test_tensorrt_is_not_offered():
+    from mozo.registry import DERIVES, EXECUTES
+    from mozo.runtimes import RuntimeError_, select_runtime
+    from mozo.weights import artifacts
+
+    with pytest.raises(RuntimeError_):
+        select_runtime("cuda", artifacts(FAMILY, SMALLEST), "tensorrt-fp16",
+                       executes=EXECUTES[FAMILY], derives=DERIVES[FAMILY])
 
 
 def test_cuda_runs_fp16_by_default():
@@ -354,11 +381,6 @@ def _on_cuda(runtime, **options):
 
     if not torch.cuda.is_available():
         pytest.skip("needs CUDA")
-    if runtime.startswith("tensorrt"):
-        from mozo.runtimes import _tensorrt_unusable
-
-        if (problem := _tensorrt_unusable()) is not None:
-            pytest.skip(problem)
     if not weights.is_cached(FAMILY, SMALLEST, "torch-fp32"):
         pytest.skip(f"{FAMILY}/{SMALLEST} is not downloaded here")
     from mozo.adapters.mm_grounding_dino import MMGroundingDinoPredictor
@@ -372,20 +394,6 @@ def test_fp16_finds_what_fp32_finds_on_the_fixture(image):
 
     want = _on_cuda("torch-fp32").predict(image, list(PROMPTS))
     got = _on_cuda("torch-fp16").predict(image, list(PROMPTS), threshold=0.3)
-    assert len(want) > 0
-    for found in want:
-        nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))
-        assert nearest.class_name == found.class_name
-        assert float(np.abs(np.subtract(nearest.bbox, found.bbox)).max()) < 5.0
-
-
-def test_a_square_on_torch_and_on_tensorrt_agree(image):
-    """The same square on both: what TensorRT changes is precision, not preprocessing. Builds an
-    engine on the first run on a machine, which takes a few minutes."""
-    import numpy as np
-
-    want = _on_cuda("torch-fp32", input_size=800).predict(image, list(PROMPTS))
-    got = _on_cuda("tensorrt-fp16").predict(image, list(PROMPTS), threshold=0.3)
     assert len(want) > 0
     for found in want:
         nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))

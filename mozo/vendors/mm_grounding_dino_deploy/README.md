@@ -46,8 +46,8 @@ prompts fit the 256-token budget, and this raises past it where upstream truncat
 
 By default nothing is letterboxed: the short side goes to 800 and the long side is capped at 1333,
 aspect kept, nothing padded — `transformers`' `GroundingDinoImageProcessor`, whose rounding differs
-from Grounding DINO's own on panoramas (167×1333, not 167×1336). For TensorRT the image is fitted
-into a square instead (`fit_square`) and the padding is handed to the model as a mask.
+from Grounding DINO's own on panoramas (167×1333, not 167×1336). `fit_square` fits the image into
+a fixed square instead and hands the padding to the model as a mask, for callers who want one shape.
 
 ## Fidelity
 

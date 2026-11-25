@@ -32,11 +32,9 @@ import numpy as np
 
 from .. import registry
 from ..image import load_image
-from ..runtimes import TensorRTRunner, free_device_memory, get_default_device, select_runtime
+from ..runtimes import get_default_device, select_runtime
 from ..vendors.mm_grounding_dino_deploy import SPECS, VARIANTS, Predictor
-from ..vendors.mm_grounding_dino_deploy.checkpoint import build
-from ..vendors.mm_grounding_dino_deploy.export import example, export, profile, require_exporter
-from ..weights import _ENGINES_SUFFIX, artifacts, framework_of, resolve
+from ..weights import artifacts, resolve
 
 try:
     import pixelflow as pf
@@ -60,12 +58,12 @@ class MMGroundingDinoPredictor:
             ``llmdet-large`` (Swin-L), 44.7, 48.3 and 51.1 AP on LVIS minival zero-shot as the
             authors report it. Larger is slower and finds more.
         device: Where to run. Defaults to the best available.
-        runtime: Which artifact to execute. ``auto`` picks the fastest published one;
-            ``tensorrt-fp16`` must be asked for, and needs TensorRT 11 or later.
+        runtime: Which artifact to execute. ``auto`` picks the fastest published one: on CUDA
+            that is ``torch-fp16``. No TensorRT runtime is offered -- measured, it moved 3-7% of
+            detections, where Grounding DINO's moves 0.1%; see the family's documentation.
         input_size: Fit every image into this square, padded, instead of upstream's resize to a
-            short side of 800. ``None`` -- the default -- is upstream's resize, except on
-            TensorRT, which needs one fixed shape and uses 800. A smaller square is faster and
-            finds less: see the measured trade-off in the family's documentation.
+            short side of 800. ``None`` -- the default -- is upstream's resize. A smaller square
+            is faster and finds less: see the measured trade-off in the family's documentation.
         checkpoint_path: Your own checkpoint, instead of the published weights.
         revision: Which published revision to use. Defaults to the newest.
 
@@ -89,13 +87,6 @@ class MMGroundingDinoPredictor:
     #: Frameworks this adapter executes, and runtimes it builds at load time. See the registry.
     EXECUTES = registry.EXECUTES[FAMILY]
     DERIVES = registry.DERIVES[FAMILY]
-
-    #: The square a TensorRT engine runs at when no ``input_size`` is given -- the same default as
-    #: Grounding DINO's, and measured the same way. See ``docs/models/mm-grounding-dino.md``.
-    TENSORRT_SIZE = 800
-
-    #: The caption length a TensorRT engine is tuned for. It accepts any up to the model's 256.
-    TENSORRT_TOKENS = 64
 
     def __init__(
         self,
@@ -129,47 +120,15 @@ class MMGroundingDinoPredictor:
 
         if input_size is not None and not 64 <= input_size <= 2048:
             raise ValueError(f"input_size must be between 64 and 2048 pixels, not {input_size}")
-        tensorrt = framework_of(self.runtime) == "tensorrt"
-        # A graph runs at one shape, so TensorRT always letterboxes; torch only when asked.
-        self.input_size = self.TENSORRT_SIZE if tensorrt and input_size is None else input_size
+        self.input_size = input_size
 
-        # Neither derived runtime has a file of its own: ``torch-fp16`` is the checkpoint under
-        # autocast, and a TensorRT engine is exported from it.
+        # ``torch-fp16`` has no file of its own: it is the checkpoint under autocast.
         weights = (Path(checkpoint_path) if checkpoint_path
                    else resolve(FAMILY, variant, "torch-fp32", revision=revision))
-        if tensorrt:
-            engine = self._engine(weights)
-            self._predictor = Predictor(None, SPECS[variant], device=self.device,
-                                        input_size=self.input_size,
-                                        forward=engine)
-        else:
-            self._predictor = Predictor(weights, SPECS[variant], device=self.device,
-                                        autocast=self.runtime == "torch-fp16",
-                                        input_size=self.input_size)
+        self._predictor = Predictor(weights, SPECS[variant], device=self.device,
+                                    autocast=self.runtime == "torch-fp16",
+                                    input_size=self.input_size)
         _log.info("MM-Grounding-DINO %s ready on %s via %s.", variant, self.device, self.runtime)
-
-    def _engine(self, weights: Path) -> TensorRTRunner:
-        """The TensorRT engine for this variant at ``input_size``, built if this GPU has none.
-
-        Kept beside the checkpoint in ``torch-fp32.engines/``, so ``weights.remove`` takes it
-        with the model. When it has to be built, the graph is exported from the checkpoint --
-        under fp16 autocast, so the engine runs ``torch-fp16``'s precision -- and deleted after.
-        """
-        spec, device, size = SPECS[self.variant], self.device, self.input_size
-
-        def write(path: Path) -> None:
-            # Called only when this GPU has no engine yet, so a machine that has one needs no
-            # exporter; checked before the checkpoint loads, not a minute later.
-            require_exporter()
-            model = build(spec, weights, device=device)
-            export(model, path, size, fp16=True)
-            del model
-            free_device_memory()
-
-        engines = weights.with_suffix(_ENGINES_SUFFIX)
-        return TensorRTRunner(engines / f"square{size}-fp16.onnx", device, engines=engines,
-                              export=write, shapes=profile(self.TENSORRT_TOKENS, spec.max_text_len),
-                              probe=example(size, device))
 
     def predict(
         self,

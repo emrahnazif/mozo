@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Measure every way MM-Grounding-DINO (LLMDet) can run: accuracy, agreement and latency.
 
-Bootstrap tooling; never ships. What ``auto`` choosing ``torch-fp16`` rests on, what
-``tensorrt-fp16``'s default square rests on, and the latency table in the family's docs.
+Bootstrap tooling; never ships. What ``auto`` choosing ``torch-fp16`` rests on, why no TensorRT
+runtime is offered, and the latency table in the family's docs.
 
     python tools/bench/mm_grounding_dino_precision.py --coco /data/coco
     python tools/bench/mm_grounding_dino_precision.py --coco /data/coco --sizes 800 --n 100
@@ -16,7 +16,7 @@ zero-shot number; it is the yardstick for what a runtime changes, which is all i
 **What is compared.** Two preprocessings -- upstream's resize (short side 800, long side up to
 1333, nothing padded) and a fixed square (:func:`~mozo.vendors.mm_grounding_dino_deploy.image.fit_square`,
 padded, with a mask) at each ``--sizes`` -- and on each, torch fp32, torch fp16 (autocast),
-TensorRT fp16 and TensorRT fp32. ``--onnx`` instead measures the fp32 graph under ONNX Runtime
+TensorRT fp16 and fp32 (built here; mozo does not offer them for this family). ``--onnx`` instead measures the fp32 graph under ONNX Runtime
 (CPU, and CUDA where the provider is installed) against torch fp32 on the same square.
 
 ``accuracy``   COCO box AP, the 80 class names as one caption (195 tokens), top 100 queries.
@@ -127,11 +127,6 @@ def measure(variant: str, coco: Path, n: int, seed: int, sizes: list[int], work:
                                                         input_size=size)
         adapters[f"{size}/torch-fp16"], _ = _timed_load(variant=variant, runtime="torch-fp16",
                                                         input_size=size)
-        adapters[f"{size}/tensorrt-fp16"], first = _timed_load(variant=variant,
-                                                               runtime="tensorrt-fp16",
-                                                               input_size=size)
-        _, again = _timed_load(variant=variant, runtime="tensorrt-fp16", input_size=size)
-        loads[f"{size}/tensorrt-fp16"] = {"first": first, "cached": again}
 
     model = adapters["resize/torch-fp32"]._predictor.model
     tokenizer = adapters["resize/torch-fp32"]._predictor.tokenizer
@@ -148,15 +143,19 @@ def measure(variant: str, coco: Path, n: int, seed: int, sizes: list[int], work:
 
     text, phrase_map, tokens = text_for(names)
 
-    # TensorRT fp32, for the record: not a runtime mozo offers, so built here, outside the cache.
-    fp32_engines = {}
+    # TensorRT, for the record: not a runtime mozo offers for this family, so built here, outside
+    # the cache -- fp16 from a graph exported under autocast (Grounding DINO's recipe), and fp32.
+    engines = {}
     for size in sizes:
-        engines = work / f"{variant}-fp32"
-        fp32_engines[size] = TensorRTRunner(
-            engines / f"square{size}-fp32.onnx", "cuda", engines=engines,
-            export=lambda path, size=size: export(model, path, size, fp16=False),
-            shapes=profile(MMGroundingDinoPredictor.TENSORRT_TOKENS, model.spec.max_text_len),
-            probe=example(size, "cuda"))
+        for precision in ("fp16", "fp32"):
+            folder = work / f"{variant}-{precision}"
+            start = time.perf_counter()
+            engines[size, precision] = TensorRTRunner(
+                folder / f"square{size}-{precision}.onnx", "cuda", engines=folder,
+                export=lambda path, size=size, precision=precision: export(
+                    model, path, size, fp16=precision == "fp16"),
+                shapes=profile(64, model.spec.max_text_len), probe=example(size, "cuda"))
+            loads[f"{size}/tensorrt-{precision}"] = time.perf_counter() - start
 
     def autocast(*inputs):
         with torch.autocast("cuda", torch.float16):
@@ -171,9 +170,6 @@ def measure(variant: str, coco: Path, n: int, seed: int, sizes: list[int], work:
             return canvas[None].cuda(), padding[None].cuda()
         return prep
 
-    def engine_of(name):
-        return adapters[name]._predictor._forward
-
     runtimes = {
         "resize/torch-fp32": (resize, lambda x, t: model(x, *t)),
         "resize/floor": (resize, lambda x, t: model(x.half().float(), *t)),
@@ -183,10 +179,9 @@ def measure(variant: str, coco: Path, n: int, seed: int, sizes: list[int], work:
         prep = square(size)
         runtimes[f"{size}/torch-fp32"] = (prep, lambda x, m, t: model(x, *t, m))
         runtimes[f"{size}/torch-fp16"] = (prep, lambda x, m, t: autocast(x, *t, m))
-        runtimes[f"{size}/tensorrt-fp16"] = (
-            prep, lambda x, m, t, f=engine_of(f"{size}/tensorrt-fp16"): f(x, *t, m))
-        runtimes[f"{size}/tensorrt-fp32"] = (
-            prep, lambda x, m, t, e=fp32_engines[size]: e(x, *t, m))
+        for precision in ("fp16", "fp32"):
+            runtimes[f"{size}/tensorrt-{precision}"] = (
+                prep, lambda x, m, t, e=engines[size, precision]: e(x, *t, m))
 
     def reference_of(name):
         return name.split("/")[0] + "/torch-fp32"

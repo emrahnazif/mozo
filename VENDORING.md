@@ -334,6 +334,13 @@ found traps it had not predicted, and the predicted ones were mostly real.
 - **`mmap=True` makes every tensor a view into one whole-file mapping.** Returning a 4-byte scalar
   from it keeps 1.5–7.5 GB resident for the life of the process. `.clone()` small reads.
 
+- **A buffer computed at `eval()` time goes stale if `eval()` ran before the load.** TinyViT (as in
+  MobileSAM and HQ-SAM's `vit_tiny`) gathers its attention biases into a non-persistent buffer in
+  `train(False)`; the builder calls `eval()` and *then* loads, so a model used straight from the
+  builder attends with zero biases. The upstream demo calls `eval()` again; a reference built
+  without that is wrong, and a vendor that caches the same way is one refactor away from it.
+  Compute such things in `forward`, and build the reference the way upstream's demo does.
+
 ### Postprocessing
 
 - **Half-resolution heatmaps.** EasyOCR's coordinates are ×2 before the resize ratio is undone.

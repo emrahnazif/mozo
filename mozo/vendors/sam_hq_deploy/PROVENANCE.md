@@ -1,0 +1,146 @@
+# Provenance
+
+This package is a deployment-only extraction of [HQ-SAM](https://github.com/SysCV/sam-hq)
+("Segment Anything in High Quality", NeurIPS 2023), reduced to single-image promptable
+segmentation.
+
+HQ-SAM is Meta's SAM with its weights frozen and one thing added: a learned *HQ output token* in
+the mask decoder, whose mask is predicted from a feature that fuses the decoder's own upsampled
+features with an early encoder feature (the first global-attention block of the ViT, or stage 1 of
+TinyViT) and the final image embedding. Only the added parameters were trained, on 44K finely
+annotated masks.
+
+| | |
+|---|---|
+| Upstream repository | `https://github.com/SysCV/sam-hq` |
+| Upstream commit | `e696978d60352dc9a26b12631cd91781502c6546` (2025-09-11) |
+| Checkpoints | `https://huggingface.co/lkeab/hq-sam`, Hub commit `09b02a333b37772133eff3997bdba997867374b7` |
+| Extracted | 2026-11-25 |
+| Verified against | `torch` 2.13.0 and 2.6.0, `torchvision` 0.28.0 / 0.21.0, Pillow 12.1.1, on CPU |
+
+## Why this reference
+
+The authors publish PyTorch and the checkpoints are theirs, so the reference is their repository
+(VENDORING §1.1), driven through its own `SamPredictor`. Two other implementations exist and are
+not the reference:
+
+- `segment-anything-hq` on PyPI is the same code packaged by the same authors; the repository at a
+  pinned commit is the thing that can be checked out and diffed.
+- `transformers`' `SamHQModel` (with checkpoints under `syscv-community/`) is an independent port.
+  It is not bit-identical to upstream by construction: with `multimask_output=True` it adds the HQ
+  mask to all three SAM candidates and returns them sorted, where upstream keeps the best one.
+  mozo returns three candidates too (see below), but the gate checks them against upstream's own
+  decoder output, not against the port.
+
+## Licences
+
+| What | Licence | Where it is stated |
+|---|---|---|
+| Code | Apache-2.0 | `LICENSE` at the repository root (byte-identical to the text in this directory) |
+| `sam_hq_vit_{b,l,h}.pth` | Apache-2.0 | the `lkeab/hq-sam` model card (`license: apache-2.0`), the repository the README links for every checkpoint |
+| `sam_hq_vit_tiny.pth` | Apache-2.0 | same card |
+| SAM weights inside the ViT checkpoints | Apache-2.0 | `facebookresearch/segment-anything` README: "The model is licensed under the Apache 2.0 license" |
+| TinyViT weights inside `tiny` | Apache-2.0 | `ChaoningZhang/MobileSAM` LICENSE (MobileSAM distilled them from SAM ViT-H) |
+| TinyViT code (`tiny_vit.py`) | MIT | `microsoft/Cream` LICENSE; reproduced in `NOTICE` |
+
+Every checkpoint is the authors' file unchanged: the published `torch-fp32.pth` has the sha256 the
+Hub records for it (`tools/fetch/sam_hq.py` verifies this at the pinned Hub commit).
+
+## What was taken
+
+Verbatim from `segment_anything/modeling/`, apart from relative imports and an SPDX line:
+
+```
+common.py           <- common.py            (LayerNorm2d, MLPBlock)
+image_encoder.py    <- image_encoder.py     (the SAM ViT, returning the global blocks' outputs)
+prompt_encoder.py   <- prompt_encoder.py
+transformer.py      <- transformer.py       (TwoWayTransformer)
+```
+
+Changed:
+
+- `mask_decoder.py` <- `mask_decoder_hq.py`. `MaskDecoderHQ.forward` no longer selects: it returns
+  the four SAM tokens' logits, the HQ token's logits, and all four IoU predictions, and
+  `network.SamHq.decode` does the selection; and the first two lines of upstream's `forward`,
+  which fuse the early encoder feature with the image embedding and depend only on the image,
+  are `MaskDecoderHQ.hq_features`, run once in `encode` and cached with the embedding rather than
+  on every prompt. The arithmetic is upstream's line for line. See "Where this diverges".
+- `tiny_vit.py` <- `tiny_vit_sam.py`, reduced: timm (`DropPath`, `to_2tuple`, `trunc_normal_`,
+  `register_model`), gradient checkpointing, layer-wise learning-rate decay, weight init, the
+  ImageNet classifier head, the model zoo and its download code are gone. `DropPath` was already
+  `nn.Identity` at a drop rate of zero. The attention-bias cache is replaced; see the traps.
+- `network.py` replaces `Sam`: the same three sub-modules under the same attribute names (so the
+  checkpoint loads strictly with no rename table), split into `encode` and `decode`. `Sam.forward`
+  (the batched training entry point) is not carried; `Sam.preprocess` is `encode`'s first two lines.
+- `image.py` replaces `utils/transforms.py::ResizeLongestSide` and `Sam.postprocess_masks`. The
+  resize calls Pillow directly instead of going through torchvision's PIL path -- the same
+  `Image.resize(..., BILINEAR)` call -- which is what removes torchvision.
+- `predictor.py` replaces `SamPredictor`: a content-keyed encoder cache, as SAM 2's segmenter has,
+  and prompts in mozo's shapes. The coordinate scaling is upstream's numpy float64 path.
+- `config.py` replaces `build_sam.py`'s inline numbers.
+
+Not carried: `mask_decoder.py` (SAM's baseline decoder, which no HQ checkpoint uses),
+`build_sam_baseline.py`, `automatic_mask_generator.py`, `utils/amg.py`, `utils/onnx.py`,
+`scripts/export_onnx_model.py`, the `train/` and `seginw/` trees, the demos, and `sam-hq2/`.
+
+## Where this diverges, and why
+
+**Three candidates, not one.** With `multimask_output=True`, upstream's `MaskDecoderHQ.forward`
+takes the SAM multimask token with the highest predicted IoU, adds the HQ token's mask to it, and
+returns that one mask. mozo's promptable contract is three ranked candidates per click, which every
+other family honours and `tests/families/test_promptable.py` holds them to, so this package adds
+the HQ mask to each of the three SAM multimask tokens and returns all three with their IoUs. The
+top-ranked one is upstream's answer bit for bit; the other two are the same addition applied to the
+tokens upstream discards. With `multimask_output=False` nothing differs.
+
+**`hq_token_only` is fixed at upstream's default, `False`.** Upstream's demo suggests `True` for
+images of a single object; offering it would be a new argument on a public signature, so it is not
+offered. What it would change on HQ-SAM's own validation sets is in the family's docs page.
+
+**The score.** It is SAM's predicted IoU for the SAM token's own mask, before the HQ correction:
+HQ-SAM trains no IoU head for the corrected mask. It ranks the three candidates; it does not rate
+the final mask.
+
+## Traps, predicted and found
+
+- **The resize is PIL's.** `ResizeLongestSide.apply_image` resizes through
+  `torchvision.transforms.functional.resize` *on a PIL image*, which is Pillow's antialiasing
+  bilinear on `uint8`, then normalises on the 0..255 scale. Replacing it with `F.interpolate` or
+  cv2 changes every pixel (falsifier `resize-filter`: 316 of 395 stages fail).
+- **Half-up rounding of the resized size.** `int(x + 0.5)`, not `round`. They disagree only when
+  the scaled side lands on exactly .5 -- a 2048x1025 image -- which is why the gate carries one
+  (falsifier `resize-rounding`).
+- **Letterbox, not squash.** Unlike SAM 2, SAM pads bottom-right to 1024 square *after*
+  normalising, and `postprocess_masks` crops the padding before the final resize (falsifier
+  `no-crop`).
+- **Coordinates in float64.** `apply_coords` scales numpy arrays as float64 from whatever dtype the
+  caller passed, then casts to float32. Casting to float32 first moves the prompt embedding
+  (falsifier `coords-float32`). The predictor therefore does not cast clicks or boxes on entry.
+- **TinyViT's attention biases are cached at `eval()` time, and the builder calls `eval()` before
+  loading.** A `vit_tiny` model used straight from `build_sam_vit_t` attends with its zero-initialised
+  biases; upstream's light demo calls `eval()` again after the load, which is what makes it right.
+  The gate builds the reference the way the demo does, and this package gathers the biases in
+  `forward` from the loaded parameter (falsifier `attention-bias`: 313 of 395 fail).
+- **LayerNorm epsilon 1e-6** in the ViT, passed explicitly; torch's default is 1e-5 (falsifier
+  `layernorm-eps`).
+- **The early feature is the *first* global block's output.** The ViT returns one tensor per global
+  block and the decoder reads `[0]`; reading the last runs and is wrong (falsifier `interm-index`).
+- **Unused weights.** The tiny checkpoint carries TinyViT's ImageNet classifier (`norm_head`,
+  `head`); upstream loads with `strict=False`. Here they are dropped by name and the load is
+  strict. The ViT checkpoints load strictly with nothing dropped. `num_batches_tracked` counters
+  (int64) in the tiny checkpoint load into the BatchNorms and are never read in eval.
+
+## Verification
+
+`tools/verify/sam_hq.py --upstream <checkout>` compares, with `torch.equal`, on CPU, for each
+variant: the resized image, the image embedding, the fused HQ features, and for seven prompts (click,
+click + negative click, box, box single-mask, box + negative click, lone negative, click
+single-mask) the sparse and dense prompt embeddings, the decoder's four raw SAM tokens, HQ token and
+IoUs, upstream's final logits / IoU / mask against mozo's best candidate, and all three candidates
+against upstream's raw decoder output through upstream's own `postprocess_masks`; then mask-input
+refinement, a batch of two boxes through upstream's `predict_torch`, and a repeated prompt through
+the cache. Five images: the fixture landscape, its transpose (padding on the right), an odd crop,
+a small upscale, and the 2048x1025 half-pixel case. Then mozo end to end through the adapter.
+`--falsify` runs the gate under each of eight perturbations and passes only if each is caught.
+
+RESULTS_PLACEHOLDER

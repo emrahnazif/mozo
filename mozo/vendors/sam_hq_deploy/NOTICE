@@ -1,0 +1,49 @@
+sam_hq_deploy
+Copyright (c) the HQ-SAM authors (ETH Zurich and HKUST).
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+This product includes software developed by the HQ-SAM authors, extracted from the
+Segment Anything in High Quality project (https://github.com/SysCV/sam-hq) and reduced
+to its single-image inference path. HQ-SAM is built on Meta's Segment Anything
+(https://github.com/facebookresearch/segment-anything); the files carried from it keep
+Meta's copyright header. Both are licensed under the Apache License, Version 2.0; see the
+LICENSE file in this directory.
+
+The published checkpoints are Apache-2.0 as well, stated on the model card of the
+repository the authors serve them from (https://huggingface.co/lkeab/hq-sam). They contain
+Meta's SAM weights (Apache-2.0) or, for the tiny variant, MobileSAM's TinyViT encoder
+(Apache-2.0, https://github.com/ChaoningZhang/MobileSAM), with HQ-SAM's trained
+parameters on top.
+
+The tiny variant's image encoder, tiny_vit.py, is TinyViT, carried through MobileSAM and
+HQ-SAM. Its header names its origin, and Microsoft's licence for it is reproduced here as
+the MIT licence asks:
+
+  TinyViT (https://github.com/microsoft/Cream/tree/main/TinyViT)
+  MIT License
+  Copyright (c) Microsoft Corporation.
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+NOT INCLUDED
+------------
+HQ-SAM 2 (sam-hq2/, the same idea on SAM 2.1), the training code and HQSeg-44K
+tooling, the automatic mask generator, the ONNX export script, SAM's unused baseline
+mask decoder, and Sam's batched training forward are not part of this package. See
+PROVENANCE.md for the full list and for why.

@@ -2,52 +2,68 @@
 """Check the vendored DEIM against the authors' repository, module by module, and mozo against
 the vendor.
 
-    python tools/verify/deim.py --upstream DEIM/                   # every variant, the fixtures
-    python tools/verify/deim.py --upstream DEIM/ --coco val2017/   # plus 16 COCO photographs
+    python tools/verify/deim.py --upstream DEIM/ --device cuda     # the primary gate, on a GPU
+    python tools/verify/deim.py --upstream DEIM/ --device cuda --coco val2017/ \\
+        --reference-cache refs/                                     # plus 16 COCO photographs
+    python tools/verify/deim.py --device cuda --coco val2017/ --reference-cache refs/ \\
+        --falsify all                                               # prove the gate can fail
+    python tools/verify/deim.py --upstream DEIM/                   # the CPU gate (the default)
     python tools/verify/deim.py --upstream DEIM/ --variant small photo.jpg
-    python tools/verify/deim.py --upstream DEIM/ --falsify all     # prove the gate can fail
     python tools/verify/deim.py --no-reference                     # vendor vs mozo only
 
 ``DEIM/`` is a clone of ``github.com/ShihuaHuang95/DEIM`` at commit ``09d35d5`` (see the vendor's
 PROVENANCE); it needs ``torch``, ``torchvision``, ``pyyaml``, ``scipy``, ``tensorboard``,
-``faster-coco-eval`` and ``calflops`` importable, because importing upstream's ``engine`` imports
-its training code. So this does not run in the test suite.
+``faster-coco-eval``, ``calflops`` and ``transformers`` importable, because importing upstream's
+``engine`` imports its training code. So this does not run in the test suite.
 
-Three paths over the same checkpoint and the same decoded pixels:
+Three paths over the same checkpoint and the same decoded pixels, in one process per variant
+(several variants run as one child process each: upstream's config registry leaks between configs,
+see ``deim_reference.py``):
 
-1. **upstream**, run by ``tools/verify/deim_reference.py`` in a fresh process per variant (its
-   docstring says why it must be fresh): what ``tools/inference/torch_inf.py`` does;
-2. **the vendor**, ``mozo.vendors.deim_deploy``;
-3. **mozo**, ``ModelManager().get_model("deim", variant, runtime="torch-fp32")``: registry,
-   weights, adapter, PixelFlow.
+1. **upstream**, ``deim_reference.Upstream``: what ``tools/inference/torch_inf.py`` does on the
+   device, decode included;
+2. **the vendor**, ``mozo.vendors.deim_deploy``, run the same way: batch made on the host, network
+   and decode on the device;
+3. **mozo**, ``ModelManager().get_model("deim", variant, runtime="torch-fp32", device=...)``:
+   registry, weights, adapter, PixelFlow.
 
 Upstream against the vendor is compared exactly: the network input, the encoder's outputs, the
-raw logits and boxes and all 300 post-processed detections with ``torch.equal``, and every
-module's output in call order by the sha256 of its bytes (stricter than ``torch.equal``: it also
-tells ``-0.0`` from ``0.0``). The first module that differs is named. The vendor against mozo is
-compared after both go through PixelFlow's rounding (``tests/conftest.py::as_pixelflow_reports``),
-at two thresholds.
+raw logits and boxes and all 300 post-processed detections, and every module's output in call
+order by the sha256 of its bytes (stricter than ``torch.equal``: it also tells ``-0.0`` from
+``0.0``). The first module that differs is named. The vendor against mozo is compared exactly on
+the arrays mozo hands to PixelFlow, and again on PixelFlow's rounded rows
+(``tests/conftest.py::as_pixelflow_reports``), at two thresholds.
 
-CPU only, and under ``MKL_CBWR=AVX2,STRICT`` (set below, inherited by the reference process):
-that is where the comparison is defined. See the comment at the setting.
+``--device cuda`` is the primary gate: one GPU, torch's default CUDA settings, which mozo leaves
+alone (cuDNN may use TF32 for convolutions; matmul TF32, ``cudnn.benchmark`` and deterministic
+algorithms off). Each side first runs every image twice and must repeat itself bit for bit.
+``--dtype`` is fp32 only: DEIM's only torch runtime is ``torch-fp32`` (``auto`` on CUDA is a
+TensorRT engine, measured by parity and accuracy instead), and upstream has no half inference path.
 
-``--falsify NAME`` perturbs one thing in the vendor and expects the gate to fail at the stage that
-thing reaches and at no earlier one. See :data:`FALSIFY`.
+On the CPU, ``MKL_CBWR=AVX2,STRICT`` is forced (set below): that is where the CPU comparison is
+defined. See the comment at the setting.
+
+``--reference-cache DIR`` keeps upstream's records per variant (the input and encoder outputs as
+digests, module outputs as digests, the raw outputs and 300 detections whole), read when present,
+computed and saved when not. ``--falsify NAME`` perturbs one thing in the vendor and expects the
+gate to fail at the stage that thing reaches and at no earlier one, after an unperturbed run has
+passed against the same reference. See :data:`FALSIFY`; five of them perturb only what a GPU does.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Callable, NamedTuple
 from unittest import mock
 
-# Before torch loads MKL, and inherited by the reference process. Without it the comparison is not
-# defined: MKL's sgemm picks its kernel by the buffers' alignment, which differs from process to
+# Before torch loads MKL, and inherited by the per-variant processes. Without it the comparison
+# is not defined: MKL's sgemm picks its kernel by the buffers' alignment, which differs from process to
 # process, so the same model on the same pixels gave a different encoder attention output in about
 # one process in ten on an idle machine (medium: 1 of 12, logits up to ~5e-4 apart). Strict
 # conditional-numerical-reproducibility mode makes the result independent of alignment. It sets
@@ -67,7 +83,7 @@ os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 import mozo  # noqa: E402
 from common import fixtures  # noqa: E402
 from conftest import as_pixelflow_reports  # noqa: E402
-from deim_reference import record_digests  # noqa: E402
+from deim_reference import digest, record_digests  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.vendors.deim_deploy import SPECS, load, postprocess, preprocess  # noqa: E402
 from mozo.weights import resolve  # noqa: E402
@@ -112,34 +128,92 @@ def images(paths: list[Path], coco: Path | None, count: int) -> dict[str, np.nda
     return found
 
 
-def run_reference(upstream: Path, variant: str, checkpoint: Path, inputs: Path, work: Path) -> dict:
-    out = work / f"reference-{variant}.pt"
-    subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "verify" / "deim_reference.py"),
-         "--upstream", str(upstream), "--config", str(upstream / SPECS[variant].config),
-         "--checkpoint", str(checkpoint), "--inputs", str(inputs), "--out", str(out)],
-        check=True)
-    return torch.load(out, weights_only=False)
+def _cache_form(record: dict) -> dict:
+    """What a reference keeps of one image: the network input and the encoder's outputs as their
+    digests (dtype, shape, sha256 of the bytes), the small raw outputs and all 300 detections
+    whole. The full intermediates of 25 images run to gigabytes."""
+    return {**record, "input": digest(record["input"]), "encoder": digest(record["encoder"])}
 
 
-def vendor_stages(model, rgb: np.ndarray) -> dict:
+def _same_record(a: dict, b: dict) -> bool:
+    """Whether two records of one side, in cache form, hold the same bytes at every stage."""
+    return (a["input"] == b["input"] and a["encoder"] == b["encoder"]
+            and a["digests"] == b["digests"]
+            and all(_equal(a[k], b[k]) for k in ("pred_logits", "pred_boxes", "labels", "boxes", "scores")))
+
+
+def _reference_key(args, named: dict) -> dict:
+    """What a cached reference was made for. A cache made for anything else is refused."""
+    device = torch.device(args.device)
+    return {"device": args.device, "dtype": args.dtype, "torch": torch.__version__,
+            "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else "cpu",
+            "images": {k: hashlib.sha256(v.tobytes()).hexdigest() + str(v.shape) for k, v in named.items()}}
+
+
+def reference_for(variant: str, args, named: dict, checkpoint: Path) -> dict:
+    """Upstream's records for every image, in cache form: read from ``--reference-cache`` when it
+    holds this variant, otherwise computed here (on CUDA each image twice, which must repeat bit
+    for bit) and saved there."""
+    key = _reference_key(args, named)
+    path = args.reference_cache / f"{variant}.pt" if args.reference_cache else None
+    if path is not None and path.exists():
+        cached = torch.load(path, weights_only=False)
+        if cached["for"] != key:
+            raise SystemExit(f"{path} was made for another device, dtype, torch, GPU or image set")
+        print(f"upstream: read from {path} ({cached['versions']}, commit {cached['commit']})")
+        return cached["results"]
+    if args.upstream is None:
+        raise SystemExit(f"no cached reference for {variant} and no --upstream to compute one")
+
+    from deim_reference import Upstream, versions
+    device = torch.device(args.device)
+    upstream = Upstream(args.upstream, args.upstream / SPECS[variant].config, checkpoint, device)
+    commit = subprocess.run(["git", "-C", str(args.upstream), "rev-parse", "HEAD"],
+                            capture_output=True, text=True).stdout.strip() or "?"
+    print(f"upstream: {versions()}, commit {commit}")
+    results, unrepeated = {}, []
+    for name, rgb in named.items():
+        results[name] = _cache_form(upstream(rgb))
+        if device.type == "cuda" and not _same_record(results[name], _cache_form(upstream(rgb))):
+            unrepeated.append(name)
+    if device.type == "cuda":
+        print(f"  upstream repeats itself on {len(named) - len(unrepeated)}/{len(named)} images"
+              + (f"; not on {unrepeated}" if unrepeated else ""))
+        if unrepeated:
+            raise SystemExit("upstream is not deterministic here, so no comparison means anything")
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"for": key, "results": results, "versions": versions(), "commit": commit}, path)
+        print(f"upstream: saved to {path}")
+    return results
+
+
+def vendor_stages(model, rgb: np.ndarray, device: torch.device) -> dict:
+    """The vendor run the way upstream's script runs: batch and size made on the host and moved
+    to the device, network and decode there. Every stage is copied back to the host (exact)."""
     store, handles = record_digests(model)
     encoder_out: list = []
     handles.append(model.encoder.register_forward_hook(
-        lambda _m, _i, out: encoder_out.append([t.clone() for t in out])))
+        lambda _m, _i, out: encoder_out.append([t.detach().to("cpu", copy=True) for t in out])))
     batch, size = preprocess(rgb)
+    batch, size = batch.to(device), size.to(device)
     with torch.inference_mode():
         outputs = model(batch)
-    labels, boxes, scores = postprocess(outputs, size)
+        labels, boxes, scores = postprocess(outputs, size)
     for handle in handles:
         handle.remove()
-    return {"input": batch, "encoder": encoder_out[0], "pred_logits": outputs["pred_logits"],
-            "pred_boxes": outputs["pred_boxes"], "labels": labels, "boxes": boxes,
-            "scores": scores, "digests": dict(store)}
+    return {"input": batch.cpu(), "encoder": encoder_out[0],
+            "pred_logits": outputs["pred_logits"].cpu(), "pred_boxes": outputs["pred_boxes"].cpu(),
+            "labels": labels.cpu(), "boxes": boxes.cpu(), "scores": scores.cpu(),
+            "digests": dict(store)}
 
 
 def _equal(a, b) -> bool:
-    if isinstance(a, (list, tuple)):
+    """Tensors, lists of them, or a cached digest of either on one side (compared by digest)."""
+    live = (torch.Tensor, list)
+    if not isinstance(a, live) or not isinstance(b, live):
+        return (digest(a) if isinstance(a, live) else a) == (digest(b) if isinstance(b, live) else b)
+    if isinstance(a, list):
         return len(a) == len(b) and all(_equal(x, y) for x, y in zip(a, b))
     return a.shape == b.shape and a.dtype == b.dtype and torch.equal(a, b)
 
@@ -171,18 +245,34 @@ def compare(vendor: dict, reference: dict) -> dict[str, bool]:
 
 
 def mozo_matches(model, rgb: np.ndarray, vendor: dict) -> bool:
-    """mozo's result against the vendor's 300 detections, filtered and rounded the same way."""
+    """mozo's result against the vendor's 300 detections, at each threshold, twice: exactly, on
+    the arrays mozo hands to PixelFlow, and on the rows PixelFlow gives back, after the vendor's
+    arrays go through the same rounding. The rows alone could not see a last-bit difference
+    (PixelFlow keeps two or three decimals), such as a decode on the host instead of the device."""
+    import pixelflow as pf
+
+    handed: list = []
+    real = pf.detections.from_arrays
+
+    def spy(**arrays):
+        handed.append(arrays)
+        return real(**arrays)
+
     for threshold in THRESHOLDS:
         keep = vendor["scores"][0] > threshold
-        want = as_pixelflow_reports(vendor["boxes"][0][keep].numpy(),
-                                    vendor["scores"][0][keep].numpy(),
-                                    vendor["labels"][0][keep].numpy())
-        rows = model.predict(rgb, threshold=threshold).to_dict()
+        exact = {"boxes": vendor["boxes"][0][keep].numpy(), "scores": vendor["scores"][0][keep].numpy(),
+                 "class_ids": vendor["labels"][0][keep].numpy()}
+        want = as_pixelflow_reports(exact["boxes"], exact["scores"], exact["class_ids"])
+        with mock.patch.object(pf.detections, "from_arrays", spy):
+            rows = model.predict(rgb, threshold=threshold).to_dict()
+        if not all(handed[-1][k].dtype == v.dtype and np.array_equal(handed[-1][k], v)
+                   for k, v in exact.items()):
+            return False
         got_boxes = np.array([r["bbox"] for r in rows], np.float64).reshape(-1, 4)
         got_scores = np.array([r["confidence"] for r in rows], np.float64)
         got_ids = np.array([r["class_id"] for r in rows])
         if not (np.array_equal(got_boxes, want[0]) and np.array_equal(got_scores, want[1])
-                and np.array_equal(got_ids, vendor["labels"][0][keep].numpy())):
+                and np.array_equal(got_ids, exact["class_ids"])):
             return False
     return True
 
@@ -268,11 +358,68 @@ def _frozen_bn_as_batchnorm():
     return _patch(hgnetv2.FrozenBatchNorm2d, "forward", batch_norm)
 
 
+@contextlib.contextmanager
+def _setting(obj, name, value):
+    """A torch backend flag set for the vendor's run alone (upstream ran before, unperturbed)."""
+    old = getattr(obj, name)
+    setattr(obj, name, value)
+    try:
+        yield
+    finally:
+        setattr(obj, name, old)
+
+
+def _cudnn_tf32_off():
+    """cuDNN convolutions in full fp32, where torch's default (and mozo's) lets them use TF32."""
+    return _setting(torch.backends.cudnn, "allow_tf32", False)
+
+
+def _matmul_tf32_on():
+    """cuBLAS matmuls in TF32, where torch's default (and mozo's) keeps them in full fp32. The
+    backbone is all convolutions, so the first matmul is in the encoder."""
+    return _setting(torch.backends.cuda.matmul, "allow_tf32", True)
+
+
+def _channels_last():
+    """The vendor's batch in channels-last memory, values equal (the input stage still passes):
+    cuDNN picks other kernels for the other layout."""
+    real = preprocess
+
+    def nhwc(*args, **kwargs):
+        batch, size = real(*args, **kwargs)
+        return batch.contiguous(memory_format=torch.channels_last), size
+    return _patch(sys.modules[__name__], "preprocess", nhwc)
+
+
+def _attention_sdpa():
+    """``need_weights=False`` on every ``nn.MultiheadAttention``, which sends it through
+    ``scaled_dot_product_attention`` and whichever backend torch picks (head sizes 16 and 32).
+    Upstream calls it with the default ``need_weights=True``: the unfused ``baddbmm`` + softmax
+    path, which never reaches SDPA, so no SDPA backend is in use to perturb."""
+    import torch.nn as nn
+
+    real = nn.MultiheadAttention.forward
+
+    def fused(self, query, key, value, *args, **kwargs):
+        return real(self, query, key, value, *args, **{**kwargs, "need_weights": False})
+    return _patch(nn.MultiheadAttention, "forward", fused)
+
+
+def _decode_on_host():
+    """The decode on the host, as mozo's adapter did before the GPU gate, while upstream decodes
+    on the device its network ran on. CUDA's ``sigmoid`` is not the CPU's in the last bit."""
+    real = postprocess
+    return _patch(sys.modules[__name__], "postprocess",
+                  lambda outputs, size, *a, **k: real({n: t.cpu() for n, t in outputs.items()},
+                                                      size.cpu(), *a, **k))
+
+
 class Falsification(NamedTuple):
     perturb: Callable
     first: str      # the first stage it must fail at (``modules`` precedes the tensors it holds)
     reaches: str    # the stage its effect is aimed at, which must fail too
     applies: Callable = lambda spec: True   # variants it can reach; skipped elsewhere
+    cuda_only: bool = False                 # a perturbation of what only a GPU does
 
 
 FALSIFY = {
@@ -284,7 +431,70 @@ FALSIFY = {
     "box-scale": Falsification(_box_scale_swapped, "detections", "detections"),
     "frozen-bn": Falsification(_frozen_bn_as_batchnorm, "modules", "encoder",
                                lambda spec: spec.freeze_norm),
+    "tf32-off": Falsification(_cudnn_tf32_off, "modules", "encoder", cuda_only=True),
+    "matmul-tf32": Falsification(_matmul_tf32_on, "modules", "encoder", cuda_only=True),
+    "channels-last": Falsification(_channels_last, "modules", "encoder", cuda_only=True),
+    "attention-sdpa": Falsification(_attention_sdpa, "modules", "encoder", cuda_only=True),
+    "decode-host": Falsification(_decode_on_host, "detections", "detections", cuda_only=True),
 }
+
+
+def environment(device: torch.device) -> str:
+    """torch, CUDA, cuDNN, the GPU, its driver and the settings in force: what a result holds for."""
+    if device.type == "cpu":
+        return f"torch {torch.__version__}, CPU, MKL_CBWR={os.environ.get('MKL_CBWR', '')}"
+    driver = subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader",
+                             "-i", str(device.index or 0)], capture_output=True, text=True)
+    return (f"torch {torch.__version__}, CUDA {torch.version.cuda}, cuDNN "
+            f"{torch.backends.cudnn.version()}, {torch.cuda.get_device_name(device)}, driver "
+            f"{driver.stdout.strip() or 'unknown'}; cudnn.allow_tf32 "
+            f"{torch.backends.cudnn.allow_tf32}, matmul.allow_tf32 "
+            f"{torch.backends.cuda.matmul.allow_tf32}, cudnn.benchmark "
+            f"{torch.backends.cudnn.benchmark}, deterministic "
+            f"{torch.are_deterministic_algorithms_enabled()}")
+
+
+def _without_variants(argv: list[str]) -> list[str]:
+    out, skip = [], False
+    for arg in argv:
+        if skip:
+            skip = False
+        elif arg == "--variant":
+            skip = True
+        elif not arg.startswith("--variant="):
+            out.append(arg)
+    return out
+
+
+def falsify(variant: str, args, named: dict, checkpoint: Path, reference: dict) -> int:
+    """An unperturbed run against the reference first, which must pass (so a falsifier's failure
+    is its perturbation, not the reference), then each falsifier that applies here."""
+    device = torch.device(args.device)
+
+    def failing():
+        model = load(variant, checkpoint).to(device)
+        got = {k: compare(vendor_stages(model, rgb, device), reference[k]) for k, rgb in named.items()}
+        failed = [s for s in STAGES[:-1] if not all(g[s] for g in got.values())]
+        return failed, next((g["_module"] for g in got.values() if g["_module"]), None)
+
+    failed, module = failing()
+    print(f"  unperturbed    {variant:<14} {'PASS' if not failed else 'FAIL'}: fails at "
+          f"{failed or 'nothing'}, first module {module}")
+    if failed:
+        return 1
+    names = list(FALSIFY) if args.falsify == "all" else [args.falsify]
+    failures = 0
+    for name in names:
+        perturb, first, reaches, applies, cuda_only = FALSIFY[name]
+        if not applies(SPECS[variant]) or (cuda_only and device.type != "cuda"):
+            continue
+        with perturb():
+            failed, module = failing()
+        caught = bool(failed) and failed[0] == first and reaches in failed
+        print(f"  falsify {variant:<14} {name:<14} {'CAUGHT' if caught else 'MISSED'}: "
+              f"fails at {failed or 'nothing'}, first module {module}")
+        failures += not caught
+    return failures
 
 
 def main() -> int:
@@ -294,67 +504,74 @@ def main() -> int:
     parser.add_argument("--variant", action="append", choices=VARIANTS)
     parser.add_argument("--coco", type=Path, help="a COCO image folder to add photographs from")
     parser.add_argument("--coco-count", type=int, default=16)
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--dtype", choices=("fp32", "fp16", "bf16"), default="fp32")
     parser.add_argument("--falsify", choices=[*FALSIFY, "all"])
+    parser.add_argument("--reference-cache", type=Path,
+                        help="a folder of upstream's records per variant: read when present, "
+                             "computed and saved there when not")
     parser.add_argument("--no-reference", action="store_true")
     args = parser.parse_args()
-    if not args.no_reference and args.upstream is None:
-        parser.error("--upstream is required unless --no-reference")
+    if not args.no_reference and args.upstream is None and args.reference_cache is None:
+        parser.error("--upstream (or a --reference-cache) is required unless --no-reference")
     if args.falsify and args.no_reference:
         parser.error("--falsify compares against upstream, so it needs --upstream")
+    if args.dtype != "fp32":
+        parser.error("DEIM runs through torch in fp32 only: mozo publishes no torch half runtime "
+                     "for it (autocast was slower than fp32 on CUDA for every variant), and "
+                     "upstream's inference script has no half-precision path")
+    if args.falsify and FALSIFY.get(args.falsify, FALSIFY["resize"]).cuda_only and args.device != "cuda":
+        parser.error(f"--falsify {args.falsify} perturbs what only a GPU does: use --device cuda")
 
+    variants = args.variant or list(VARIANTS)
+    if len(variants) > 1:
+        # One variant per process: upstream's config registry leaks between configs (see
+        # deim_reference.py), and upstream, the vendor and mozo share the process they compare in.
+        base = [sys.executable, __file__, *_without_variants(sys.argv[1:])]
+        failed = [v for v in variants if subprocess.run([*base, "--variant", v]).returncode]
+        print("PASS" if not failed else f"FAIL ({', '.join(failed)})")
+        return 1 if failed else 0
+
+    variant = variants[0]
+    device = torch.device(args.device)
     torch.set_grad_enabled(False)
     named = images(args.images or fixtures(), args.coco, args.coco_count)
-    variants = args.variant or list(VARIANTS)
-    print(f"torch {torch.__version__}, {len(named)} images, variants {variants}")
-    failures = 0
+    print(environment(device))
+    print(f"{variant}: {len(named)} images, {args.dtype}")
+    checkpoint = resolve(FAMILY, variant, "torch-fp32")
+    reference = None if args.no_reference else reference_for(variant, args, named, checkpoint)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        work = Path(tmp)
-        inputs = work / "inputs.npz"
-        np.savez(inputs, **named)
-        for variant in variants:
-            checkpoint = resolve(FAMILY, variant, "torch-fp32")
-            reference = None
-            if not args.no_reference:
-                reference = run_reference(args.upstream, variant, checkpoint, inputs, work)
-                if variant == variants[0]:
-                    print("upstream:", reference["versions"])
-                reference = reference["results"]
+    if args.falsify:
+        failures = falsify(variant, args, named, checkpoint, reference)
+        print("PASS" if not failures else f"FAIL ({failures})")
+        return 0 if not failures else 1
 
-            if args.falsify:
-                names = list(FALSIFY) if args.falsify == "all" else [args.falsify]
-                for name in names:
-                    perturb, first, reaches, applies = FALSIFY[name]
-                    if not applies(SPECS[variant]):
-                        continue
-                    with perturb():
-                        model = load(variant, checkpoint)
-                        got = {k: compare(vendor_stages(model, rgb), reference[k]) for k, rgb in named.items()}
-                    failed = [s for s in STAGES[:-1] if not all(g[s] for g in got.values())]
-                    caught = bool(failed) and failed[0] == first and reaches in failed
-                    module = next((g["_module"] for g in got.values() if g["_module"]), None)
-                    print(f"  falsify {variant:<14} {name:<14} {'CAUGHT' if caught else 'MISSED'}: "
-                          f"fails at {failed or 'nothing'}, first module {module}")
-                    failures += not caught
-                continue
-
-            model = load(variant, checkpoint)
-            served = mozo.ModelManager().get_model(FAMILY, variant, runtime="torch-fp32", device="cpu")
-            rows = []
-            for key, rgb in named.items():
-                vendor = vendor_stages(model, rgb)
-                result = compare(vendor, reference[key]) if reference else {}
-                result["mozo"] = mozo_matches(served, rgb, vendor)
-                ok = all(v for k, v in result.items() if not k.startswith("_"))
-                failures += not ok
-                count = int((vendor["scores"][0] > THRESHOLDS[0]).sum())
-                rows.append(ok)
-                if not ok:
-                    print(f"  FAIL {variant} {key}: {result}")
-                print(f"  {variant:<14} {key:<22} {count:>3} dets  "
-                      + " ".join(f"{s}={'ok' if result[s] else 'FAIL'}" for s in STAGES if s in result))
-            print(f"{variant}: {sum(rows)}/{len(rows)} images exact")
-
+    model = load(variant, checkpoint).to(device)
+    served = mozo.ModelManager().get_model(FAMILY, variant, runtime="torch-fp32", device=args.device)
+    failures, rows, unrepeated, outputs = 0, [], [], 0
+    for key, rgb in named.items():
+        vendor = vendor_stages(model, rgb, device)
+        outputs += sum(len(c) for n, c in vendor["digests"].items() if n not in STRUCTURAL)
+        if device.type == "cuda" and not _same_record(_cache_form(vendor),
+                                                      _cache_form(vendor_stages(model, rgb, device))):
+            unrepeated.append(key)
+        result = compare(vendor, reference[key]) if reference else {}
+        result["mozo"] = mozo_matches(served, rgb, vendor)
+        ok = all(v for k, v in result.items() if not k.startswith("_"))
+        failures += not ok
+        count = int((vendor["scores"][0] > THRESHOLDS[0]).sum())
+        rows.append(ok)
+        if not ok:
+            print(f"  FAIL {variant} {key}: {result}")
+        print(f"  {variant:<14} {key:<22} {count:>3} dets  "
+              + " ".join(f"{s}={'ok' if result[s] else 'FAIL'}" for s in STAGES if s in result))
+    if device.type == "cuda":
+        print(f"  vendor repeats itself on {len(named) - len(unrepeated)}/{len(named)} images"
+              + (f"; not on {unrepeated}" if unrepeated else ""))
+        failures += len(unrepeated)
+    print(f"{variant}: {sum(rows)}/{len(rows)} images exact; {outputs} module outputs, and per "
+          f"image the input, encoder, logits, boxes, 300 detections and mozo at {len(THRESHOLDS)} "
+          f"thresholds")
     print("PASS" if not failures else f"FAIL ({failures})")
     return 0 if not failures else 1
 

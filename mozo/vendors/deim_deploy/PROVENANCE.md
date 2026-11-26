@@ -9,7 +9,7 @@ This package is a deployment-only extraction of [DEIM](https://github.com/Shihua
 | Upstream commit | `09d35d53d39ee3145a1e61e3a989b28b9468d1dd` (2026-03-24) |
 | Model code last changed | `c7ed52d` (2025-03-12); later commits touch README and LICENSE only |
 | Extracted | 2026-11-25 |
-| Verified against | `torch` 2.13.0, `torchvision` 0.28.0, Pillow 12.3.0, numpy 2.3.5, Python 3.12, CPU |
+| Verified against | CUDA: `torch` 2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2, `torchvision` 0.28.0, Pillow 13.0.0, numpy 2.5.4, RTX 3060 (2026-11-26); CPU: `torch` 2.13.0, `torchvision` 0.28.0, Pillow 12.3.0, numpy 2.3.5, Python 3.12 |
 
 ## The reference
 
@@ -20,7 +20,7 @@ transform `T.Compose([T.Resize((640, 640)), T.ToTensor()])` on a PIL image. The 
 transform is the same arithmetic. `tools/inference/onnx_inf.py` letterboxes instead, and is not
 the reference.
 
-**Guarantee:** on the CPU, for the same RGB pixels, the vendor's network input, every module's
+**Guarantee:** on CUDA in fp32 (DEIM's only torch precision) and on the CPU, for the same RGB pixels, the vendor's network input, every module's
 output, the raw logits and boxes and all 300 decoded detections are bit-identical to upstream's,
 for all six checkpoints. The chain stops there: the AP numbers in upstream's README are the
 authors'; mozo has not reproduced their full COCO evaluation, only measured its runtimes against
@@ -89,18 +89,19 @@ Reproduced from upstream, recorded here so nobody "fixes" them:
 
 ## Verification
 
-`tools/verify/deim.py --upstream <clone>` runs upstream in a fresh process per variant (upstream's
-`YAMLConfig` leaks one config's keys into the next built in the same process) and compares, on
+`tools/verify/deim.py --upstream <clone>` runs each variant in a process of its own (upstream's
+`YAMLConfig` leaks one config's keys into the next built in the same process), with upstream, this
+package and mozo side by side in it, on one device (`--device cuda` or the CPU), and compares, on
 the fixture photograph, eight synthetic cases (blank, black, tiny, both extreme aspect ratios,
 exactly 640, an upscale, noise) and 16 random COCO val2017 images:
 
 - the network input, the encoder outputs, raw logits and boxes, and the 300 decoded detections,
   with `torch.equal`;
 - every module's output, in call order, by the sha256 of its bytes;
-- mozo's served result against the vendor's, through PixelFlow's rounding, at thresholds 0.4 and
-  0.05.
+- mozo's served result against the vendor's at thresholds 0.4 and 0.05: exactly, on the arrays
+  mozo's adapter hands to PixelFlow, and on the rows PixelFlow returns after its rounding.
 
-Both processes run with `MKL_CBWR=AVX2,STRICT`. Without it, CPU results are not reproducible from
+On the CPU, every process runs with `MKL_CBWR=AVX2,STRICT`. Without it, CPU results are not reproducible from
 one process to the next: MKL chooses its sgemm kernel by buffer alignment, and the same model on
 the same pixels gave a different encoder attention output in about one process in ten (measured
 on medium on an idle machine; logits up to about 5e-4 apart). That is a property of torch on this
@@ -116,6 +117,42 @@ still equal), the training-form weighting function (first module: the second lay
 position head; boxes and logits fail, the encoder does not), box scale with x and y swapped
 (detections only), and, on `xlarge-obj365` only, `FrozenBatchNorm2d` computed as eval
 `F.batch_norm` (first module: `backbone.stem.stem1.bn`).
+
+**On CUDA (2026-11-26), the primary gate:** RTX 3060 (vision-003), driver 550.144.03, torch
+2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2, fp32. That is DEIM's only torch precision: its `auto` on
+CUDA is a TensorRT engine (measured by parity and accuracy below), mozo publishes no torch half
+runtime, and upstream's inference script has no half path. The settings are torch's defaults, which
+mozo leaves alone: cuDNN may use TF32 for convolutions; matmul TF32, `cudnn.benchmark` and
+deterministic algorithms off. Upstream runs as `torch_inf.py` does with `-d cuda`: the batch made on
+the host and moved to the device, the network and the post-processor on the device, with autograd
+on (the script never turns it off). The attention modules take torch's unfused `need_weights=True`
+path on both sides; no `scaled_dot_product_attention` call is made (counted), so there is no SDPA
+backend to pin. Each side ran every image twice and repeated itself bit for bit (150 images, each
+side). Then the same 25 images and stages as on the CPU, every one exact on all six variants:
+124,225 module outputs, plus per image the input, encoder outputs, logits, boxes, 300 detections
+and mozo at both thresholds.
+
+One fix to mozo's adapter came out of it, none to this package: the adapter copied the raw logits
+and boxes to the host and decoded there, while upstream decodes on the device. CUDA's `sigmoid`
+differs from the CPU's in the last bit on about a quarter of the logits (up to 6e-08), so the 300
+scores differed on every image, and on one the top-k order changed. The adapter now decodes where
+the network ran. The check of mozo against PixelFlow's rounded rows passed before the fix; the
+exact check on the arrays handed to PixelFlow was added because of it.
+
+**GPU falsifiers** (`--device cuda --falsify all`, against one cached reference run per variant,
+after an unperturbed run passed against the same cache): 67 of 67 caught on all six variants. The
+seven above, each first at the same stage as on the CPU, and five that perturb only what a GPU
+does, on the vendor's side alone: cuDNN TF32 off (first at the first convolution cuDNN runs in
+TF32, e.g. `backbone.stem.stem2a.conv` on `nano`), matmul TF32 on (first at
+`encoder.encoder.0.layers.0.self_attn`: the backbone is all convolutions), the batch in
+channels-last memory with equal values (first at `backbone.stem.stem1.conv`: cuDNN picks other
+kernels), attention through `scaled_dot_product_attention` (`need_weights=False`; first at the
+encoder's self-attention), and the decode on the host (detections only). The cache keeps the input
+and encoder outputs as their dtype, shape and sha256, module outputs as digests, and the raw
+outputs and 300 detections whole.
+
+The CPU gate (all six variants, 25 images) and its 37 falsifiers (all six variants, 11 images)
+were rerun after the change, on vision-003's CPU, 2026-11-26: all exact, all caught.
 
 ## Export
 

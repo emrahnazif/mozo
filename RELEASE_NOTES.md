@@ -35,7 +35,7 @@
   COCO, and `xlarge-obj365`, pretrained on Objects365 and the most accurate (59.5 AP by the
   authors' count). Like RF-DETR it has no non-maximum suppression to tune. `mozo.get_model("deim/small")`,
   `/predict/deim/small`, and a `deim` workflow node. Results are bit-identical to the authors' code
-  on the CPU, checked module by module. Code Apache-2.0; the weights come with no terms of their
+  on CUDA (RTX 3060, torch 2.13.0, CUDA 12.6) in fp32 and on the CPU, checked module by module. Code Apache-2.0; the weights come with no terms of their
   own, and mozo reads them as the repository's Apache-2.0 (the NOTICE says so).
 - **DEIM runs 1.9 to 5.4 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed: `auto` builds an fp32 engine from the published ONNX graph

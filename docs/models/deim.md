@@ -69,7 +69,7 @@ model = ModelManager().get_model("deim", "small", runtime="onnx-fp32")
 
 Measured on an RTX 3090 with torch 2.13, ONNX Runtime 1.21 (CPU) and TensorRT 11.5, on 500
 random COCO val2017 images. Time is the network's forward pass on one 640×640 image, median; the
-resize and the decode run on the CPU on every runtime. AP is COCO box AP on those 500 images with
+resize runs on the CPU and the decode on the device that ran the network. AP is COCO box AP on those 500 images with
 all 300 detections, so it only compares runtimes with each other. A detection "changes" when,
 against torch fp32 on the CPU, it scores above 0.52 on one side with no same-class partner (IoU
 above 0.5) above 0.5 on the other; each variant has 2,200–3,000 detections above 0.5.
@@ -112,6 +112,18 @@ Returns a PixelFlow `Detections`, best first. Each detection has:
 - `class_id` and `class_name`: one of COCO's 80 classes, ids 0–79 (`person` is 0).
 - `confidence`: the sigmoid of one class's score for one query. Classes do not compete for it (it
   is not a softmax), so one box can come back twice with two classes when both clear the threshold.
+
+### Parity
+
+Bit-identical to the authors' code (`ShihuaHuang95/DEIM` at commit `09d35d5`, run as its
+`torch_inf.py` runs) on CUDA (RTX 3060, torch 2.13.0, CUDA 12.6, cuDNN 9.10.2) in fp32, the only
+precision DEIM runs through torch, with torch's default CUDA settings; and also on the CPU.
+Compared with no tolerance on all six variants, 25 images each (a photograph, eight awkward
+synthetic cases, 16 COCO val2017 images): the network input, the output of every module (124,225
+in all), the encoder outputs, raw logits and boxes, all 300 decoded detections, and what mozo
+returns at thresholds 0.4 and 0.05. On the GPU the decode runs on the device, as upstream's does.
+`tools/verify/deim.py` runs the comparison against a checkout of that repository (`--device cuda`
+for the GPU).
 
 ## How it behaves
 

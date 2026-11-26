@@ -363,6 +363,13 @@ found traps it had not predicted, and the predicted ones were mostly real.
   not include it.
 - **Second passes are part of the model.** EasyOCR re-runs low-contrast crops and keeps the better
   read.
+- **The decode runs where upstream's runs, and PixelFlow's rounding hides it when it doesn't.**
+  DEIM's upstream decodes (sigmoid, top-k) on the device its network ran on; mozo's adapter copied
+  the raw outputs to the host first. CUDA's `sigmoid` is not the CPU's in the last bit (about a
+  quarter of the 24,000 logits per image, up to 6e-08), so the 300 scores differed on every image
+  and on one the top-k order changed too -- yet the gate's mozo check, which compared PixelFlow's
+  rows (two or three decimals), passed every one. Compare the arrays the adapter hands to
+  `pf.detections.from_arrays` exactly (spy on it), not only the rows it gives back.
 
 - **`torchvision.ops.batched_nms` separates classes by `max + 1`.** For up to 1,000 boxes on the
   CPU it offsets each class by the largest coordinate plus one, which stops separating once boxes

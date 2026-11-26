@@ -282,12 +282,12 @@ def test_several_prompt_sets_run_in_one_call():
     assert masks.shape[0] == 2 and iou.shape[0] == 2
 
 
-def test_the_video_machinery_is_left_behind():
-    """Memory attention and mask-memory fusion have nothing to attend to on a still image."""
-    for key in ("tracker.transformer.", "tracker.maskmem_backbone.", "tracker.obj_ptr_proj."):
-        assert loader._skipped(f"{key}weight")
-    for key in ("tracker.sam_prompt_encoder.", "tracker.sam_mask_decoder.", "tracker.no_mem_embed"):
-        assert not loader._skipped(key), "the click path itself must survive the filter"
+def test_the_click_head_takes_only_the_click_path():
+    """The tracker section is shared with the video tracker; the click head takes its half."""
+    for key in ("sam_prompt_encoder.x", "sam_mask_decoder.x", "no_mem_embed"):
+        assert key.startswith(loader.CLICK_KEYS)
+    for key in ("transformer.x", "maskmem_backbone.x", "obj_ptr_proj.x", "no_mem_pos_enc"):
+        assert not key.startswith(loader.CLICK_KEYS)
 
 
 @pytest.mark.parametrize("meta,ours", [

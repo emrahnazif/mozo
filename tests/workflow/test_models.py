@@ -349,7 +349,11 @@ class TestEveryPromptedNodeIsMarked:
             pass
 
         class Recording:
-            """Whatever the node calls -- ``predict``, ``cutout`` -- records and stops."""
+            """Whatever the node calls -- ``predict``, ``cutout`` -- records and stops. A tracker
+            node asks for a session first; the session is this same recorder."""
+
+            def tracker(self):
+                return self
 
             def __getattr__(self, method):
                 def record(*args, **kwargs):
@@ -374,10 +378,10 @@ class TestEveryPromptedNodeIsMarked:
             [name] = marked
             assert given_to_model["text"] == list(arguments[name])
 
-    def test_the_five_that_take_text_are_marked(self):
+    def test_the_six_that_take_text_are_marked(self):
         marked = sorted(spec.name for spec in _model_nodes()
                         if any(p.prompts for p in spec.parameters))
-        assert marked == ["clip", "grounding_dino", "owlv2", "sam3", "siglip2"]
+        assert marked == ["clip", "grounding_dino", "owlv2", "sam3", "sam3_track", "siglip2"]
 
 
 class TestPromptList:

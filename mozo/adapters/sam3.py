@@ -33,15 +33,16 @@ from ..image import load_image
 from ..runtimes import CoreMLRunner, get_default_device, select_runtime
 from ..vendors.sam3_deploy import Segmenter
 from ..weights import artifacts, framework_of, resolve
+from ..vendors.sam3_deploy.tracker.session import split_prompts
 from ._prepare import Preparing
-from ._promptable import candidates
+from ._promptable import bounds, candidates, names_for
 
 try:
     import pixelflow as pf
 except ImportError:
     raise ImportError("PixelFlow is not installed. Install it with: pip install pixelflow") from None
 
-__all__ = ["CLICK_LEVELS", "GraphVision", "LEVELS", "Sam3Predictor"]
+__all__ = ["CLICK_LEVELS", "GraphVision", "LEVELS", "Sam3Predictor", "Sam3Tracker"]
 
 #: The family this adapter serves, as the registry and the manifest name it.
 FAMILY = "sam3"
@@ -294,3 +295,121 @@ class Sam3Predictor(Preparing):
             masks=joined(masks),
             labels=prompts,
         )
+
+    def tracker(self) -> "Sam3Tracker":
+        """Start following concepts -- or clicked objects -- through a video, one frame at a time.
+
+        A new, empty session on this loaded model. Give it phrases on the first frame and it finds
+        every instance of each on every frame, starting new objects as they appear; or give it
+        clicks or boxes on the first frame and it follows those objects. It reads only the frames
+        before, never after, and keeps a bounded memory of them, so a long video or a camera runs
+        in constant memory. Any number of trackers can share one model; one tracker follows one
+        stream and is not safe to call from two threads at once.
+
+        Raises:
+            ValueError: If the model was loaded on a graph runtime. The graph is the image
+                encoder alone, and the tracker has been checked only against the torch encoder.
+
+        Examples:
+            >>> model = mozo.get_model("sam3")                                # doctest: +SKIP
+            >>> tracker = model.tracker()                                     # doctest: +SKIP
+            >>> for frame in pf.VideoReader("street.mp4"):                    # doctest: +SKIP
+            ...     found = tracker.update(frame, text="person")
+        """
+        if self._segmenter.tracker_net is None or self.runtime != "torch-fp32":
+            raise ValueError(
+                f"SAM 3's tracker runs on torch-fp32 only; this model was loaded on "
+                f"{self.runtime}. Load it with runtime='torch-fp32' to track."
+            )
+        return Sam3Tracker(self._segmenter.tracker())
+
+
+class Sam3Tracker:
+    """One SAM 3 tracking session over one stream of frames. Made by :meth:`Sam3Predictor.tracker`.
+
+    A session tracks phrases or clicked objects, decided by its first call. Phrases: every
+    instance of each phrase is found on every frame and followed, new instances get new ids as
+    they appear, and ones SAM 3 judges spurious soon after appearing are dropped. Clicks or boxes:
+    each prompt on the first frame starts one object, followed as SAM 2's tracker follows it, with
+    SAM 3's weights. The frames are taken in order and only forward.
+
+    **The weights are not Apache-2.0** -- see :class:`Sam3Predictor`.
+    """
+
+    def __init__(self, session: Any) -> None:
+        self._session = session
+        self._texts: list[str] | None = None
+        #: What to call each clicked object, by object id; ``None`` where no name was given.
+        self._names: list[str | None] = []
+
+    def update(
+        self,
+        image: Union[str, Path, bytes, np.ndarray],
+        text: Union[str, Sequence[str], None] = None,
+        *,
+        points: Any = None,
+        labels: Any = None,
+        boxes: Any = None,
+        name: Union[str, Sequence[str], None] = None,
+    ) -> "pf.detections.Detections":
+        """Follow every object onto the next frame.
+
+        Args:
+            image: The next frame: a file path, encoded image bytes, or an ``HxWx3`` RGB ``uint8``
+                array. Every frame must be the size of the first.
+            text: On the first call, one concept as a noun phrase or several; each is tracked on
+                its own, sharing the frame's image encode. Later calls may repeat the same phrases
+                (so a loop can pass them every time) or pass nothing.
+            points: ``(N, 2)`` or ``(B, N, 2)`` x, y clicks in the frame's own pixels -- first call
+                only.
+            labels: ``(N,)`` or ``(B, N)``, 1 to include and 0 to exclude.
+            boxes: ``(4,)`` or ``(B, 4)`` x1, y1, x2, y2 in the frame's own pixels.
+            name: What to call the clicked objects: one name, or one per prompt.
+
+        Returns:
+            A PixelFlow ``Detections`` with one row per object shown on this frame, in object
+            order. ``tracker_id`` is the object's id: 0, 1, 2… in the order objects first appear,
+            across all phrases, never reused. ``class_id`` and ``class_name`` are the phrase's
+            index and the phrase (for a click session, the prompt's index and its ``name``).
+            ``confidence`` is SAM 3's probability that the object is visible on this frame (on the
+            frame a phrase's object first appears, its detection score). The mask is at the
+            frame's own size, with its tight box. An object hidden on a frame has no row and comes
+            back under the same id.
+
+        Raises:
+            ValueError: If the first call has no prompt; a session is given both a phrase and
+                clicks; a later call brings a different phrase, or clicks; a phrase is empty; a
+                frame's size differs from the first's; points arrive without labels; or *name*
+                does not give one name per prompt.
+        """
+        texts = None
+        if text is not None:
+            texts = [text] if isinstance(text, str) else list(text)
+            if not texts:
+                raise ValueError("SAM 3 needs a concept to look for; no text was given.")
+            if any(not t.strip() for t in texts):
+                raise ValueError("SAM 3 needs a concept to look for; text was empty.")
+            if self._texts is not None and texts == self._texts:
+                texts = None
+        prompts = split_prompts(points, labels, boxes)
+        names = names_for(name, len(prompts))
+        pixels = load_image(image)
+        frame = self._session.update(pixels, texts=texts, prompts=prompts or None)
+        if texts is not None:
+            self._texts = texts
+        self._names.extend(names)
+
+        found = pf.Detections()
+        masks = frame.masks.numpy()
+        for row, obj_id in enumerate(frame.obj_ids):
+            index = frame.prompts[row]
+            label = self._texts[index] if self._texts is not None else self._names[index]
+            found.add_detection(pf.Detection(
+                bbox=bounds(masks[row][None])[0].tolist(),
+                masks=[masks[row]],
+                class_id=index,
+                class_name=label,
+                confidence=float(frame.scores[row]),
+                tracker_id=obj_id,
+            ))
+        return found

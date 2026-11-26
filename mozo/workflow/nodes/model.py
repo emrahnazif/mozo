@@ -251,6 +251,24 @@ def sam2_track(image: Image, detections: Detections, models: Models, state: Stat
     return found
 
 
+@node(category="Track", ordered=True)
+def sam3_track(image: Image, models: Models, state: State, text: Prompts = ["person"],
+               variant: variants("sam3") = "sam3") -> Detections:
+    """SAM 3 by Meta -- follow every instance of a concept through a video, a mask on every frame.
+
+    Finds every instance of each phrase on the first frame, then follows them frame by frame from
+    its memory of the frames before, starting new objects as new instances appear and dropping
+    ones it judges spurious within their first fifteen frames. Each object keeps its
+    ``tracker_id`` for the whole run; ``class_id`` is its phrase's index and ``class_name`` the
+    phrase; ``confidence`` is SAM 3's probability that the object is visible. SAM 3 is the
+    detector, so nothing is wired in. Every frame costs a detector pass plus a pass of the tracker
+    per object. The weights carry the SAM License.
+    """
+    if "tracker" not in state:
+        state["tracker"] = models("sam3", variant).tracker()
+    return state["tracker"].update(image, text=prompt_list(text))
+
+
 @node(category="Segment", exclusive=True)
 def sam3_boxes(image: Image, detections: Detections, models: Models,
                variant: variants("sam3") = "sam3") -> Detections:

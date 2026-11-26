@@ -336,7 +336,8 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         'description': (
             'SAM 3 by Meta — promptable concept segmentation. Name a thing in words and it '
             'returns every instance of it, with a mask, a box and a score; or click a point or '
-            'draw a box and it returns the one thing you pointed at, as SAM 2 does. One '
+            'draw a box and it returns the one thing you pointed at, as SAM 2 does; or name it '
+            'once and it follows every instance through a video (tracker()). One '
             'published model, so one variant. Unlike every other family here the weights are neither Apache-2.0 '
             'nor AGPL: they carry Meta\'s SAM License, which restricts what they may be used '
             'for and binds whoever you serve predictions to. See the NOTICE published beside '

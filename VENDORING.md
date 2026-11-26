@@ -372,6 +372,16 @@ Reproduce them, and record them:
 - **A third-party remote-code file can carry a newer upstream than the checkpoint.** BiRefNet's
   GitHub `main` routes Swin attention through SDPA where the Hugging Face remote code beside the
   weights runs it eagerly. Gate against the code the model card loads.
+- **A defensive `.float()` before the last step is a half-precision divergence.** BiRefNet's
+  vendored postprocess took `logits.float().sigmoid()`; upstream takes the sigmoid of the float16
+  logits that autocast or `.half()` hands back, in float16, and truncates that. Invisible on the
+  CPU in float32; on CUDA under autocast it moved up to 1.5M alpha pixels of one photograph by 1 or
+  2 grey levels, and none at all on a nearly saturated one. Keep the dtype upstream keeps, and
+  falsify the last steps on an image with a soft matte.
+- **cuDNN's TF32 flag is on by default and matmul's is off.** Swin is all matmuls, so in fp32
+  BiRefNet's backbone runs full float32 while its convolutions run TF32 (except the patch
+  embedding: cuDNN gives a 3-channel 4x4 conv no TF32 kernel). Both sides under the same defaults
+  match; flipping either flag is a falsifier the GPU gate catches.
 
 ### Export traps (custom operators)
 

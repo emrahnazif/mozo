@@ -6,9 +6,10 @@
   times faster), `matting` (soft alpha along hair and fur) and `hr` (2048x2048, for large
   photographs). It returns what BEN2 returns -- `predict` an `HxW` alpha, `cutout` an RGBA image,
   `refine=True` to remove colour fringes -- and has a `birefnet` workflow node. The alpha is the
-  model's own probability, not stretched per image. Bit-identical to the authors' code on the CPU.
-  On CUDA, `auto` runs it in half precision (the authors' own way, the same accuracy on their
-  validation sets), or through an fp32 TensorRT engine when TensorRT 11 is installed;
+  model's own probability, not stretched per image. Bit-identical to the authors' code on CUDA
+  (RTX 3060, torch 2.13, CUDA 12.6) in fp32 and in fp16, and on the CPU in fp32. On CUDA, `auto`
+  runs it under float16 autocast (the same accuracy on the authors' validation sets), or through
+  an fp32 TensorRT engine when TensorRT 11 is installed;
   `runtime="tensorrt-fp16"` is 2.2 to 3.9 times faster than fp32. See the family's page.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when

@@ -35,9 +35,10 @@ class Predictor:
         model: The underlying :class:`~.network.BiRefNet`, in eval mode.
         resolution: The square side images are resized to.
         device: Where the weights live.
-        dtype: The compute dtype. Parity is claimed for ``float32`` on CPU and nothing else.
-        autocast: Run the network under torch's float16 autocast -- the authors' own CUDA
-            examples run in half precision. Off by default; not covered by the parity claim.
+        dtype: The compute dtype. ``float16`` is the authors' own CUDA path (``model.half()``).
+        autocast: Run the network under torch's float16 autocast, mozo's ``torch-fp16``. Off by
+            default. Parity is claimed for ``float32`` on CPU and CUDA and for this autocast on
+            CUDA, each against upstream run the same way (``tools/verify/birefnet.py``).
     """
 
     def __init__(self, model: BiRefNet, device: str | torch.device = "cpu",

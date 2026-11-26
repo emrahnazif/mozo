@@ -117,6 +117,11 @@ class TestPrePost:
         out = postprocess(torch.zeros(1, 1, 4, 4), (4, 4))
         assert out.dtype == np.uint8 and np.all(out == 127)
 
+    def test_postprocess_keeps_float16_logits_in_float16(self):
+        # Upstream's sigmoid runs in the logits' dtype: float16 here gives 19, float32 gives 18.
+        out = postprocess(torch.full((1, 1, 4, 4), -2.51953125, dtype=torch.float16), (4, 4))
+        assert np.all(out == 19)
+
     def test_postprocess_returns_the_requested_size(self):
         assert postprocess(torch.zeros(1, 1, 8, 8), (3, 5)).shape == (3, 5)
         assert postprocess(torch.zeros(1, 1, 8, 8), (1, 1)).shape == (1, 1)

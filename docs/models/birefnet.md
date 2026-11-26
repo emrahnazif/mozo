@@ -106,14 +106,17 @@ for `matting`. S-measure is higher-better, MAE lower-better.
 | `matting` | 241 ms | 142 ms | 184 ms | 67 ms | 0.980 / 0.005 |
 | `hr` | 875 ms | 498 ms | not offered | 224 ms | 0.923 / 0.027 |
 
-No runtime moved either number by more than 0.0003. TensorRT fp32 changes the alpha by at most 2
+No runtime moved either number by more than 0.0003. The torch fp16 figures were measured before
+the 2026-11-26 postprocess fix, which moves its alpha by at most 2 grey levels; re-measuring them
+is open. TensorRT fp32 changes the alpha by at most 2
 grey levels; the fp16 runtimes move individual edge pixels further, by up to 254 grey levels on a handful of
 pixels, without moving the averages.
 
 - **On CUDA with TensorRT 11 installed**, `auto` runs `tensorrt-fp32`, built on first load from the
   published ONNX graph (two to five minutes, then cached). For `hr`, whose fp32 engine needs 12 GB
   of scratch memory and is slower than torch in half precision, it runs `torch-fp16`.
-- **On CUDA without TensorRT**, `auto` runs `torch-fp16`, the authors' own way of running it.
+- **On CUDA without TensorRT**, `auto` runs `torch-fp16`: the network under float16 autocast.
+  (The authors' own examples call `model.half()` instead, a different computation.)
 - **`runtime="tensorrt-fp16"`** is the fastest, 2.2 to 3.9 times torch fp32. `auto` never picks it.
 - **On the CPU**, `auto` runs torch, the exact one. `runtime="onnx-fp32"` (with
   `pip install 'mozo[onnx]'`) was 2.4 to 2.9 times faster on a shared 20-thread machine: 3.2 s
@@ -125,9 +128,11 @@ for `hr`: 9.3 GB on torch fp32, 8.8 GB in fp16, 6.1 GB for the fp16 engine.
 
 ### Parity
 
-On the CPU in float32, mozo reproduces the authors' code bit for bit at every stage, for every
-variant. The authors' examples run in float16 on CUDA, which is a different computation and is not
-claimed.
+mozo reproduces the authors' code bit for bit at every stage, for every variant, on CUDA in
+float32 and in `torch-fp16` (RTX 3060, torch 2.13, CUDA 12.6), and on the CPU in float32. The fp16
+comparison runs the authors' code under the same float16 autocast mozo uses; their own examples
+call `model.half()`, which is a different computation. TensorRT and ONNX Runtime use other kernels
+and are measured, not claimed exact.
 
 ## Weights and licence
 

@@ -71,7 +71,10 @@ def postprocess(logits: torch.Tensor, size: tuple[int, int]) -> np.ndarray:
     255 means "certainly foreground" in every image (unlike BEN2's default). For the segmentation
     checkpoints it is close to binary; for ``matting`` it is a soft alpha.
     """
-    small = logits.float().sigmoid().cpu()[0].squeeze()
+    # Upstream's order and dtype: the sigmoid on the logits' own device and in their own dtype
+    # (float16 under autocast or ``.half()``), then ToPILImage's ``mul(255).byte()`` on the host.
+    # A float32 sigmoid of float16 logits moves pixels by a grey level.
+    small = logits.sigmoid().cpu()[0].squeeze()
     small = small.mul(255).byte().numpy()
     height, width = size
     return np.asarray(Image.fromarray(small, mode="L").resize((width, height), resample=Image.BICUBIC))

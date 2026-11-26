@@ -4,6 +4,7 @@
     python tools/verify/birefnet.py general --weights weights/birefnet/general/<rev>
     python tools/verify/birefnet.py lite --weights ... --images /path/to/photos
     python tools/verify/birefnet.py general --weights ... --no-falsify
+    python tools/verify/birefnet.py general --weights ... --device cuda --reference-cache /tmp/ref
 
 Needs, beside mozo: ``transformers``, ``timm``, ``einops``, ``kornia`` and ``safetensors``
 (upstream's remote code imports all of them) and the Hub, or an ``HF_HOME`` that already holds
@@ -29,18 +30,31 @@ Checks, in increasing strength:
 
 Every comparison is ``torch.equal`` / ``np.array_equal``: this is an extraction.
 
-**The reference is pinned to CPU, float32 and eager attention.** ``from_pretrained`` is given
+**Device and precision.** ``--device cpu`` (the default) gates float32 on the CPU. ``--device
+cuda`` gates, on the GPU, every precision a CUDA torch runtime of mozo uses: ``fp32``
+(``torch-fp32``) and ``fp16`` (``torch-fp16``, which ``auto`` picks on CUDA without TensorRT, and
+always for ``hr``) -- float16 **autocast** around the network, mozo's mechanism. ``--dtype``
+picks one. ``--dtype half`` gates the authors' own CUDA path instead, which no mozo runtime uses:
+the model card's and ``handler.py``'s ``model.half()`` and ``input.half()``, against
+``Predictor(dtype=torch.float16)``. Both sides always run in this one process, on the same device,
+under the same precision mechanism, with torch's global settings (TF32, cuDNN) as mozo leaves
+them: nothing is flipped to get a match. ``--repeat`` (2 on CUDA) runs each side that many times
+per image and requires every run byte-identical to the first.
+
+**The reference is pinned to float32 weights and eager attention.** ``from_pretrained`` is given
 ``dtype=torch.float32``: transformers 5 defaults to ``dtype="auto"``, which loads the
 float16-stored checkpoints (``general``, ``hr``) as a float16 model. The upstream module's own
 ``SDPA_enabled`` is ``False``. Parameters are cloned after loading so both sides compute from
 freshly allocated tensors (``VENDORING.md`` §4). Run with ``MKL_CBWR=AVX2,STRICT`` when the two
-sides run in different processes; here they share one.
+sides run in different processes; here they share one. ``handler.py``'s
+``torch.set_float32_matmul_precision('high')`` is not applied to either side: mozo never sets it.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -61,6 +75,7 @@ from fetch.birefnet import CHECKPOINTS, TRAINING_ONLY  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.vendors.birefnet_deploy import MODEL_SPECS, Predictor  # noqa: E402
 from mozo.vendors.birefnet_deploy import blocks, image as vendor_image, network, swin  # noqa: E402
+from mozo.vendors.birefnet_deploy import predictor as vendor_predictor  # noqa: E402
 
 VENDOR = ROOT / "mozo" / "vendors" / "birefnet_deploy"
 ALLOWED_THIRD_PARTY = {"torch", "torchvision", "numpy", "cv2", "PIL"}
@@ -71,6 +86,10 @@ ALLOWED_THIRD_PARTY = {"torch", "torchvision", "numpy", "cv2", "PIL"}
 STAGES = (swin.PatchEmbed, swin.SwinTransformerBlock, swin.PatchMerging, torch.nn.LayerNorm,
           blocks.DeformableConv2d, blocks.ASPPDeformable, blocks.BasicDecBlk, blocks.BasicLatBlk,
           blocks.SimpleConvs, torch.nn.Sequential)
+
+#: Precision -> how both sides run. ``fp16`` is mozo's ``torch-fp16`` runtime (autocast around the
+#: network); ``half`` is upstream's own ``model.half()`` path, gated only on request.
+PRECISIONS = ("fp32", "fp16", "half")
 
 
 # --------------------------------------------------------------------------------------------
@@ -108,8 +127,9 @@ def check_rewrite() -> list[tuple[str, bool]]:
 # --------------------------------------------------------------------------------------------
 # the reference
 
-def load_upstream(variant: str):
-    """Upstream's model at the pinned commit, float32, parameters re-allocated; and its files."""
+def load_upstream(variant: str, device: str = "cpu"):
+    """Upstream's model at the pinned commit, float32, parameters re-allocated, on *device*; and
+    its files."""
     from huggingface_hub import hf_hub_download
     from transformers import AutoModelForImageSegmentation
 
@@ -119,6 +139,7 @@ def load_upstream(variant: str):
     with torch.no_grad():
         for tensor in list(model.parameters()) + list(model.buffers()):
             tensor.data = tensor.data.clone()
+    model.to(device)
     safetensors = hf_hub_download(repo, "model.safetensors", revision=commit)
     handler = hf_hub_download(repo, "handler.py", revision=commit)
     return model, safetensors, handler
@@ -143,8 +164,14 @@ def handler_functions(path: str) -> dict:
     return scope
 
 
-def upstream_pipeline(model, rgb: np.ndarray, resolution: int, refine_fn):
-    """The model card's snippet and ``handler.py``'s refine, run as upstream runs them."""
+def upstream_pipeline(model, rgb: np.ndarray, resolution: int, refine_fn, device: str = "cpu",
+                      precision: str = "fp32"):
+    """The model card's snippet and ``handler.py``'s refine, run as upstream runs them.
+
+    The transforms run on the host and the tensor moves to *device* afterwards, as in the card;
+    ``half`` casts it as the card does (``.to('cuda').half()``), ``fp16`` runs the forward under
+    autocast. The sigmoid runs where the logits are, in their dtype, before ``.cpu()``.
+    """
     from torchvision import transforms
 
     image = Image.fromarray(rgb)
@@ -153,29 +180,36 @@ def upstream_pipeline(model, rgb: np.ndarray, resolution: int, refine_fn):
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
     pixels = transform(image).unsqueeze(0)
-    with torch.no_grad():
-        logits = model(pixels)[-1]
+    x = pixels.to(device)
+    if precision == "half":
+        x = x.half()
+    with torch.no_grad(), torch.autocast(torch.device(device).type, dtype=torch.float16,
+                                         enabled=precision == "fp16"):
+        logits = model(x)[-1]
     pred_pil = transforms.ToPILImage()(logits.sigmoid().cpu()[0].squeeze())
     mask = pred_pil.resize(image.size)
     plain = image.copy()
     plain.putalpha(mask)
     refined = refine_fn(image, pred_pil)
     refined.putalpha(pred_pil.resize(image.size))
-    return pixels, logits, np.asarray(mask), np.asarray(plain), np.asarray(refined)
+    return pixels, logits.cpu(), np.asarray(mask), np.asarray(plain), np.asarray(refined)
 
 
 # --------------------------------------------------------------------------------------------
 # 4
 
 def record(model, names: set[str]):
-    """Hook every module in *names*; return (outputs by name in call order, remove)."""
+    """Hook every module in *names*; return (outputs by name in call order, remove).
+
+    Each output is copied to the host when it is produced: a snapshot no later in-place op can
+    touch, and GPU memory stays free for ``hr``'s 2048x2048 activations."""
     seen: dict[str, list] = {}
     handles = []
     for name, module in model.named_modules():
         if name in names:
             handles.append(module.register_forward_hook(
                 lambda m, i, o, name=name: seen.setdefault(name, []).append(
-                    o[0] if isinstance(o, tuple) else o)))
+                    (o[0] if isinstance(o, tuple) else o).detach().to("cpu", copy=True))))
     return seen, lambda: [h.remove() for h in handles]
 
 
@@ -184,42 +218,108 @@ def stage_names(ours) -> list[str]:
             if name and isinstance(module, STAGES)]
 
 
-def compare(variant, upstream, ours, rgb, refine_fn, names) -> list[tuple[str, bool, str]]:
-    """Every stage for one image: (stage, equal, detail)."""
-    resolution = MODEL_SPECS[variant].resolution
-    up_seen, remove = record(upstream, set(names))
-    up_pixels, up_logits, up_mask, up_plain, up_refined = upstream_pipeline(
-        upstream, rgb, resolution, refine_fn)
-    remove()
+#: ``--swap-models``: the two networks, of which only the one running stays on the GPU. ``hr``
+#: needs 9.3 GB for one 2048x2048 forward and does not fit on a 12 GB card beside a second Swin-L.
+RESIDENT: dict = {}
 
-    rows = []
-    pixels = vendor_image.preprocess(rgb, resolution)
-    rows.append(("pixels", torch.equal(pixels, up_pixels), ""))
 
-    our_seen, remove = record(ours.model, set(names))
-    with torch.inference_mode():
-        logits = ours.model(pixels)
-    remove()
+def resident(model) -> None:
+    """Park every other registered network on the host and bring *model* to the GPU."""
+    if not RESIDENT:
+        return
+    for other in RESIDENT.values():
+        if other is not model:
+            other.to("cpu")
+    # The parked network's blocks go back to the driver: a 2048 forward wants 3.75 GB in one
+    # piece, which the allocator's cached fragments cannot supply.
+    torch.cuda.empty_cache()
+    model.to("cuda")
+
+
+def run_upstream(upstream, rgb, resolution, refine_fn, device, precision, names):
+    """One upstream pass with every stage recorded: (outputs by name, pipeline results)."""
+    resident(upstream)
+    seen, remove = record(upstream, set(names))
+    try:
+        return seen, upstream_pipeline(upstream, rgb, resolution, refine_fn, device, precision)
+    finally:
+        remove()
+
+
+def run_ours(ours, rgb, names):
+    """One pass through mozo's own ``Predictor.logits`` -- the production call, autocast and
+    device placement included -- with every stage recorded: (outputs, host logits, alpha).
+
+    The alpha is post-processed from the logits where they were produced, as ``matte`` does."""
+    resident(ours.model)
+    seen, remove = record(ours.model, set(names))
+    try:
+        logits = ours.logits(rgb)
+    finally:
+        remove()
+    return seen, logits.cpu(), vendor_image.postprocess(logits, rgb.shape[:2])
+
+
+def stage_diff(names, a_seen, b_seen) -> tuple[int, int, str]:
+    """(calls compared, mismatches, first mismatching stage) between two recordings."""
     calls = mismatched = 0
     first = ""
     for name in names:
-        for a, b in zip(our_seen.get(name, []), up_seen.get(name, [])):
+        for a, b in zip(a_seen.get(name, []), b_seen.get(name, [])):
             calls += 1
-            if a.shape != b.shape or not torch.equal(a, b):
+            if a.shape != b.shape or a.dtype != b.dtype or not torch.equal(a, b):
                 mismatched += 1
                 first = first or name
-        if len(our_seen.get(name, [])) != len(up_seen.get(name, [])):
+        if len(a_seen.get(name, [])) != len(b_seen.get(name, [])):
             mismatched += 1
             first = first or f"{name} (call count)"
-    rows.append((f"{calls} module outputs", mismatched == 0,
-                 f"first: {first}" if mismatched else ""))
-    del our_seen, up_seen
+    return calls, mismatched, first
 
-    rows.append(("logits", torch.equal(logits, up_logits), ""))
-    alpha = vendor_image.postprocess(logits, rgb.shape[:2])
-    rows.append(("alpha", np.array_equal(alpha, up_mask), ""))
-    rows.append(("cutout", np.array_equal(ours.cutout(rgb), up_plain), ""))
-    rows.append(("cutout refine", np.array_equal(ours.cutout(rgb, refine=True), up_refined), ""))
+
+def tensors_equal(a, b) -> bool:
+    return a.shape == b.shape and a.dtype == b.dtype and torch.equal(a, b)
+
+
+def compare(variant, upstream, ours, rgb, refine_fn, names, device="cpu", precision="fp32",
+            repeat=1) -> list[tuple[str, bool, str, int]]:
+    """Every stage for one image: (stage, equal, detail, comparisons).
+
+    With *repeat* > 1 each side runs that many times and every later run must equal its first,
+    stage by stage: the determinism check (``VENDORING.md`` §2.7)."""
+    resolution = MODEL_SPECS[variant].resolution
+    up_seen, (up_pixels, up_logits, up_mask, up_plain, up_refined) = run_upstream(
+        upstream, rgb, resolution, refine_fn, device, precision, names)
+
+    rows = []
+    pixels = vendor_image.preprocess(rgb, resolution)
+    rows.append(("pixels", torch.equal(pixels, up_pixels), "", 1))
+
+    our_seen, logits, alpha = run_ours(ours, rgb, names)
+    calls, mismatched, first = stage_diff(names, our_seen, up_seen)
+    rows.append((f"{calls} module outputs", mismatched == 0,
+                 f"first: {first}" if mismatched else "", calls))
+    rows.append(("logits", tensors_equal(logits, up_logits), "", 1))
+    rows.append(("alpha", np.array_equal(alpha, up_mask), "", 1))
+    resident(ours.model)
+    rows.append(("cutout", np.array_equal(ours.cutout(rgb), up_plain), "", 1))
+    rows.append(("cutout refine", np.array_equal(ours.cutout(rgb, refine=True), up_refined), "", 1))
+
+    for run in range(1, repeat):
+        seen, (_, again_logits, again_mask, _, _) = run_upstream(
+            upstream, rgb, resolution, refine_fn, device, precision, names)
+        calls, mismatched, first = stage_diff(names, seen, up_seen)
+        ok = mismatched == 0 and tensors_equal(again_logits, up_logits) \
+            and np.array_equal(again_mask, up_mask)
+        rows.append((f"upstream run {run + 1} = run 1", ok, f"first: {first}" if not ok else "",
+                     calls + 2))
+        del seen
+        seen, again_logits, again_alpha = run_ours(ours, rgb, names)
+        calls, mismatched, first = stage_diff(names, seen, our_seen)
+        ok = mismatched == 0 and tensors_equal(again_logits, logits) \
+            and np.array_equal(again_alpha, alpha)
+        rows.append((f"mozo run {run + 1} = run 1", ok, f"first: {first}" if not ok else "",
+                     calls + 2))
+        del seen
     return rows
 
 
@@ -237,9 +337,14 @@ def synthetic() -> list[tuple[str, np.ndarray]]:
 # --------------------------------------------------------------------------------------------
 # 5
 
-def falsify(variant, upstream, ours, rgb, refine_fn, names) -> list[tuple[str, bool, str]]:
-    """Each perturbation must make the first failing stage the one it reaches."""
+def falsify(variant, upstream, ours, rgb, refine_fn, names, device="cpu", precision="fp32",
+            cache: Path | None = None) -> list[tuple[str, bool, str]]:
+    """Each perturbation must make the first failing stage the one it reaches.
+
+    The reference never changes between perturbations, so it is computed once -- or read from
+    *cache*, written the first time, keyed by variant, device, precision, image and versions."""
     import torch.nn.functional as F
+    import torchvision
 
     def set_attr(obj, name, value):
         original = getattr(obj, name)
@@ -252,24 +357,43 @@ def falsify(variant, upstream, ours, rgb, refine_fn, names) -> list[tuple[str, b
             setattr(m, attr, change(v))
         return lambda: [setattr(m, attr, v) for m, v in touched]
 
+    def flag(obj, name, value):
+        return set_attr(obj, name, value)
+
     real_patches, real_resize = network.image2patches, network._resize
     real_deform = blocks.DeformableConv2d.deform
     real_postprocess = vendor_image.postprocess
+    real_preprocess = vendor_predictor.preprocess
     resolution = MODEL_SPECS[variant].resolution
 
     def rounded_postprocess(logits, size):
-        small = (logits.float().sigmoid()[0].squeeze() * 255).round().byte().numpy()
+        small = (logits.sigmoid().cpu()[0].squeeze() * 255).round().byte().numpy()
         return np.asarray(Image.fromarray(small, mode="L").resize(size[::-1], Image.BICUBIC))
 
-    cases = (
+    def float32_postprocess(logits, size):  # the branch's postprocess before the GPU gate
+        small = logits.float().sigmoid().cpu()[0].squeeze().mul(255).byte().numpy()
+        return np.asarray(Image.fromarray(small, mode="L").resize(size[::-1], Image.BICUBIC))
+
+    def half_model():
+        """Upstream's ``.half()`` in place of mozo's autocast, on mozo's side only. The float32
+        weights are restored from a copy: ``.float()`` would not undo the rounding."""
+        saved = {k: v.clone() for k, v in ours.model.state_dict().items()}
+        ours.model.half()
+        state = (ours.dtype, ours.autocast)
+        ours.dtype, ours.autocast = torch.float16, False
+
+        def restore():
+            ours.model.float().load_state_dict(saved)
+            ours.dtype, ours.autocast = state
+        return restore
+
+    cases = [
         ("normalisation mean 0.485 -> 0.486", "pixels",
          lambda: set_attr(vendor_image, "MEAN", (0.486, 0.456, 0.406))),
         ("resize BILINEAR -> BICUBIC", "pixels",
          lambda: set_attr(Image, "BILINEAR", Image.BICUBIC)),
         (f"resolution {resolution} -> {resolution + 32}", "pixels",
          lambda: set_attr(ours, "resolution", resolution + 32)),
-        ("Swin attention scale x 1.0000001", "bb.layers.0.blocks.0.norm2",
-         lambda: each(swin.WindowAttention, "scale", lambda s: s * 1.0000001)),
         ("LayerNorm eps 1e-5 -> 1e-6", "bb.patch_embed.norm",
          lambda: each(torch.nn.LayerNorm, "eps", lambda e: 1e-6)),
         ("image2patches order (c, wg, hg)", "decoder.ipt_blk5",
@@ -284,34 +408,73 @@ def falsify(variant, upstream, ours, rgb, refine_fn, names) -> list[tuple[str, b
         ("modulator 2*sigmoid -> sigmoid", "squeeze_module.0.dec_att.aspp1.atrous_conv",
          lambda: set_attr(blocks.DeformableConv2d, "deform",
                           lambda self, x, o, m: real_deform(self, x, o, m / 2))),
-        ("BatchNorm eps 1e-5 -> 1e-4", "squeeze_module.0.dec_att.aspp1.atrous_conv",
-         lambda: each(torch.nn.BatchNorm2d, "eps", lambda e: 1e-4)),
         ("alpha truncation -> rounding", "alpha",
          lambda: set_attr(vendor_image, "postprocess", rounded_postprocess)),
         ("refine radius 90 -> 91", "cutout refine",
          lambda: set_attr(vendor_image.refine_foreground, "__defaults__", (91,))),
-    )
+    ]
+    if precision == "fp32":
+        # Below float16's resolution: a relative change of 1e-7 rounds away in a float16 product,
+        # and BatchNorm runs in float16 under autocast, where eps 1e-4 vs 1e-5 is lost the same
+        # way. The float16 run replaces them with the two float16-specific cases below.
+        cases += [
+            ("Swin attention scale x 1.0000001", "bb.layers.0.blocks.0.norm2",
+             lambda: each(swin.WindowAttention, "scale", lambda s: s * 1.0000001)),
+            ("BatchNorm eps 1e-5 -> 1e-4", "squeeze_module.0.dec_att.aspp1.atrous_conv",
+             lambda: each(torch.nn.BatchNorm2d, "eps", lambda e: 1e-4)),
+        ]
+    if precision == "fp16":
+        cases += [
+            ("sigmoid in float32 (pre-GPU-gate postprocess)", "alpha",
+             lambda: set_attr(vendor_image, "postprocess", float32_postprocess)),
+            ("upstream's .half() instead of autocast", "bb.patch_embed.norm",
+             half_model),
+        ]
+    if device == "cuda":
+        # The production settings, flipped: each changes the kernels on the GPU only.
+        cases += [
+            ("input channels-last (cuDNN layout)", "bb.patch_embed.norm",
+             lambda: set_attr(vendor_predictor, "preprocess", lambda *a, **k: real_preprocess(
+                 *a, **k).contiguous(memory_format=torch.channels_last))),
+        ]
+        if precision == "fp32":
+            # The patch embedding's 4x4 conv over 3 channels gets no TF32 kernel from cuDNN, and
+            # Swin is all matmuls, so cuDNN's TF32 first shows in the first decoder convolution.
+            cases += [
+                ("cuDNN TF32 off (production: on)", "squeeze_module.0.dec_att.aspp1.atrous_conv",
+                 lambda: flag(torch.backends.cudnn, "allow_tf32", False)),
+                ("matmul TF32 on (production: off)", "bb.layers.0.blocks.0.norm2",
+                 lambda: flag(torch.backends.cuda.matmul, "allow_tf32", True)),
+            ]
 
-    # The reference is perturbation-free, so it is computed once.
-    up_seen, remove = record(upstream, set(names))
-    up = upstream_pipeline(upstream, rgb, resolution, refine_fn)
-    remove()
+    image_key = hashlib.sha256(rgb.tobytes()).hexdigest()[:12]
+    path = cache and cache / (f"{variant}-{device}-{precision}-{image_key}-torch{torch.__version__}"
+                              f"-tv{torchvision.__version__}.pt")
+    if path and path.exists():
+        up_seen, up = torch.load(path, weights_only=False)
+        print(f"    reference read from {path}")
+    else:
+        up_seen, up = run_upstream(upstream, rgb, resolution, refine_fn, device, precision, names)
+        if path:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save((up_seen, up), path)
+            print(f"    reference written to {path}")
 
     def observe() -> tuple[str, str]:
         pixels = vendor_image.preprocess(rgb, ours.resolution)
         if pixels.shape != up[0].shape or not torch.equal(pixels, up[0]):
             return "pixels", "shape" if pixels.shape != up[0].shape else \
                 f"{(pixels - up[0]).abs().max().item():.1e}"
-        our_seen, remove = record(ours.model, set(names))
-        with torch.inference_mode():
-            logits = ours.model(pixels)
-        remove()
+        our_seen, logits, alpha = run_ours(ours, rgb, names)
         # Upstream's call order, so "first" means first in the forward.
         for name in names:
             for k, (a, b) in enumerate(zip(our_seen.get(name, []), up_seen.get(name, []))):
-                if not torch.equal(a, b):
-                    return name + (" (2nd pass)" if k else ""), f"{(a - b).abs().max().item():.1e}"
-        alpha = vendor_image.postprocess(logits, rgb.shape[:2])
+                if not tensors_equal(a, b):
+                    delta = (a.float() - b.float()).abs().max().item() if a.shape == b.shape else 0
+                    return name + (" (2nd pass)" if k else ""), \
+                        f"{delta:.1e}" + ("" if a.dtype == b.dtype else f" {a.dtype}/{b.dtype}")
+        if not tensors_equal(logits, up[1]):
+            return "logits", f"{(logits.float() - up[1].float()).abs().max().item():.1e}"
         if not np.array_equal(alpha, up[2]):
             return "alpha", f"{np.abs(alpha.astype(int) - up[2]).max()}"
         from mozo.vendors.birefnet_deploy.image import refine_foreground
@@ -330,6 +493,7 @@ def falsify(variant, upstream, ours, rgb, refine_fn, names) -> list[tuple[str, b
         rows.append((label, moved == expected, f"{moved} {delta}"))
     assert network.image2patches is real_patches and network._resize is real_resize
     assert blocks.DeformableConv2d.deform is real_deform and vendor_image.postprocess is real_postprocess
+    assert vendor_predictor.preprocess is real_preprocess
     return rows
 
 
@@ -339,11 +503,31 @@ def ordered_names(ours, rgb) -> list[str]:
     order: list[str] = []
     handles = [m.register_forward_hook(lambda m, i, o, n=n: order.append(n) if n not in order else None)
                for n, m in ours.model.named_modules() if n in wanted]
-    with torch.inference_mode():
-        ours.model(vendor_image.preprocess(rgb[:64, :64], ours.resolution))
+    resident(ours.model)
+    ours.logits(rgb[:64, :64])
     for h in handles:
         h.remove()
     return order
+
+
+def environment(device: str) -> str:
+    """torch, CUDA, cuDNN, GPU, driver and the global settings both sides run under."""
+    lines = [f"torch {torch.__version__}  CUDA {torch.version.cuda}  "
+             f"cuDNN {torch.backends.cudnn.version()}"]
+    if device == "cuda":
+        import subprocess
+
+        driver = subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader",
+                                 f"--id={torch.cuda.current_device()}"],
+                                capture_output=True, text=True).stdout.strip() or "?"
+        lines.append(f"GPU {torch.cuda.get_device_name()}  driver {driver}")
+        lines.append(f"matmul allow_tf32 {torch.backends.cuda.matmul.allow_tf32}  "
+                     f"cudnn allow_tf32 {torch.backends.cudnn.allow_tf32}  "
+                     f"cudnn benchmark {torch.backends.cudnn.benchmark}  "
+                     f"cudnn deterministic {torch.backends.cudnn.deterministic}  "
+                     f"deterministic algorithms {torch.are_deterministic_algorithms_enabled()}  "
+                     f"float32 matmul precision {torch.get_float32_matmul_precision()}")
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------------------------
@@ -356,8 +540,22 @@ def main() -> int:
                         help="revision directory holding torch-fp32.pth, or the file itself")
     parser.add_argument("--images", type=Path, default=None,
                         help="directory of photographs; defaults to the shared fixtures")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--dtype", choices=PRECISIONS, action="append", default=None,
+                        help="precision(s) to gate; default fp32 on cpu, fp32 and fp16 on cuda")
+    parser.add_argument("--repeat", type=int, default=None,
+                        help="runs per side per image, all byte-identical; default 2 on cuda, 1 on cpu")
+    parser.add_argument("--reference-cache", type=Path, default=None,
+                        help="directory for the falsifiers' reference run, reused across runs")
+    parser.add_argument("--swap-models", action="store_true",
+                        help="keep only the running network on the GPU (always on for hr on cuda)")
     parser.add_argument("--no-falsify", action="store_true")
     args = parser.parse_args()
+    device = args.device
+    precisions = args.dtype or (["fp32"] if device == "cpu" else ["fp32", "fp16"])
+    # ``half`` converts both models in place, so it runs last.
+    precisions = sorted(dict.fromkeys(precisions), key=PRECISIONS.index)
+    repeat = args.repeat or (2 if device == "cuda" else 1)
 
     import torchvision
     import transformers
@@ -366,8 +564,10 @@ def main() -> int:
     print(f"variant {args.variant}: {CHECKPOINTS[args.variant].repo} @ "
           f"{CHECKPOINTS[args.variant].commit}")
     print(f"torch {torch.__version__}  torchvision {torchvision.__version__}  "
-          f"transformers {transformers.__version__}  device cpu, float32  "
+          f"transformers {transformers.__version__}  device {device}  "
+          f"precisions {', '.join(precisions)}  repeat {repeat}  "
           f"MKL_CBWR={os.environ.get('MKL_CBWR', '(unset)')}")
+    print(environment(device))
 
     problems = check_standalone()
     print(f"\n[1] standalone: {'ok' if not problems else 'FAILED'}")
@@ -379,7 +579,7 @@ def main() -> int:
 
     from safetensors.torch import load_file
 
-    upstream, safetensors, handler = load_upstream(args.variant)
+    upstream, safetensors, handler = load_upstream(args.variant, device)
     refine_fn = handler_functions(handler)["refine_foreground"]
     checkpoint = args.weights / "torch-fp32.pth" if args.weights.is_dir() else args.weights
     published = torch.load(checkpoint, map_location="cpu", weights_only=True)
@@ -389,44 +589,77 @@ def main() -> int:
                   and all(published[k].dtype == v.dtype and torch.equal(published[k], v)
                           for k, v in expected.items())
                   and len(source) - len(expected) == 12)
-    ours = Predictor.from_pretrained(args.variant, checkpoint, device="cpu")
+    base = Predictor.from_pretrained(args.variant, checkpoint, device=device)
     print(f"[3] structural: {len(published)} tensors = upstream's {len(source)} minus "
           f"{len(source) - len(expected)} training-only, dtypes kept, strict load: "
           f"{'ok' if structural else 'FAILED'}")
+    del published, source, expected
 
     paths = fixtures() if args.images is None else sorted(
         p for p in args.images.glob("*") if p.suffix.lower() in {".jpg", ".jpeg", ".png"})
     inputs = [(p.name, load_image(str(p))) for p in paths] + synthetic()
-    names = ordered_names(ours, inputs[0][1])
-
-    print(f"[4] every stage ({len(names)} stage modules):")
+    if device == "cuda" and (args.swap_models or args.variant == "hr"):
+        RESIDENT.update(upstream=upstream, ours=base.model)
+    names = ordered_names(base, inputs[0][1])
+    # The falsifiers run on the shared fixture whatever --images says: an image whose matte is
+    # nearly saturated can hide a perturbation of the last steps (a float32 sigmoid of float16
+    # logits moves no pixel of COCO 000000000139 for `lite`, and 1.5M of the fixture's).
+    shared = fixtures()[0]
+    falsify_rgb = next((rgb for label, rgb in inputs if label == shared.name), None)
+    if falsify_rgb is None:
+        falsify_rgb = load_image(str(shared))
     good = not problems and all(ok for _, ok in rewrite) and structural
-    for label, rgb in inputs:
-        rows = compare(args.variant, upstream, ours, rgb, refine_fn, names)
-        ok = all(r[1] for r in rows)
-        good &= ok
-        detail = "; ".join(f"{s} FAILED {d}" for s, e, d in rows if not e)
-        print(f"    {'PASS' if ok else 'FAIL'}  {label:40s} {len(rows)} stages"
-              f"{'  ' + detail if detail else ''}")
 
-    try:
-        from mozo.adapters.birefnet import BiRefNetPredictor
-        adapter = BiRefNetPredictor(args.variant, device="cpu", runtime="torch-fp32")
-    except Exception as error:  # weights not resolvable through mozo.weights here
-        print(f"    skip  mozo adapter: {type(error).__name__}: {str(error)[:100]}")
-    else:
-        label, rgb = inputs[0]
-        # One forward a side: the cut-out's fourth channel is the matte.
-        ok = np.array_equal(adapter.cutout(rgb), ours.cutout(rgb))
-        good &= ok
-        print(f"    {'PASS' if ok else 'FAIL'}  mozo adapter (registry -> weights), {label}")
+    for precision in precisions:
+        if precision == "half":
+            upstream.half()
+            ours = Predictor(base.model, device=device, dtype=torch.float16)
+        else:
+            ours = Predictor(base.model, device=device, autocast=precision == "fp16")
+        total = 0
+        print(f"\n[4] every stage ({len(names)} stage modules), {device} {precision}:")
+        for label, rgb in inputs:
+            rows = compare(args.variant, upstream, ours, rgb, refine_fn, names, device, precision,
+                           repeat)
+            ok = all(r[1] for r in rows)
+            good &= ok
+            total += sum(r[3] for r in rows)
+            detail = "; ".join(f"{s} FAILED {d}" for s, e, d, _ in rows if not e)
+            print(f"    {'PASS' if ok else 'FAIL'}  {label:40s} {len(rows)} checks"
+                  f"{'  ' + detail if detail else ''}")
 
-    if not args.no_falsify:
-        print("[5] falsification -- each must fail, at its own stage")
-        rows = falsify(args.variant, upstream, ours, inputs[0][1], refine_fn, names)
-        for label, ok, moved in rows:
-            print(f"    {'caught' if ok else 'MISSED'}  {label:36s} {moved}")
-        good &= all(ok for _, ok, _ in rows)
+        runtime = {"fp32": "torch-fp32", "fp16": "torch-fp16"}.get(precision)
+        if runtime:
+            try:
+                from mozo.adapters.birefnet import BiRefNetPredictor
+                for model in (RESIDENT and (upstream, base.model)) or ():
+                    model.to("cpu")
+                adapter = BiRefNetPredictor(args.variant, device=device, runtime=runtime)
+            except Exception as error:  # weights not resolvable through mozo.weights here
+                print(f"    skip  mozo adapter: {type(error).__name__}: {str(error)[:100]}")
+            else:
+                label, rgb = inputs[0]
+                # One forward a side: the cut-out's fourth channel is the matte.
+                theirs, used = adapter.cutout(rgb), adapter.runtime
+                del adapter
+                if device == "cuda":
+                    torch.cuda.empty_cache()
+                resident(ours.model)
+                ok = np.array_equal(theirs, ours.cutout(rgb))
+                good &= ok
+                total += 1
+                print(f"    {'PASS' if ok else 'FAIL'}  mozo adapter (registry -> weights, "
+                      f"{used}), {label}")
+        print(f"    {total} comparisons, {device} {precision}")
+
+        if not args.no_falsify:
+            print(f"[5] falsification, {device} {precision} -- each must fail, at its own stage")
+            rows = falsify(args.variant, upstream, ours, falsify_rgb, refine_fn, names, device,
+                           precision, args.reference_cache)
+            for label, ok, moved in rows:
+                print(f"    {'caught' if ok else 'MISSED'}  {label:44s} {moved}")
+            good &= all(ok for _, ok, _ in rows)
+            print(f"    {sum(ok for _, ok, _ in rows)}/{len(rows)} caught")
 
     print(f"\n{'PASS' if good else 'FAIL'}")
     return 0 if good else 1

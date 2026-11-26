@@ -2,7 +2,8 @@
 
 The network lives in :mod:`mozo.vendors.birefnet_deploy`, extracted from the authors' Hugging Face
 remote code and reduced to inference; pre- and post-processing come from the vendor too, so the
-pipeline is the model card's step for step -- verified bit-identical to it on CPU in float32.
+pipeline is the model card's step for step -- verified bit-identical to it on CUDA in float32 and
+under float16 autocast (``torch-fp16``), and on the CPU in float32.
 
 Four variants, one architecture. ``general`` is the authors' general-purpose model and the one most
 people use; ``lite`` swaps the Swin-L backbone for Swin-T and runs about three times faster;

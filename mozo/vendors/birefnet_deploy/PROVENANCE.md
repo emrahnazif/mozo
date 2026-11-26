@@ -32,8 +32,9 @@ Pre- and post-processing come from the model card's inference snippet and the re
 Its resolution table (2048 for the HR models, 1024 for the others) is what fixes each variant's
 size here.
 
-**What this package guarantees:** on the CPU in float32, for the same RGB image, every stage is
-`torch.equal` to the reference -- the preprocessed tensor against torchvision's own transforms;
+**What this package guarantees:** on CUDA in float32 and under float16 autocast (mozo's
+`torch-fp16`), and on the CPU in float32, for the same RGB image, every stage is `torch.equal` to
+the reference run the same way in the same process -- the preprocessed tensor against torchvision's own transforms;
 the output of every Swin block, patch merge and stage norm in both backbone passes; the squeeze
 block; every patch convolution, deformable convolution, ASPP, decoder, lateral and attention block,
 by module name; the logits; the alpha against `ToPILImage` + `resize`; the cut-out against the
@@ -43,8 +44,22 @@ compare its own runtimes.
 
 **The reference has to be pinned to be defined.** `tools/verify/birefnet.py` loads it with
 `dtype=torch.float32`, because transformers 5 defaults to `dtype="auto"` and loads the
-float16-stored checkpoints (`general`, `hr`) as a float16 model; the authors' own examples then
-call `.half()` on CUDA anyway. Neither float16 path is claimed.
+float16-stored checkpoints (`general`, `hr`) as a float16 model, which no mozo runtime runs.
+
+**The GPU gate (2026-11-26).** RTX 3060 (vision-003), torch 2.13.0+cu126, CUDA 12.6, cuDNN
+9.10.2, driver 550.144.03, transformers 5.9.0. Upstream and mozo in one process on the same GPU,
+under torch's defaults as mozo leaves them (matmul TF32 off, cuDNN TF32 on, cuDNN benchmark and
+deterministic off): every variant bit-identical in float32 and under float16 autocast, on five
+photographs and four synthetic inputs, each side run twice and byte-identical to itself. mozo's
+`torch-fp16` is **autocast** around the network; the authors' own CUDA path (model card,
+`handler.py`) is `model.half()` with a `.half()` input, a different computation. The fp16 gate
+therefore runs upstream's code under the same autocast; `tools/verify/birefnet.py --dtype half`
+gates the `.half()` path too, on request. The one change the GPU gate needed: the alpha's sigmoid
+runs on the float16 logits in float16, as upstream's does (the vendored code had taken a float32
+sigmoid, which moved up to 1.5M pixels of one photograph by 1-2 grey levels).
+`torchvision.ops.deform_conv2d` on CUDA was byte-identical over 50 reruns and runs under
+`torch.use_deterministic_algorithms(True)`; under autocast torchvision runs it in float32 on both
+sides.
 
 ## Checkpoints, and why only these four
 
@@ -184,7 +199,9 @@ in float16 behind a `Cast`: 475 MB instead of 893, the same arithmetic.
 
 Network-only median ms on the fixture; accuracy on DIS-VD (470) or P3M-500-NP (500, `matting`),
 from the uint8 alpha at the image's size, against the ground truth. "vs fp32" is the alpha against
-torch fp32 on CUDA (TF32 off), in grey levels, mean / max over all images.
+torch fp32 on CUDA (TF32 off), in grey levels, mean / max over all images. The torch fp16 rows
+were measured before the 2026-11-26 postprocess fix (the sigmoid now runs in float16, as
+upstream's): the alpha moves by at most 2 grey levels; re-measuring them is open.
 
 | variant | runtime | ms | S-measure | MAE | vs fp32 | GPU memory |
 |---|---|---|---|---|---|---|

@@ -6,7 +6,8 @@ Hugging Face remote code (`birefnet.py`, 2,250 lines, one file per repository), 
 
 > **Verified bit-identical to the published model** at every stage -- the preprocessed tensor,
 > every backbone block of both passes, every decoder block and deformable convolution, the logits,
-> the alpha and both cut-outs -- on CPU in float32. `PROVENANCE.md` says where the guarantee stops.
+> the alpha and both cut-outs -- on CUDA in float32 and under float16 autocast, and on CPU in
+> float32. `PROVENANCE.md` says where the guarantee stops.
 
 ```python
 from birefnet_deploy import Predictor

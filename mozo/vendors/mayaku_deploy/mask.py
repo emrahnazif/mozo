@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 the mayaku authors. Extracted from mayaku 3.1.1 (mayaku/model/mask.py,
 # mayaku/inference/decode.py), reduced to the decode of one image's masks.
-"""The per-instance mask head, run on the host over the graph's stride-4 mask feature.
+"""The per-instance mask head, run after the graph over the graph's stride-4 mask feature.
 
 Dynamic kernels in the manner of CondInst (arXiv 2003.05664) and RTMDet-Ins (arXiv 2212.07784):
 each detection's anchor emitted 169 numbers, the weights and biases of a three-layer 1x1 network

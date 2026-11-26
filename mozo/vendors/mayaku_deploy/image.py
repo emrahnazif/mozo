@@ -62,6 +62,25 @@ def planar(canvas: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(out)
 
 
+def network_input(canvas: np.ndarray, device: str | torch.device = "cpu") -> torch.Tensor:
+    """The network's input for *canvas* on *device*, made where upstream's ``network_input`` makes
+    it: on the host for the CPU (:func:`planar`), else sent as bytes and divided on the device
+    (upstream's ``planar_tensor``).
+
+    The two are not the same bits. torch's CUDA division by a scalar multiplies by its reciprocal,
+    which is what :func:`planar` avoids, so upstream's own CPU and CUDA inputs differ in the last
+    bit -- and a network run on the GPU is bit-identical to upstream's only from upstream's GPU
+    input. The result is contiguous: a channels-last input runs other convolution kernels.
+    """
+    device = torch.device(device)
+    if device.type == "cpu":
+        return planar(canvas)
+    h, w, _ = canvas.shape
+    px = torch.from_numpy(np.ascontiguousarray(canvas[None])).to(device)
+    out = torch.empty((1, 3, h, w), dtype=torch.float32, device=device)
+    return torch.div(px.permute(0, 3, 1, 2), 255, out=out)
+
+
 def letterbox(image: np.ndarray, size: int) -> tuple[torch.Tensor, float, int, int]:
     """The network's input for *image* on a square canvas of side *size*, and where the image went:
     ``(batch, gain, pad_x, pad_y)``, the shape every mozo detection vendor's letterbox returns."""

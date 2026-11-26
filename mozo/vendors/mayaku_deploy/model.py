@@ -13,7 +13,7 @@ import torch
 
 from .blocks import STRIDES
 from .decode import postprocess
-from .image import PAD, letterbox, to_original
+from .image import PAD, network_input, place, to_original
 from .mask import COORD_SCALE, decode_masks
 from .network import KERNEL_LAYOUT, MASK_CH, TIERS, Tier, build_network, read_checkpoint
 
@@ -106,12 +106,16 @@ def detect(
     forward: Callable[[torch.Tensor], Sequence[torch.Tensor]],
     spec: Spec,
     conf: float,
+    device: str | torch.device = "cpu",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """Detect in one image, with *forward* supplying the middle step.
 
-    Letterbox, run whatever executes the graph, decode on the CPU, map back. A torch module, an ONNX
-    session and a TensorRT engine differ only in *forward*, so all of them share one pre- and
-    post-processing path.
+    Letterbox, run whatever executes the graph, decode, map back. A torch module, an ONNX session
+    and a TensorRT engine differ only in *forward*, so all of them share one pre- and
+    post-processing path. Both ends run where upstream runs them: the input is made on *device*
+    (:func:`~.image.network_input`), and the decode runs on the GPU when the graph's maps come
+    back on CUDA, else on the CPU (upstream's ``host_side``). On CUDA that is what makes the torch
+    runtime bit-identical to upstream on the same GPU.
 
     Args:
         image: ``HxWx3`` RGB ``uint8`` array.
@@ -121,6 +125,8 @@ def detect(
         spec: The variant's :class:`Spec`.
         conf: Minimum score, ``0 <= conf < 1``. Replaces the checkpoint's own 0.4, as upstream's
             ``conf=`` does.
+        device: Where the network's input is made: the device the torch module runs on, or the
+            CPU for a runtime that is handed host memory.
 
     Returns:
         Boxes in the source image's pixels, scores, class ids, and for a seg variant one boolean
@@ -128,16 +134,17 @@ def detect(
     """
     if not 0 <= conf < 1:
         raise ValueError(f"conf must be in [0, 1), got {conf}")
-    batch, gain, pad_x, pad_y = letterbox(image, spec.canvas[0])
-    meta = {"ratio": gain, "pad": (pad_x, pad_y), "shape": image.shape[:2]}
-    # Decoded on the CPU whatever ran the graph, as upstream does for every device but CUDA, so
-    # the answer does not depend on where the forward pass ran.
-    preds = [p.float().cpu() for p in forward(batch)]
+    canvas, meta = place(image, spec.canvas)
+    # Decoded where upstream decodes (``host_side``): on the GPU for CUDA maps, which it runs well,
+    # else on the CPU. Masks are computed there too; boxes are mapped back on the CPU, as upstream.
+    maps = forward(network_input(canvas, device))
+    preds = [p.float() if p.is_cuda else p.float().cpu() for p in maps]
     dets, anchors, points, stride = postprocess(
         preds, spec.num_classes, spec.cfg.reg_max, conf, spec.iou, spec.topk, spec.max_det)
     masks = decode_masks(preds, dets, anchors, points, stride, meta) if spec.seg else None
-    return (to_original(dets[:, :4], gain, pad_x, pad_y, meta["shape"]), dets[:, 4],
-            dets[:, 5].long(), masks)
+    host = dets.float().cpu()
+    return (to_original(host[:, :4], meta["ratio"], *meta["pad"], meta["shape"]), host[:, 4],
+            host[:, 5].long(), masks)
 
 
 @dataclass
@@ -186,7 +193,7 @@ class Detector:
     def predict(self, image: np.ndarray, conf: float | None = None) -> Detections:
         """Detect in one ``HxWx3`` RGB ``uint8`` image; *conf* defaults to the checkpoint's 0.4."""
         conf = self.spec.conf if conf is None else conf
-        boxes, scores, ids, masks = detect(image, self.forward, self.spec, conf)
+        boxes, scores, ids, masks = detect(image, self.forward, self.spec, conf, self.device)
         ids_np = ids.numpy()
         return Detections(boxes.numpy(), scores.numpy(), ids_np,
                           [self.names[int(i)] for i in ids_np],

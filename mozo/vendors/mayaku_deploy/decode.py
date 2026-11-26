@@ -61,7 +61,7 @@ def postprocess(preds, nc, reg_max, conf, iou, topk, max_det):
 
     ``dets`` is ``(n, 6)`` ``[x1, y1, x2, y2, score, class]`` in canvas pixels, highest score
     first; ``anchors`` the flat anchor index each came from, which is how the mask branch finds its
-    kernels; ``points`` and ``stride`` the anchor grid. *preds* are on the CPU.
+    kernels; ``points`` and ``stride`` the anchor grid, on the device *preds* are on.
     """
     head = preds[:2 * len(STRIDES)]
     shapes = [tuple(c.shape[2:]) for c in head[0::2]]

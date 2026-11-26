@@ -6,8 +6,8 @@ runs the forward pass depends on what mozo publishes for the variant and what th
 execute -- the torch module, or the same graph as ONNX or a TensorRT engine built from it.
 
 Only the forward pass changes between runtimes. The letterbox, the prediction decode (threshold,
-top-k, class-wise NMS) and the per-instance mask network are the vendor's on every path, run on the
-CPU, so the answer cannot depend on which runtime produced the raw maps.
+top-k, class-wise NMS) and the per-instance mask network are the vendor's on every path, run where
+upstream runs them: on the GPU when the raw maps come back on CUDA, else on the CPU.
 
 Each published Mayaku checkpoint is a variant of this one family. The street models
 (``street-*``) find 22 classes of road scenes -- people, faces, helmets, bicycles, e-scooters,
@@ -137,8 +137,11 @@ class MayakuPredictor:
             one class per location, after class-wise NMS at IoU 0.5. A seg variant carries one
             boolean mask per detection at the image's resolution; a det variant carries none.
         """
-        boxes, scores, class_ids, masks = detect(load_image(image), self._forward, self.spec,
-                                                 threshold)
+        # The torch module gets its input made on its own device, as upstream makes it; the graph
+        # runtimes are handed host memory.
+        boxes, scores, class_ids, masks = detect(
+            load_image(image), self._forward, self.spec, threshold,
+            self._detector.device if self._detector is not None else "cpu")
         if self.device == "mps" and self._detector is not None:
             torch.mps.empty_cache()
         return pf.detections.from_arrays(

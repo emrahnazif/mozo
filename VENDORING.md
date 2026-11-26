@@ -278,6 +278,15 @@ found traps it had not predicted, and the predicted ones were mostly real.
   moves every box.
 - **Padding may replicate rather than zero-fill.** EasyOCR copies the last column.
 - **Normalisation constants are usually not ImageNet's.** CLIP has its own; SigLIP 2 is 0.5/0.5.
+- **Upstream's preprocessing may depend on the device, and on CUDA `x / 255` is `x * (1/255)`.**
+  torch's CUDA division by a scalar multiplies by the reciprocal, so the same division on the host
+  and on the GPU differ in the last bit. Mayaku divides on the host for the CPU and sends the uint8
+  canvas to the GPU otherwise: a vendor that kept the host path was exact on the CPU gate and wrong
+  at the input on the GPU one. Copy the device dispatch, and keep the result contiguous: a
+  channels-last input is `torch.equal` to the contiguous one and runs other conv kernels.
+- **So may the decode.** Mayaku decodes on the GPU when its maps are on CUDA (`host_side`); a vendor
+  that decoded the same GPU maps on the CPU differed from upstream on 55 of 64 runs (boxes, scores
+  or masks in the last bits).
 
 ### Tokenisation
 

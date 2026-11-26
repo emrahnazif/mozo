@@ -51,8 +51,9 @@ def decode(
     """Turn one image's raw outputs into detections.
 
     Args:
-        logits: ``(queries, max_text_len)`` raw similarities for one image.
-        boxes: ``(queries, 4)`` as ``cxcywh``, normalised to the picture.
+        logits: ``(queries, max_text_len)`` raw similarities for one image, on the device the
+            model ran on.
+        boxes: ``(queries, 4)`` as ``cxcywh``, normalised to the picture, on the CPU.
         phrase_map: ``(phrases, tokens)`` boolean -- which tokens belong to which prompt.
         source_height: Height of the original image, in its own pixels.
         source_width: Width of the original image.
@@ -61,7 +62,11 @@ def decode(
     Returns:
         Detections in the model's own order, which is neither sorted nor deduplicated.
     """
-    scored = logits.sigmoid()
+    # The sigmoid runs where the logits are, as upstream's post-processing runs it on the model's
+    # outputs: CUDA's sigmoid and the CPU's differ in the last bit (measured, RTX 3060), and that
+    # bit is the score a caller reads. Everything after it is a max, a comparison, or an IEEE
+    # subtract and multiply, which give the same bits on either device.
+    scored = logits.sigmoid().cpu()
     best, _ = scored.max(dim=1)
     keep = best > box_threshold
     if not bool(keep.any()):

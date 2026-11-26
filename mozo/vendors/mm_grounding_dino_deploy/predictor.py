@@ -162,7 +162,7 @@ class Predictor:
             )
 
         return decode(
-            logits[0].float().cpu(),
+            logits[0],
             boxes[0].float().cpu(),
             phrase_map[0],
             source_height,

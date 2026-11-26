@@ -239,8 +239,8 @@ def stage_names(spec, prefix: str) -> dict[str, str]:
 
 
 def compare_variant(variant: str, modules, authors: Path, frames, gate: Gate,
-                    falsifier: str | None, witness: bool) -> tuple[Segmenter, dict]:
-    """Every stage for one variant. Returns the vendor and upstream's maps, for the mozo path."""
+                    falsifier: str | None, witness: bool) -> Segmenter:
+    """Every stage for one variant. Returns the vendor's segmenter, for the mozo path."""
     from mozo.weights import resolve
 
     spec = SPECS[variant]
@@ -268,24 +268,20 @@ def compare_variant(variant: str, modules, authors: Path, frames, gate: Gate,
 
     ours_seen, ours_hooks = pre_hooks(network, stage_names(spec, ""))
     theirs_seen, theirs_hooks = pre_hooks(lit, stage_names(spec, "network."))
-    ours_seen_patch, theirs_seen_patch = {}, {}
-    ours_hooks.append(network.encoder.backbone.patch_embed.register_forward_hook(
-        lambda _m, _i, out: ours_seen_patch.__setitem__("patch_embed", out.detach().clone())))
-    theirs_hooks.append(lit.network.encoder.backbone.patch_embed.register_forward_hook(
-        lambda _m, _i, out: theirs_seen_patch.__setitem__("patch_embed", out.detach().clone())))
+    # The patch embedding's output is block 0's input before the position embedding and tokens.
+    for model, seen, hooks in ((network, ours_seen, ours_hooks),
+                               (lit.network, theirs_seen, theirs_hooks)):
+        hooks.append(model.encoder.backbone.patch_embed.register_forward_hook(
+            lambda _m, _i, out, seen=seen: seen.__setitem__("patch_embed", out.detach().clone())))
 
     hf = _witness(variant) if witness and spec.task == "panoptic" else None
-    answers = {}
     for index, (label, rgb) in enumerate(frames):
         size = tuple(rgb.shape[:2])
         their_pixels, their_masks, their_classes, answer = upstream_answer(lit, spec, rgb)
-        answers[label] = answer
         with torch.inference_mode():
             pixels, mask_logits, class_logits, origins = segmenter.raw(rgb)
         gate.check("pixels", pixels, their_pixels, label)
-        gate.check("patch_embed", ours_seen_patch["patch_embed"], theirs_seen_patch["patch_embed"],
-                   label)
-        for stage in stage_names(spec, ""):
+        for stage in ["patch_embed", *stage_names(spec, "")]:
             gate.check(stage, ours_seen[stage], theirs_seen[stage], label)
         gate.check("class_logits", class_logits, their_classes, label)
         gate.check("mask_logits", mask_logits, their_masks, label)
@@ -309,7 +305,7 @@ def compare_variant(variant: str, modules, authors: Path, frames, gate: Gate,
 
     for handle in ours_hooks + theirs_hooks:
         handle.remove()
-    return segmenter, answers
+    return segmenter
 
 
 def _witness(variant: str):
@@ -347,16 +343,13 @@ def perturb(name: str, network) -> None:
             return [int(s * factor) for s in size]
         vimage.pad_size = pad_size
     elif name == "pad_topleft":
-        original = vimage.resize_and_pad
+        import mozo.vendors.eomt_deploy.predictor as vpred
 
-        def resize_and_pad(image, side):
+        def resize_and_pad(image, side):  # the binding the segmenter calls
             new_h, new_w = vimage.pad_size(image.shape[:2], side)
             resized = vimage._resize(image, new_h, new_w)
             return F.pad(resized, (side - new_w, 0, side - new_h, 0))[None]
-        vimage.resize_and_pad = resize_and_pad
-        import mozo.vendors.eomt_deploy.predictor as vpred
         vpred.resize_and_pad = resize_and_pad
-        del original
     elif name == "registers_first":
         def _pos_embed(x):
             x = x + backbone.pos_embed
@@ -384,33 +377,21 @@ def perturb(name: str, network) -> None:
         original_panoptic = vpost.panoptic
         setting = {"threshold": 0.7} if name == "threshold" else {"overlap": 0.5}
         vpost.panoptic = lambda *a, **k: original_panoptic(*a, **{**k, **setting})
-    elif name == "no_count":
-        original_div = torch.Tensor.__truediv__
-
-        def semantic(mask_logits, class_logits, origins, size, side):
-            torch.Tensor.__truediv__ = lambda a, b: a  # sums / counts -> sums
-            try:
-                return original_semantic(mask_logits, class_logits, origins, size, side)
-            finally:
-                torch.Tensor.__truediv__ = original_div
-        original_semantic = vpost.semantic
-        vpost.semantic = semantic
-    elif name == "argmax_early":
+    elif name in ("no_count", "argmax_early"):
         def semantic(mask_logits, class_logits, origins, size, side):
             mask_logits = F.interpolate(mask_logits, (side, side), mode="bilinear")
             crop = torch.einsum("bqhw, bqc -> bchw", mask_logits.sigmoid(),
                                 class_logits.softmax(dim=-1)[..., :-1])
             h, w = vimage.window_size(size, side)
-            sums = torch.zeros((crop.shape[1], h, w))
-            counts = torch.zeros((crop.shape[1], h, w))
+            sums, counts = torch.zeros((crop.shape[1], h, w)), torch.zeros((1, h, w))
             for c, (start, end) in zip(crop, origins):
-                if size[0] > size[1]:
-                    sums[:, start:end, :] += c
-                    counts[:, start:end, :] += 1
-                else:
-                    sums[:, :, start:end] += c
-                    counts[:, :, start:end] += 1
-            labels = (sums / counts).argmax(0)[None, None].float()
+                window = (slice(None), slice(start, end)) if size[0] > size[1] else \
+                    (slice(None), slice(None), slice(start, end))
+                sums[window] += c
+                counts[window] += 1
+            if name == "no_count":  # the overlap summed, not averaged
+                return F.interpolate(sums[None], size, mode="bilinear")[0].argmax(0)
+            labels = (sums / counts).argmax(0)[None, None].float()  # argmax, then upsample
             return F.interpolate(labels, size, mode="nearest")[0, 0].long()
         vpost.semantic = semantic
     else:
@@ -437,12 +418,13 @@ def against_mozo(variant: str, vendor: Segmenter, frames, paths: list[Path], gat
         gate.check("mozo", torch.from_numpy(masks), torch.from_numpy(want.masks), label)
         gate.check("mozo", torch.tensor([d.class_id for d in got], dtype=torch.long),
                    torch.from_numpy(want.class_ids), label + " classes")
-        expected = ([None] * len(want.class_ids) if want.scores is None
+        # nan stands for None (a semantic segment's confidence) on both sides.
+        expected = ([float("nan")] * len(want.class_ids) if want.scores is None
                     else [round_to_decimal(float(s)) for s in want.scores])
-        if [d.confidence for d in got] != expected:
-            gate.failures.append(("mozo", float("inf")))
-            print(f"    FAIL mozo           {label:28s} confidences differ")
-        gate.count += 1
+        confidences = [float("nan") if d.confidence is None else d.confidence for d in got]
+        gate.check("mozo", torch.tensor(confidences, dtype=torch.float64).nan_to_num(-1.0),
+                   torch.tensor(expected, dtype=torch.float64).nan_to_num(-1.0),
+                   label + " confidences")
 
 
 def versions() -> str:
@@ -508,7 +490,7 @@ def main() -> int:
     for variant in variants:
         before = (gate.count, len(gate.failures))
         print(f"\n[{variant}]")
-        vendor, _ = compare_variant(variant, modules, args.authors, frames, gate,
+        vendor = compare_variant(variant, modules, args.authors, frames, gate,
                                     falsifier=args.falsify, witness=args.witness)
         if args.mozo and not args.falsify:
             against_mozo(variant, vendor, frames, photographs(), gate)

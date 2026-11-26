@@ -29,7 +29,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import statistics
 import sys
 import time
 from pathlib import Path
@@ -45,62 +44,43 @@ sys.path.insert(0, str(ROOT / "tools"))
 os.environ.setdefault("MOZO_BASE_URL", f"file://{ROOT / 'weights'}")
 sys.stdout.reconfigure(line_buffering=True)
 
-from common import fixtures, synchronise  # noqa: E402
+from common import fixtures, median_ms  # noqa: E402
 from mozo.image import load_image  # noqa: E402
+from mozo.labels import resolve as labels_for  # noqa: E402
 from mozo.vendors.eomt_deploy import SPECS, Segmenter  # noqa: E402
-from mozo.vendors.eomt_deploy.checkpoint import load_network  # noqa: E402
+from mozo.vendors.eomt_deploy.predictor import one_at_a_time  # noqa: E402
 from mozo.weights import resolve  # noqa: E402
 
 RUNTIMES = ("torch-fp32", "torch-fp16", "onnx-fp32", "tensorrt-fp32", "tensorrt-fp16")
 
 
-def _one_at_a_time(run):
-    def network(pixels):
-        outs = [run(pixels[i:i + 1].contiguous()) for i in range(len(pixels))]
-        return torch.cat([o[0] for o in outs]), torch.cat([o[1] for o in outs])
-    return network
-
-
-def build(variant: str, runtime: str, device: str):
-    """``(segmenter, network)`` for *runtime*, or ``None`` where it cannot run here."""
+def build(variant: str, runtime: str, device: str) -> Segmenter | None:
+    """The vendor's segmenter running *runtime*, or ``None`` where it cannot run here. The torch
+    and TensorRT rows are the adapter's own wiring (``Segmenter(half=)``, ``engine_network``)."""
     spec = SPECS[variant]
     checkpoint = resolve("eomt", variant, "torch-fp32")
     # The graphs tools/export/eomt.py wrote into the tree, which may not be published (yet).
     tree = ROOT / "weights" / "eomt" / variant / checkpoint.parent.name
     graph = lambda key: tree / f"{key}.onnx"  # noqa: E731
-    if runtime == "torch-fp32":
-        network = load_network(spec, checkpoint, device)
-    elif runtime == "torch-fp16":
-        if device != "cuda":
+    if runtime in ("torch-fp32", "torch-fp16"):
+        if runtime == "torch-fp16" and device != "cuda":
             return None
-        torch_net = load_network(spec, checkpoint, device)
-
-        def network(x):
-            with torch.autocast("cuda", torch.float16):
-                mask_logits, class_logits = torch_net(x)
-            return mask_logits.float(), class_logits.float()
-    elif runtime == "onnx-fp32":
+        return Segmenter(checkpoint, spec, device=device, half=runtime == "torch-fp16")
+    if runtime == "onnx-fp32":
         if not graph("onnx-fp32").is_file():
             return None
         from mozo.runtimes import OnnxRunner
 
         runner = OnnxRunner(graph("onnx-fp32"), device=device)
-        network = _one_at_a_time(lambda x: tuple(torch.from_numpy(o).to(x.device)
-                                                 for o in runner(x.cpu().numpy())))
-    else:
-        source = graph("onnx-fp16" if runtime.endswith("fp16") else "onnx-fp32")
-        if device != "cuda" or not source.is_file():
-            return None
-        from mozo.runtimes import TensorRTRunner
+        return Segmenter(None, spec, device=device, network=one_at_a_time(
+            lambda x: tuple(torch.from_numpy(o).to(x.device) for o in runner(x.cpu().numpy()))))
+    source = graph("onnx-fp16" if runtime.endswith("fp16") else "onnx-fp32")
+    if device != "cuda" or not source.is_file():
+        return None
+    from mozo.adapters.eomt import engine_network
+    from mozo.runtimes import TensorRTRunner
 
-        runner = TensorRTRunner(source, device)
-        order = [runner.outputs.index(name) for name in ("mask_logits", "class_logits")]
-
-        def run(x):
-            outs = runner(x)
-            return tuple(outs[i].float() for i in order)
-        network = _one_at_a_time(run)
-    return Segmenter(None, spec, device=device, network=network), network
+    return Segmenter(None, spec, device=device, network=engine_network(TensorRTRunner(source, device)))
 
 
 def per_pixel(found) -> np.ndarray:
@@ -199,7 +179,7 @@ def ade_semantic(root: Path, count: int):
 
 def accuracy(variant: str, segmenters: dict, args) -> None:
     spec = SPECS[variant]
-    names = [entry["name"] for entry in json.loads(resolve("eomt", variant, "labels").read_text())]
+    names = [entry["name"] for entry in labels_for("eomt", variant, published=True)]
     moved = {r: [] for r in segmenters}
     started = time.perf_counter()
     if spec.task == "panoptic":
@@ -216,16 +196,13 @@ def accuracy(variant: str, segmenters: dict, args) -> None:
             if reference is not None:
                 moved[r].append(float((per_pixel(found) != reference).mean()))
             if spec.task == "panoptic":
-                pred = np.zeros(rgb.shape[:2], np.int64)
+                pred = np.zeros(rgb.shape[:2], np.int64)  # segment ids from 1; 0 is void
                 for i, mask in enumerate(found.masks):
                     pred[mask] = i + 1
                 scores[r].add(item[1], item[2], pred,
                               {i + 1: int(c) for i, c in enumerate(found.class_ids)})
             else:
-                label = item[1]
-                pred = np.zeros(rgb.shape[:2], np.int64)
-                for i, mask in enumerate(found.masks):
-                    pred[mask] = found.class_ids[i]
+                label, pred = item[1], per_pixel(found)
                 valid = label >= 0
                 confusion[r] += np.bincount(label[valid] * spec.classes + pred[valid],
                                             minlength=spec.classes ** 2).reshape(spec.classes, -1)
@@ -247,39 +224,26 @@ def accuracy(variant: str, segmenters: dict, args) -> None:
         print(f"    {r:14s} {line}{drift}")
 
 
-def speed(variant: str, built: dict, device: str, runs: int) -> None:
-    spec = SPECS[variant]
+def speed(built: dict, device: str, runs: int) -> None:
     rgb = load_image(str(fixtures()[0]))
     print(f"\n  speed on {fixtures()[0].name} {rgb.shape[1]}x{rgb.shape[0]}, {device}, median of {runs}:")
-    for runtime, (segmenter, network) in built.items():
+    for runtime, segmenter in built.items():
         with torch.inference_mode():
             pixels = segmenter.raw(rgb)[0].float() / 255.0
+            network = segmenter.network()
 
             def net():
-                network(pixels)
+                with torch.autocast("cuda", torch.float16, enabled=runtime == "torch-fp16"):
+                    network(pixels)
 
             def call():
                 segmenter.segment(rgb)
-            net_ms = _median(net, device, runs)
-            call_ms = _median(call, device, runs)
+            net_ms = median_ms(net, device, runs)
+            call_ms = median_ms(call, device, runs)
         print(f"    {runtime:14s} network {net_ms:8.1f} ms   call {call_ms:8.1f} ms")
     if device == "cuda":
         print(f"    peak CUDA memory {torch.cuda.max_memory_allocated() / 2**30:.2f} GiB "
               f"(all runtimes loaded together)")
-    del spec
-
-
-def _median(work, device: str, runs: int, warmup: int = 3) -> float:
-    for _ in range(warmup):
-        work()
-    synchronise(device)
-    timings = []
-    for _ in range(runs):
-        start = time.perf_counter()
-        work()
-        synchronise(device)
-        timings.append((time.perf_counter() - start) * 1000)
-    return statistics.median(timings)
 
 
 def main() -> int:
@@ -313,10 +277,10 @@ def main() -> int:
             else:
                 built[runtime] = made
         if not args.no_speed:
-            speed(variant, built, args.device, args.runs)
+            speed(built, args.device, args.runs)
         task = SPECS[variant].task
         if (task == "panoptic" and args.coco_panoptic) or (task == "semantic" and args.ade):
-            accuracy(variant, {r: s for r, (s, _) in built.items()}, args)
+            accuracy(variant, built, args)
     return 0
 
 

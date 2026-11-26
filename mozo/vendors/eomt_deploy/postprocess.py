@@ -74,7 +74,7 @@ def panoptic(mask_logits: torch.Tensor, class_logits: torch.Tensor, size: tuple[
     scaled = pad_size(size, side)
     kept = F.interpolate(kept[:, :, : scaled[0], : scaled[1]], size, mode="bilinear")[0]
 
-    masks = kept.sigmoid()
+    masks = kept.sigmoid_()  # in place: the logits are not read again
     kept_scores = scores[keep]
     mask_ids = (kept_scores[..., None, None] * masks).argmax(0)
     stuff_segment_ids: dict[int, int] = {}
@@ -127,7 +127,9 @@ def semantic(mask_logits: torch.Tensor, class_logits: torch.Tensor, origins: lis
 
     h, w = window_size(size, side)
     sums = torch.zeros((crop_logits.shape[1], h, w), device=crop_logits.device)
-    counts = torch.zeros((crop_logits.shape[1], h, w), device=crop_logits.device)
+    # Every class has the same coverage count, so one map broadcasts in the division: the same
+    # divisor per element as upstream's (classes, h, w) copy, at 1/150th of the memory.
+    counts = torch.zeros((1, h, w), device=crop_logits.device)
     for crop, (start, end) in zip(crop_logits, origins):
         if size[0] > size[1]:
             sums[:, start:end, :] += crop

@@ -71,11 +71,11 @@ def _only(data: dict, what: str, fields: tuple) -> None:
 class PortType(Enum):
     """What can travel along a connection.
 
-    Five, because mozo's seventeen families return exactly five kinds of thing. Ten of them return
-    ``pf.Detections`` -- including EasyOCR, whose read text is a detection with a string, and the
-    promptable segmenters, whose masks are detections with no class. CLIP and SigLIP2 return
-    ``pf.Classifications``. EoMT's scene segments are detections too, whose masks never overlap. Depth Anything V2 returns an array, and the two embedding models return
-    a different kind of array.
+    Five, because mozo's families return exactly five kinds of thing. Most return
+    ``pf.Detections`` -- including EasyOCR, whose read text is a detection with a string, the
+    promptable segmenters, whose masks are detections with no class, and EoMT, whose scene segments
+    are detections whose masks never overlap. CLIP and SigLIP2 return ``pf.Classifications``. Depth
+    Anything V2 returns an array, and the embedding models return a different kind of array.
 
     ``CLASSIFICATIONS`` is separate from ``DETECTIONS`` although both are PixelFlow types, because
     ``pf.Classifications`` has no boxes at all -- it offers ``top1``, ``top_k`` and

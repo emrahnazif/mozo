@@ -25,10 +25,27 @@ from .checkpoint import load_network
 from .config import Spec
 from .image import resize_and_pad, windows
 
-__all__ = ["Segmenter", "Segments"]
+__all__ = ["Segmenter", "Segments", "one_at_a_time"]
 
 #: ``(B, 3, side, side)`` float pixels in ``[0, 1]`` to ``(mask_logits, class_logits)``.
 Network = Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]]
+
+
+def one_at_a_time(run: Network) -> Network:
+    """A network built for one picture (a graph with a fixed batch of 1), applied to each picture
+    of a batch in turn -- a semantic picture's windows."""
+    def network(pixels: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        outputs = [run(pixels[i:i + 1].contiguous()) for i in range(len(pixels))]
+        return torch.cat([o[0] for o in outputs]), torch.cat([o[1] for o in outputs])
+    return network
+
+
+def _to_host(masks: torch.Tensor) -> np.ndarray:
+    """Bring ``(N, H, W)`` bool masks to the host; through pinned memory from a GPU, where a
+    pageable copy of tens of megabytes is several times slower."""
+    if masks.is_cuda:
+        masks = torch.empty(masks.shape, dtype=torch.bool, pin_memory=True).copy_(masks)
+    return masks.cpu().numpy()
 
 
 @dataclass
@@ -106,12 +123,12 @@ class Segmenter:
                                               self.spec.image_size)
                 ids = torch.unique(labels)
                 masks = labels[None] == ids[:, None, None]
-                return Segments(masks.cpu().numpy(), ids.cpu().numpy(), None)
+                return Segments(_to_host(masks), ids.cpu().numpy(), None)
             segments, found = postprocess.panoptic(
                 mask_logits[0], class_logits[0], size, self.spec.image_size,
                 self.spec.stuff, threshold=threshold)
             ids = torch.tensor([s for s, _, _ in found], dtype=torch.long, device=segments.device)
             masks = segments[None] == ids[:, None, None]
-            return Segments(masks.cpu().numpy(),
+            return Segments(_to_host(masks),
                             np.array([c for _, c, _ in found], dtype=np.int64),
                             np.array([p for _, _, p in found], dtype=np.float32))

@@ -48,7 +48,7 @@ from common import fixtures, require_one_file, variant_parser  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import OnnxRunner  # noqa: E402
 from mozo.vendors.eomt_deploy import SPECS, Segmenter  # noqa: E402
-from mozo.vendors.eomt_deploy.checkpoint import load_network  # noqa: E402
+from mozo.vendors.eomt_deploy.predictor import one_at_a_time  # noqa: E402
 from mozo.weights import resolve  # noqa: E402
 
 INPUT_NAME = "pixels"
@@ -96,13 +96,6 @@ def moved(a, b) -> float:
     return float((per_pixel(a) != per_pixel(b)).mean())
 
 
-def _one_at_a_time(run):
-    def network(pixels):
-        outs = [run(pixels[i:i + 1]) for i in range(len(pixels))]
-        return torch.cat([o[0] for o in outs]), torch.cat([o[1] for o in outs])
-    return network
-
-
 def export(variant: str, revision: str | None, weights_dir: Path, fp16: bool) -> None:
     spec = SPECS[variant]
     key = "onnx-fp16" if fp16 else "onnx-fp32"
@@ -118,13 +111,8 @@ def export(variant: str, revision: str | None, weights_dir: Path, fp16: bool) ->
             raise SystemExit("the fp16 graph is exported on CUDA, under fp16 autocast")
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cudnn.allow_tf32 = False
-        network = load_network(spec, checkpoint, "cuda")
-
-        def autocast(x):
-            with torch.autocast("cuda", torch.float16):
-                mask_logits, class_logits = network(x.cuda())
-            return mask_logits.float().cpu(), class_logits.float().cpu()
-        half = Segmenter(None, spec, device="cpu", network=autocast)
+        half = Segmenter(checkpoint, spec, device="cuda", half=True)  # what torch-fp16 runs
+        network = half.network()
         budget = float(np.mean([moved(half.segment(rgb), w) for rgb, w in zip(pictures, want)]))
     else:
         network = reference.network()
@@ -134,7 +122,7 @@ def export(variant: str, revision: str | None, weights_dir: Path, fp16: bool) ->
         _export(network, spec.image_size, staged, fp16)
         require_one_file(staged)
         runner = OnnxRunner(staged, device="cpu")
-        run = _one_at_a_time(lambda x: tuple(torch.from_numpy(o) for o in runner(x.numpy())))
+        run = one_at_a_time(lambda x: tuple(torch.from_numpy(o) for o in runner(x.numpy())))
         graph = Segmenter(None, spec, device="cpu", network=run)
         got = [graph.segment(rgb) for rgb in pictures]
         drift = float(np.mean([moved(g, w) for g, w in zip(got, want)]))

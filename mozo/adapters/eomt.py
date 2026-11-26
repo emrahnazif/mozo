@@ -30,14 +30,14 @@ from pathlib import Path
 from typing import Union
 
 import numpy as np
-import torch
 
 from .. import registry
 from ..image import load_image
 from ..labels import resolve as labels_for
-from ..runtimes import TensorRTRunner, get_default_device, make_runner, select_runtime
+from ..runtimes import TensorRTRunner, get_default_device, select_runtime
 from ..vendors.eomt_deploy import SPECS, VARIANTS, Segmenter
 from ..vendors.eomt_deploy.postprocess import MASK_THRESHOLD
+from ..vendors.eomt_deploy.predictor import one_at_a_time
 from ..weights import artifacts, framework_of, parts, resolve, revision_of
 from ._promptable import bounds
 
@@ -116,18 +116,9 @@ class EomtPredictor:
         framework = framework_of(self.runtime)
         network = weights = None
         if framework == "tensorrt":
-            runner = TensorRTRunner(parts(FAMILY, variant, self.runtime, revision=revision)[""],
-                                    self.device)
-            # By name: an engine declares its outputs in an order of its own.
-            order = [runner.outputs.index(name) for name in ("mask_logits", "class_logits")]
-            network = _one_at_a_time(
-                lambda pixels: tuple(runner(pixels)[i].float() for i in order))
-        elif framework == "onnx":
-            runner = make_runner(resolve(FAMILY, variant, self.runtime, revision=revision),
-                                 self.runtime, device=self.device)
-            network = _one_at_a_time(
-                lambda pixels: tuple(torch.from_numpy(o).to(pixels.device)
-                                     for o in runner(pixels.cpu().numpy())))
+            # The engine is built from the published fp16 graph (``registry.DERIVES``).
+            network = engine_network(TensorRTRunner(
+                parts(FAMILY, variant, self.runtime, revision=revision)[""], self.device))
         else:
             weights = (Path(checkpoint_path) if checkpoint_path is not None
                        else resolve(FAMILY, variant, "torch-fp32", revision=revision))
@@ -174,9 +165,8 @@ class EomtPredictor:
         return detections
 
 
-def _one_at_a_time(run):
-    """A graph built for one picture, applied to each of a batch (a semantic picture's windows)."""
-    def network(pixels: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        outputs = [run(pixels[i:i + 1].contiguous()) for i in range(len(pixels))]
-        return torch.cat([o[0] for o in outputs]), torch.cat([o[1] for o in outputs])
-    return network
+def engine_network(runner: TensorRTRunner):
+    """A TensorRT engine as the vendor's network: one picture per call, outputs read by name
+    (an engine declares them in an order of its own) and handed on as fp32."""
+    order = [runner.outputs.index(name) for name in ("mask_logits", "class_logits")]
+    return one_at_a_time(lambda pixels: tuple(runner(pixels)[i].float() for i in order))

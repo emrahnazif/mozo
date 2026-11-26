@@ -152,6 +152,7 @@ class MaskDecoder(nn.Module):
             ``(B, P, C, 4*grid, 4*grid)`` mask logits and their ``(B, P, C)`` predicted IoU,
             where ``C`` is three candidates when ``multimask_output`` is set and one otherwise.
         """
+        fine, middle = self.project(fine, middle)
         masks, iou, _, _ = self.decode(image, image_pe, sparse, dense, fine, middle)
         if multimask_output:
             return masks[:, :, 1:], iou[:, :, 1:]
@@ -169,7 +170,6 @@ class MaskDecoder(nn.Module):
         dense: Tensor,
         fine: Tensor,
         middle: Tensor,
-        projected: bool = False,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """Run the decoder and return everything it computes, before any selection.
 
@@ -177,9 +177,8 @@ class MaskDecoder(nn.Module):
         tokens (an object pointer is built from one) and the object score (is the object there at
         all).
 
-        Args:
-            projected: The two finest levels have already been through ``conv_s0``/``conv_s1``,
-                as the video tracker's are (Meta projects them once per frame, beside the cache).
+        ``fine`` and ``middle`` arrive already narrowed by :meth:`project` (the video tracker
+        projects them once per frame, as Meta does, rather than once per decode).
 
         Returns:
             ``(B, P, 4, h, w)`` mask logits for all four mask tokens, their ``(B, P, 4)`` IoU,
@@ -208,13 +207,6 @@ class MaskDecoder(nn.Module):
         mask_tokens_out = tokens[:, :, 2 : 2 + self.num_mask_tokens, :]
 
         keys = keys.transpose(2, 3).view(batch * prompts, channels, height, width)
-        # Projected here rather than beside the cached pyramid: these are this module's layers,
-        # and running them in the caller would put a head inside the encoder's cache. They depend
-        # only on the image, so caching them would work and would shrink a click cache entry from
-        # 111 MB to 21 MB -- measured at 0.6 ms of a 6 ms MPS decode, so nothing waits on it,
-        # and the boundary is worth more than the millisecond.
-        if not projected:
-            fine, middle = self.conv_s0(fine), self.conv_s1(middle)
         if prompts > 1:
             fine = fine.repeat_interleave(prompts, dim=0)
             middle = middle.repeat_interleave(prompts, dim=0)
@@ -234,6 +226,16 @@ class MaskDecoder(nn.Module):
         iou = torch.sigmoid(self.iou_prediction_head(iou_token_out))
         object_score = self.pred_obj_score_head(tokens[:, :, 0, :])
         return masks, iou, mask_tokens_out, object_score
+
+    def project(self, fine: Tensor, middle: Tensor) -> tuple[Tensor, Tensor]:
+        """Narrow the two finest levels to what the upscaling path adds them to.
+
+        A click projects them per decode rather than beside the cached pyramid: these are this
+        module's layers, and running them in the cache would put a head inside the encoder's
+        cache (it would shrink a click cache entry from 111 MB to 21 MB -- measured at 0.6 ms of a
+        6 ms MPS decode, so nothing waits on it).
+        """
+        return self.conv_s0(fine), self.conv_s1(middle)
 
     def _steadiness(self, logits: Tensor) -> Tensor:
         """How much of the mask survives moving the threshold either way.

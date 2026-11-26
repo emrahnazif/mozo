@@ -52,14 +52,12 @@ class FrameOutput:
         masks: ``(N, H, W)`` bool at the frame's size, after the object-wise overlap rule.
         scores: ``(N,)`` the tracker's visibility probability on this frame (the detection score
             on the frame an object starts).
-        spawn_scores: ``(N,)`` the detection score each object started with.
     """
 
-    def __init__(self, obj_ids, masks, scores, spawn_scores):
+    def __init__(self, obj_ids, masks, scores):
         self.obj_ids = obj_ids
         self.masks = masks
         self.scores = scores
-        self.spawn_scores = spawn_scores
 
 
 class ConceptSession:
@@ -85,7 +83,6 @@ class ConceptSession:
         self.groups: list[ObjectGroup] = []
         self.obj_ids = np.array([], np.int64)
         self.max_obj_id = -1
-        self.spawn_score: dict[int, float] = {}
         self.last_occluded: dict[int, torch.Tensor] = {}
         self.first_frame: dict[int, int] = {}
         self.unmatched: defaultdict[int, list] = defaultdict(list)
@@ -117,18 +114,16 @@ class ConceptSession:
     def _associate(self, det_masks, det_scores, trk_masks, trk_ids):
         spec = self.spec
         if trk_masks.size(0) == 0:
-            return (np.arange(det_masks.size(0)), np.array([], np.int64), {}, {},
-                    np.array([], np.int64))
+            return np.arange(det_masks.size(0)), np.array([], np.int64), {}, {}
         if det_masks.size(0) == 0:
             nonempty = (trk_masks > 0).any(dim=(1, 2)).cpu().numpy()
-            return (np.array([], np.int64), trk_ids[nonempty], {}, {}, trk_ids[~nonempty])
+            return np.array([], np.int64), trk_ids[nonempty], {}, {}
         if det_masks.shape[-2:] != trk_masks.shape[-2:]:
             raise ValueError("detection and track masks must share a resolution")
         ious = mask_iou(det_masks > 0, trk_masks > 0).cpu().numpy()
         trk_matched = (ious >= spec.track_match_iou).any(axis=0)
         nonempty = (trk_masks > 0).any(dim=(1, 2)).cpu().numpy()
         unmatched = trk_ids[np.logical_and(nonempty, ~trk_matched)]
-        empty = trk_ids[~nonempty]
         is_new = np.logical_and(det_scores >= spec.new_object_threshold,
                                 np.logical_not(np.any(ious >= spec.association_iou, axis=1)))
         new = np.nonzero(is_new)[0]
@@ -142,7 +137,7 @@ class ConceptSession:
             matched[d] = trk_ids[ious[d, :] >= spec.association_iou]
             if d in both:
                 reseed[trk_ids[best[d]].item()] = d
-        return new, unmatched, matched, reseed, empty
+        return new, unmatched, matched, reseed
 
     # --- step 4 ----------------------------------------------------------------------------
 
@@ -256,7 +251,7 @@ class ConceptSession:
 
         scores_np = det_scores.float().cpu().numpy()
         prev_ids = self.obj_ids
-        new_inds, unmatched, matched, reseed, _ = self._associate(det_masks, scores_np, trk_masks,
+        new_inds, unmatched, matched, reseed = self._associate(det_masks, scores_np, trk_masks,
                                                                   prev_ids)
         new_ids = self.max_obj_id + 1 + np.arange(len(new_inds))
         removed_now = self._probation(frame, matched, new_ids, unmatched)
@@ -279,12 +274,10 @@ class ConceptSession:
         self.obj_ids = ids
         tracker_scores = {}
         for obj_id, d in zip(new_ids, new_inds):
-            self.spawn_score[obj_id] = scores_np[d]
             tracker_scores[obj_id] = scores_np[d]
         if len(new_ids):
             self.max_obj_id = max(self.max_obj_id, int(np.max(new_ids)))
         for obj_id in removed_now:
-            self.spawn_score[obj_id] = -1e4
             last_occluded_new.pop(obj_id, None)
         self.last_occluded = last_occluded_new
         tracker_scores.update(dict(zip(prev_ids.tolist(), trk_scores.sigmoid().tolist())))
@@ -295,7 +288,7 @@ class ConceptSession:
         for obj_id in removed_now:
             for group in self.groups:
                 group.remove(obj_id)
-            self.groups = [g for g in self.groups if len(g)]
+        self.groups = [g for g in self.groups if len(g)]
 
         out = self._outputs(frame, prev_ids, trk_masks, det_masks, new_inds, new_ids,
                             tracker_scores)
@@ -329,12 +322,9 @@ class ConceptSession:
         self.trace("masks", frame, masks)
 
         ids = sorted(masks)
-        device = trk_masks.device
         if not ids:
-            return FrameOutput([], torch.zeros(0, height, width, dtype=torch.bool), torch.zeros(0),
-                               torch.zeros(0))
+            return FrameOutput([], torch.zeros(0, height, width, dtype=torch.bool), torch.zeros(0))
         all_ids = torch.tensor(ids, dtype=torch.int64)
-        spawn = torch.tensor([self.spawn_score[i] for i in ids])
         tracker = torch.tensor([tracker_scores.get(i, 0.0) for i in ids])
         binary = torch.cat([masks[i] for i in ids], dim=0)
         keep = binary.any(dim=(1, 2)).cpu()
@@ -342,7 +332,6 @@ class ConceptSession:
             keep &= ~torch.isin(all_ids, torch.tensor(sorted(self.removed), dtype=torch.int64))
         index = torch.nonzero(keep, as_tuple=True)[0]
         all_ids = all_ids[index]
-        spawn = spawn[index]
         tracker = tracker[index]
         binary = binary[index.to(binary.device)]
         if binary.shape[0] > 1:
@@ -350,10 +339,8 @@ class ConceptSession:
             single = torch.where(binary.unsqueeze(1) > 0, tracker.unsqueeze(1)[..., None, None]
                                  .to(binary.device), 0.0)
             resolved = non_overlapping(single)
-            binary = (torch.where(resolved > 0, binary.unsqueeze(1).float(),
-                                  torch.clamp(binary.unsqueeze(1).float(), max=0.0)) > 0)[:, 0]
-        del device
-        return FrameOutput(all_ids.tolist(), binary, tracker, spawn)
+            binary = binary & (resolved[:, 0] > 0)
+        return FrameOutput(all_ids.tolist(), binary, tracker)
 
     def _forget(self, frame):
         """Drop probation bookkeeping no later frame can act on, and old batch memory."""
@@ -368,8 +355,5 @@ class ConceptSession:
         for obj_id in list(self.first_frame):
             if obj_id not in live:
                 del self.first_frame[obj_id]
-        for obj_id in list(self.spawn_score):
-            if obj_id not in live:
-                del self.spawn_score[obj_id]
         for group in self.groups:
             group.prune(frame)

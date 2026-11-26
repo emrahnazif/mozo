@@ -54,6 +54,13 @@ class ClickHead(nn.Module):
         )
         self._dense_pe_ready = False
 
+    def positions(self) -> Tensor:
+        """The feature grid's dense position encoding, filled on first use and then held."""
+        if not self._dense_pe_ready:
+            self.dense_pe.copy_(self.prompt_encoder.dense_positions())
+            self._dense_pe_ready = True
+        return self.dense_pe
+
     @torch.no_grad()
     def forward(
         self,
@@ -78,10 +85,6 @@ class ClickHead(nn.Module):
         Returns:
             ``(B, C, 288, 288)`` mask logits and their ``(B, C)`` predicted IoU.
         """
-        if not self._dense_pe_ready:
-            self.dense_pe.copy_(self.prompt_encoder.dense_positions())
-            self._dense_pe_ready = True
-
         fine, middle, coarse = click
         # Upstream adds this in the flattened HWxNxC layout, where it broadcasts over positions;
         # the maps stay NCHW here, so the same bias is applied per channel instead.
@@ -89,7 +92,7 @@ class ClickHead(nn.Module):
 
         sparse, dense = self.prompt_encoder(points, labels, mask_input)
         masks, iou = self.mask_decoder(
-            image, self.dense_pe, sparse, dense, fine, middle, multimask_output
+            image, self.positions(), sparse, dense, fine, middle, multimask_output
         )
         # One image; the prompt axis is what the caller batched over, so it is the one kept.
         return masks[0], iou[0]

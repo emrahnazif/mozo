@@ -557,14 +557,11 @@ def perturbed(name: str):
     elif name == "no-hole-filling":
         patch(vendor_concept, "fill_holes", lambda logits, max_area: logits)
     elif name == "float32-memory":
-        original_encode = vendor_group.ObjectGroup._encode
-
         def encode(self, frame, masks, scores, from_points):
             feats, _ = self.features(frame, masks.size(0))
             memory, pos = self.net.encode_memory(feats[-1], masks, scores, from_points)
             return memory, self._pos_enc(pos)
         patch(vendor_group.ObjectGroup, "_encode", encode)
-        del original_encode
     elif name == "real-rotary":
         from mozo.vendors.sam3_deploy.tracker import memory as vendor_memory
 

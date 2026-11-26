@@ -39,6 +39,10 @@ COND_KEPT = 5
 #: A store with nothing in it, for steps that read no memory.
 _EMPTY = {"cond_frame_outputs": {}, "non_cond_frame_outputs": {}}
 
+#: Where an object's given mask or clicks are stored: every frame given a prompt is a
+#: conditioning frame, tracked before or not (upstream's ``add_all_frames_to_correct_as_cond``).
+_GIVEN = "cond_frame_outputs"
+
 
 def non_overlapping(masks: torch.Tensor) -> torch.Tensor:
     """Keep each pixel only for the object with the highest logit there; clamp the others to -10."""
@@ -90,10 +94,6 @@ class ObjectGroup:
         self.inputs.append(set())
         return len(self.obj_ids) - 1
 
-    def _storage_key(self, frame: int) -> str:
-        # Every frame given a prompt is a conditioning frame, tracked before or not.
-        return "cond_frame_outputs"
-
     def add_mask(self, frame: int, obj_id: int, mask: torch.Tensor) -> None:
         """Give an object a mask on ``frame`` (upstream's ``add_new_mask``).
 
@@ -113,7 +113,7 @@ class ObjectGroup:
 
         self.inputs[index].add(frame)
         is_init = frame not in self.tracked
-        key = self._storage_key(frame)
+        key = _GIVEN
         # A given mask is taken as the output; the decoder only makes its pointer, reading no
         # memory, so the object's past is not needed here.
         out = self._run(frame, 1, is_init, None, inputs, _EMPTY, run_mem_encoder=False)
@@ -135,7 +135,7 @@ class ObjectGroup:
         index = self._index(obj_id)
         self.inputs[index].add(frame)
         is_init = frame not in self.tracked
-        key = self._storage_key(frame)
+        key = _GIVEN
         if not is_init:
             raise RuntimeError("clicks are taken on the first frame only")
         out = self._run(frame, 1, is_init, {"point_coords": points, "point_labels": labels}, None,
@@ -153,9 +153,8 @@ class ObjectGroup:
             "pred_masks": out["pred_masks"][part],
             "obj_ptr": out["obj_ptr"][part],
             "object_score_logits": out["object_score_logits"][part],
+            "iou_score": out["iou_score"][part],
         }
-        if "iou_score" in out:
-            sliced["iou_score"] = out["iou_score"][part]
         return sliced
 
     # --- running the network -----------------------------------------------------------------
@@ -201,8 +200,7 @@ class ObjectGroup:
         masks = torch.zeros((1, 1, size, size), dtype=torch.float32)
         feats, pos = self.features(frame, 1)
         masks = masks.to(feats[-1].device)
-        out = self.net.track_step(frame, True, feats, pos, None, masks,
-                                  {"cond_frame_outputs": {}, "non_cond_frame_outputs": {}},
+        out = self.net.track_step(frame, True, feats, pos, None, masks, _EMPTY,
                                   self.num_frames, run_mem_encoder=False)
         return out["obj_ptr"]
 

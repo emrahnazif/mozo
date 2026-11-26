@@ -1,6 +1,6 @@
 # sam3_deploy
 
-Deployment-only SAM 3 for single images. Apache-2.0 code, derived from
+Deployment-only SAM 3: single images, and video tracking. Apache-2.0 code, derived from
 `transformers/models/sam3` rather than from `facebookresearch/sam3`, with no `transformers`,
 `hydra` or `iopath` dependency at runtime.
 
@@ -124,8 +124,22 @@ A held image answers a repeated click identically, which the gate checks rather 
 - Prompts up to 32 tokens — not CLIP's usual 77.
 - Clicks, boxes and mask refinement, through SAM 3's own tracker head.
 - CPU and CUDA. CPU runs at about 0.2 images/second; this model wants a GPU.
+- Video tracking, frame by frame (`Segmenter.tracker()`): phrases (every instance, new ones as
+  they appear) or clicks and boxes on the first frame.
 
-Not supported: video tracking.
+## Tracking
+
+```python
+session = segmenter.tracker()
+for frame in frames:                        # HxWx3 RGB uint8, in order
+    out = session.update(frame, texts=["person"] if first else None)
+    out.obj_ids, out.prompts, out.masks, out.scores
+```
+
+Meta's SAM 3 video model, one frame at a time, bit for bit on CPU (`PROVENANCE.md`, "Video
+tracking"). Objects are tracked in the batches Meta tracks them in (those that arrived on the same
+frame), with Meta's detection, matching, probation, re-seeding and occlusion rules, and only what a
+later frame can read is kept.
 
 ## Licensing
 

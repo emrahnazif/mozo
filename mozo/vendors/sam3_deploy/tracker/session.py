@@ -35,6 +35,7 @@ import numpy as np
 import torch
 
 from ..config import VIDEO, VideoSpec
+from ..grounding.boxes import inverse_sigmoid
 from ..image import to_model_coords
 from .concept import ConceptSession
 from .group import ObjectGroup
@@ -95,11 +96,6 @@ def split_prompts(points=None, labels=None, boxes=None) -> list[dict]:
     return groups
 
 
-def _inverse_sigmoid(x: torch.Tensor, eps: float = 1e-3) -> torch.Tensor:
-    x = x.clamp(min=0, max=1)
-    return torch.log(x.clamp(min=eps) / (1 - x).clamp(min=eps))
-
-
 class _Features:
     """The current frame's tracker features, handed out expanded to a batch as upstream does."""
 
@@ -146,7 +142,6 @@ class VideoTracker:
         self.texts: list[str] = []
         self.sessions: list[ConceptSession] = []
         self.group: ObjectGroup | None = None
-        self.click_count = 0
         self._features = _Features()
         self._ids: dict[tuple[int, int], int] = {}
         self._texts: dict[str, dict] = {}
@@ -189,31 +184,28 @@ class VideoTracker:
         if self.mode == "text":
             pixels = load_frame(image).to(seg.device)
             encoded = seg.vision(pixels, stacks=("concept", "click"))
-            self._pixels = pixels
-            return self._text_frame(frame, encoded, texts)
+            return self._text_frame(frame, encoded, texts, pixels)
         pixels = load_click_frame(image).to(seg.device)
         return self._click_frame(frame, seg.vision(pixels, stacks=("click",)), prompts)
 
     # --- text --------------------------------------------------------------------------------
 
-    def _text_frame(self, frame: int, encoded: dict, texts) -> Frame:
+    def _text_frame(self, frame: int, encoded: dict, texts, pixels) -> Frame:
         seg = self.segmenter
-        decoder = seg.click.mask_decoder
-        fine, middle, coarse = (self._round(x) for x in encoded["click"])
-        levels = [decoder.conv_s0(fine), decoder.conv_s1(middle), coarse]
-        self._features.set(frame, levels, encoded["positions"])
+        levels = self._levels(frame, encoded, self._round)
         if frame == 0:
             self.texts = list(texts)
+            trace = self.trace
             self.sessions = [ConceptSession(seg.tracker_net, self._features, self.shape, self.spec,
                                             self.num_frames,
-                                            lambda s, f, v, i=i: self.trace(f"{i}.{s}", f, v))
+                                            lambda s, f, v, i=i: trace(f"{i}.{s}", f, v))
                              for i in range(len(self.texts))]
         outputs = []
         for index, text in enumerate(self.texts):
             masks, scores = self._detect(encoded, text)
             session = self.sessions[index]
             for _ in range(2 if frame == 0 else 1):
-                self.trace(f"{index}.pixels", frame, self._pixels)
+                self.trace(f"{index}.pixels", frame, pixels)
                 self.trace(f"{index}.features", frame, levels)
                 self.trace(f"{index}.detections", frame, (masks, scores))
             if frame == 0:
@@ -235,6 +227,13 @@ class VideoTracker:
                 scores.append(out.scores[row])
         return self._frame(ids, prompts, masks, scores)
 
+    def _levels(self, frame: int, encoded: dict, transform) -> list[torch.Tensor]:
+        """The tracker's three levels for this frame, the finer two projected once, as Meta does."""
+        fine, middle, coarse = (transform(x) for x in encoded["click"])
+        levels = [*self.segmenter.click.mask_decoder.project(fine, middle), coarse]
+        self._features.set(frame, levels, encoded["positions"])
+        return levels
+
     @staticmethod
     def _round(x: torch.Tensor) -> torch.Tensor:
         """Meta's bfloat16 cast of the tracker's features, handed on as float32."""
@@ -248,7 +247,7 @@ class VideoTracker:
                              prompt["mask"], None, None)
         # Meta's video model folds the presence score into each query's logit (clamped), and the
         # detections are then thresholded on the sigmoid of that.
-        logits = _inverse_sigmoid(result["logits"][0].sigmoid() * result["presence"][0].sigmoid())
+        logits = inverse_sigmoid(result["logits"][0].sigmoid() * result["presence"][0].sigmoid())
         logits = logits.clamp(min=-10.0, max=10.0)
         masks = result["masks"][0]
         keep = nms(logits.sigmoid(), masks, self.spec.detection_threshold, self.spec.nms_iou)
@@ -274,16 +273,12 @@ class VideoTracker:
 
     def _click_frame(self, frame: int, encoded: dict, prompts) -> Frame:
         seg = self.segmenter
-        decoder = seg.click.mask_decoder
-        fine, middle, coarse = encoded["click"]
-        levels = [decoder.conv_s0(fine), decoder.conv_s1(middle), coarse]
-        self._features.set(frame, levels, encoded["positions"])
+        self._levels(frame, encoded, lambda x: x)
         if frame == 0:
             self.group = ObjectGroup(seg.tracker_net, self._features, self.shape, self.num_frames)
-            for prompt in prompts:
+            for obj_id, prompt in enumerate(prompts):
                 points, labels = self._click_inputs(prompt)
-                self.group.add_points(frame, self.click_count, points, labels)
-                self.click_count += 1
+                self.group.add_points(frame, obj_id, points, labels)
             self.group.preflight(run_mem_encoder=True)
         low, scores = self.group.propagate(frame, run_mem_encoder=True)
         self.group.prune(frame)
@@ -297,6 +292,8 @@ class VideoTracker:
 
     def _click_inputs(self, prompt: dict) -> tuple[torch.Tensor, torch.Tensor]:
         """Box corners first (labels 2 and 3), then clicks, in the encoder's square."""
+        from ..predictor import BOX_BOTTOM_RIGHT, BOX_TOP_LEFT  # the predictor builds this module
+
         points = prompt.get("points")
         labels = prompt.get("labels")
         box = prompt.get("box")
@@ -304,7 +301,7 @@ class VideoTracker:
         marks = [] if labels is None else [np.asarray(labels, dtype=np.int32).reshape(-1)]
         if box is not None:
             coords.insert(0, np.asarray(box, dtype=np.float32).reshape(2, 2))
-            marks.insert(0, np.array([2, 3], dtype=np.int32))
+            marks.insert(0, np.array([BOX_TOP_LEFT, BOX_BOTTOM_RIGHT], dtype=np.int32))
         coords = to_model_coords(np.concatenate(coords), self.shape)
         marks = torch.from_numpy(np.concatenate(marks))
         device = self.segmenter.device

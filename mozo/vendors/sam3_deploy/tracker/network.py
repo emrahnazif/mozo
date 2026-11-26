@@ -80,7 +80,7 @@ class TrackerNet(nn.Module):
         self.low_res = 4 * click.grid
         self.input_mask_size = spec.mask_input_size
 
-        self.memory_attention = MemoryAttention(spec, click.grid)
+        self.memory_attention = MemoryAttention(spec)
         self.memory_encoder = MemoryEncoder(spec)
         self.mask_downsample = nn.Conv2d(1, 1, kernel_size=4, stride=4)
         self.obj_ptr_proj = Mlp((spec.hidden,) * 4)
@@ -120,12 +120,9 @@ class TrackerNet(nn.Module):
         # The prompt encoder puts a batch of prompts on the prompt axis of one image; here each
         # object is its own image with one prompt.
         sparse = sparse.transpose(0, 1)
-        if not self.click._dense_pe_ready:
-            self.click.dense_pe.copy_(encoder.dense_positions())
-            self.click._dense_pe_ready = True
         decoder = self.click.mask_decoder
         masks, ious, tokens, object_score = decoder.decode(
-            features, self.click.dense_pe, sparse, dense, high_res[0], high_res[1], projected=True)
+            features, self.click.positions(), sparse, dense, high_res[0], high_res[1])
         masks, ious, tokens, object_score = masks[:, 0], ious[:, 0], tokens[:, 0], object_score[:, 0]
 
         if multimask:
@@ -139,18 +136,19 @@ class TrackerNet(nn.Module):
         appearing = object_score > 0
         multimasks = torch.where(appearing[:, None, None], masks, self.spec.no_object_score)
         multimasks = multimasks.float()
-        high = F.interpolate(multimasks, size=(self.image_size, self.image_size),
-                             mode="bilinear", align_corners=False)
         token = tokens[:, 0]
         if multimask:
             best = torch.argmax(ious, dim=-1)
             rows = torch.arange(batch, device=device)
             low_res = multimasks[rows, best].unsqueeze(1)
-            high = high[rows, best].unsqueeze(1)
             if tokens.size(1) > 1:
                 token = tokens[rows, best]
         else:
             low_res = multimasks
+        # Upsampled after the choice: bilinear interpolation is per channel, so this is the
+        # chosen channel of upstream's all-candidates upsample, without the other two.
+        high = F.interpolate(low_res, size=(self.image_size, self.image_size),
+                             mode="bilinear", align_corners=False)
 
         pointer = self.obj_ptr_proj(token)
         weight = appearing.float()
@@ -192,9 +190,11 @@ class TrackerNet(nn.Module):
         if frame == 0:
             return []
         chosen = []
-        for t in range(frame - 1, 0, -1):
-            out = outputs.get(t)
-            if out is None or "eff_iou_score" not in out:
+        # Newest first, as upstream walks back from the previous frame -- over the frames still
+        # stored rather than every number down to 1; frame 0 is never a candidate.
+        for t in sorted((t for t in outputs if 0 < t < frame), reverse=True):
+            out = outputs[t]
+            if "eff_iou_score" not in out:
                 continue
             if out["eff_iou_score"] > self.spec.memory_selection_threshold:
                 chosen.insert(0, t)
@@ -298,8 +298,7 @@ class TrackerNet(nn.Module):
 
     def track_step(self, frame: int, is_init: bool, feats: list[Tensor], pos: list[Tensor],
                    points: dict | None, mask_inputs: Tensor | None, store: dict,
-                   num_frames: int | None, run_mem_encoder: bool,
-                   prev_mask_logits: Tensor | None = None) -> dict:
+                   num_frames: int | None, run_mem_encoder: bool) -> dict:
         """Upstream's ``track_step`` for a batch of objects on one frame.
 
         Args:
@@ -316,8 +315,6 @@ class TrackerNet(nn.Module):
             out = self.mask_as_output(pix, high_res, mask_inputs)
         else:
             pix = self.condition(frame, is_init, feats[-1], pos[-1], store, num_frames)
-            if prev_mask_logits is not None:
-                mask_inputs = prev_mask_logits
             # Three candidates for no prompt or a single click, on every frame (upstream's
             # ``multimask_output_for_tracking``); the stable single mask for anything more.
             count = 0 if points is None else points["point_labels"].size(1)

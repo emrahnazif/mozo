@@ -71,7 +71,7 @@ class RotaryAttention(nn.Module):
         self.repeat_keys = repeat_keys
 
     def forward(self, query: Tensor, key: Tensor, value: Tensor, table: Tensor,
-                unrotated: int = 0) -> Tensor:
+                key_table: Tensor | None = None, unrotated: int = 0) -> Tensor:
         # One head: ``(B, N, C)`` -> ``(B, 1, N, C)``, as a reshape-and-transpose view.
         q = self.q_proj(query)
         k = self.k_proj(key)
@@ -84,8 +84,7 @@ class RotaryAttention(nn.Module):
         rotated = k.shape[-2] - unrotated
         q = _rotate(q, table)
         if rotated:
-            repeat = rotated // q.shape[-2] if self.repeat_keys else 1
-            k[:, :, :rotated] = _rotate(k[:, :, :rotated], table.repeat(repeat, 1))
+            k[:, :, :rotated] = _rotate(k[:, :, :rotated], table if key_table is None else key_table)
 
         out = F.scaled_dot_product_attention(q, k, v)
         out = out.transpose(1, 2).reshape(b, -1, out.shape[-1])
@@ -105,12 +104,12 @@ class MemoryAttentionLayer(nn.Module):
         self.layer_norm2 = nn.LayerNorm(spec.hidden)
         self.layer_norm3 = nn.LayerNorm(spec.hidden)
 
-    def forward(self, x: Tensor, memory: Tensor, memory_pos: Tensor, table: Tensor,
+    def forward(self, x: Tensor, memory: Tensor, keys: Tensor, table: Tensor, key_table: Tensor,
                 unrotated: int) -> Tensor:
         h = self.layer_norm1(x)
         x = x + self.self_attn(h, h, h, table)
         h = self.layer_norm2(x)
-        x = x + self.cross_attn_image(h, memory + memory_pos, memory, table, unrotated)
+        x = x + self.cross_attn_image(h, keys, memory, table, key_table, unrotated)
         h = self.layer_norm3(x)
         return x + self.linear2(F.relu(self.linear1(h)))
 
@@ -120,16 +119,14 @@ class MemoryAttention(nn.Module):
 
     Args:
         spec: Tracker geometry.
-        grid: Side of the feature grid the rotary table covers.
     """
 
-    def __init__(self, spec: TrackerSpec = TRACKER, grid: int = 72):
+    def __init__(self, spec: TrackerSpec = TRACKER):
         super().__init__()
         self.layers = nn.ModuleList(MemoryAttentionLayer(spec) for _ in range(spec.attention_layers))
         self.layer_norm = nn.LayerNorm(spec.hidden)
         self.dim = spec.hidden
         self.theta = spec.rope_theta
-        self.grid = grid
         self._tables: dict[tuple, Tensor] = {}
 
     def table(self, tokens: int, device) -> Tensor:
@@ -157,8 +154,12 @@ class MemoryAttention(nn.Module):
         memory = memory.transpose(0, 1)
         memory_pos = memory_pos.transpose(0, 1)
         table = self.table(x.shape[1], x.device)
+        # The same for every layer, so built once: the keys (memory plus its encoding) and the
+        # rotary table tiled once per memory frame the keys span.
+        keys = memory + memory_pos
+        key_table = table.repeat((memory.shape[1] - unrotated) // x.shape[1], 1)
         for layer in self.layers:
-            x = layer(x, memory, memory_pos, table, unrotated)
+            x = layer(x, memory, keys, table, key_table, unrotated)
         return self.layer_norm(x).transpose(0, 1)
 
 

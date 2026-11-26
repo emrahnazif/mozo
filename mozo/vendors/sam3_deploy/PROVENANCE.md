@@ -1,6 +1,7 @@
 # Provenance
 
-This package is a deployment-only extraction of SAM 3's **image** path.
+This package is a deployment-only extraction of SAM 3's **image** path and its **video tracker**
+(see "Video tracking" below).
 
 It derives from `transformers/models/sam3` (Apache-2.0, © The Meta AI Authors and The
 HuggingFace Team) — **not** from `facebookresearch/sam3`, whose code ships under Meta's SAM
@@ -26,10 +27,17 @@ This package does not redistribute them.
 The checkpoint is consumed **exactly as Meta publishes it** — no repacking, no pruning, no
 mozo-format artifact. `checkpoint.py` translates key names at load time instead.
 
+**The reference is `facebookresearch/sam3` at commit `5eb25fb`** (2025-12-21). It is the commit
+the image gate was recorded against: all 140 `.py` files under `sam3/` of the checkout used for
+`tools/verify/sam3_reference.py` are byte-identical to it. Later commits are not this model's
+arithmetic any more: the SAM 3.1 release (`9f22cb9`, 2026-03-27) rewrote the shared ViT's MLP as a
+fused bfloat16 `addmm`+GELU whenever gradients are off (`sam3/perflib/fused.py`), so SAM 3's own
+image path became a bfloat16 function there, and refuses float32.
+
 ## What was deliberately left behind
 
-The entire video path: memory attention, the memory encoder, temporal disambiguation, tracklet
-bookkeeping, multi-GPU inference, the training code and the evaluation harness.
+Multi-GPU inference, interactive refinement of a tracked object (Meta's `add_prompt` with points
+on a concept session), SAM 3.1, the training code and the evaluation harness.
 
 Weights present in the checkpoint that this package does not build:
 
@@ -160,9 +168,10 @@ Three further things could not be read off the weights at all, and each was foun
 - **`no_mem_embed` applies here too**, as it does on SAM 2's image path -- trained as "there is no
   memory to attend to", which is a single image's situation exactly.
 
-`tracker.*` is 309 tensors; 149 of them (4.2 M parameters) are the click path and are loaded. The
-other 160 (7.5 M) are memory attention and mask-memory fusion, which have nothing to attend to on
-a still image, and are filtered at load.
+`tracker.*` is 309 tensors; 149 of them (4.2 M parameters) are the click path. The other 160
+(7.5 M) are the video tracker's memory attention, memory encoder and pointer projections; they load
+with the rest (`checkpoint.tracker_state_dict`), so the checkpoint loads strictly with nothing
+left over.
 
 **Holes are filled as upstream fills them.** Meta's interactive predictor sets every background
 region of at most 256 pixels in the 288x288 logits just above the threshold before resizing
@@ -172,6 +181,56 @@ this package's own code, written to the rule rather than copied. Measured on 720
 images, it matches upstream's fill bit for bit on all 720, and the fill changes 593 of them. The
 returned logits stay unfilled, as upstream's do. `sam2_deploy` still omits it: SAM 2's own image
 predictor does not fill by default.
+
+## Video tracking
+
+`tracker/` follows concepts or clicked objects through a video, one frame at a time. It derives
+from `transformers/models/sam3_tracker_video` (memory attention, memory encoder, the tracking step;
+© The HuggingFace Team, Apache-2.0) and `transformers/models/sam3_video` (the concept tracker:
+detection, matching, probation, re-seeding, occlusion; © The Meta AI Authors and The HuggingFace
+Team, Apache-2.0), the decoder and prompt encoder being the click head's own. The reference is
+Meta's video model at `5eb25fb`, `build_sam3_video_model()` with its defaults (temporal
+disambiguation on), run as a black box by `tools/verify/sam3_video.py`.
+
+**Licence approach (approved 2026-11-26).** In several places Meta's model behaves otherwise than
+its Apache-2.0 port, and mozo follows Meta: per-arrival batches, working NMS and hole filling, one
+session per phrase. That behaviour was established by running Meta's model and comparing numbers,
+and the code is written from the Apache source or from the rule, as the image path's thirteen
+divergences were. No code from `facebookresearch/sam3` is included.
+
+### Where this diverges from `transformers`, and why
+
+| divergence | why |
+|---|---|
+| NMS and hole filling are this package's own code (`tracker/ops.py`). | `transformers` takes both from a compiled kernel downloaded from the Hub at run time (`kernels-community/cv-utils`) and silently skips them without it: no NMS (duplicates become objects; it ran out of memory on "hand" on a 12 GB GPU where Meta needs 8.1 GB) and no hole filling. Meta's CPU path is the rule: greedy NMS in NumPy's `argsort` order, 8-connected components (scikit-image there, OpenCV here). |
+| Objects are tracked in batches, one per arrival frame (`tracker/group.py`). | `transformers` keeps every object in one batch. A batched forward is not bit-identical to another batching, and Meta's re-seed and memory selection act on a whole batch. |
+| Several phrases are independent sessions sharing the image encode. | `transformers` merges several phrases' detections into one matching and suppression; Meta takes one phrase per session, so only the independent form has a reference. |
+| The phrase is encoded batched with `"visual"`. | Meta's video detector always encodes its text batch, the phrase and the exemplar placeholder, together. A batch of two is not the same float computation as one: measured 8.5e-06 on the text features, 6e-04 on the masks. |
+| The tracker's image features are rounded through bfloat16. | Meta casts them "for all-gather" on every run, one GPU included (accommodation 2 below). |
+| Frames are stored in float16 (`ops.load_frame`). | Meta's video loader resizes with PIL (bilinear, antialiased), stores the frame in float16 and normalises it in float16. Not the image path's transform. |
+| The memory attention's rotary encoding is complex, the excluded keys rotated in place. | As the trunk's (`vision/vit.py`). `transformers` rotates with real `cos`/`sin` and notes the 1e-07 drift itself. |
+| The first frame of a phrase session is visited twice. | Meta's API runs `add_prompt` on the frame, then `propagate_in_video` starts from that same frame; the second visit re-seeds the objects the first found and re-encodes their memory. |
+| The detection score folds in presence as Meta's video detector does: `sigmoid(clamp(logit(sigmoid(q) · sigmoid(presence)), ±10))`. | The image path keeps them apart (`predictor.instances`); Meta's video model builds its detector with joint scores. |
+| A frame's output is computed from that frame and the ones before only. | Meta holds output back 15 frames ("hotstart"), so that an object it removes as spurious within its first 15 frames is never shown. Its decisions are reproduced; the delay is not: such an object is shown until removed. On eight runs over Meta's two example clips (2,000+ frames, up to 8 objects), with Meta's thresholds, it never happened; with the thresholds forced from 8 to 2, 10 object-frames of 90 differed. |
+| Memory is bounded (`group.prune`). | Meta keeps every past frame. A frame reads at most the four closest conditioning frames and, through memory selection, the fifteen most recent selectable frames; five and sixteen are kept, plus the last 20 frames (removal re-scores a batch, and only happens within probation). |
+
+### Accommodations of the reference
+
+Meta's video model is a bfloat16 (AMP) system: building it enters a process-wide CUDA autocast it
+never leaves, and it casts the tracker's features to bfloat16 explicitly. Without autocast it
+refuses float32. The gate runs it on the CPU in float32 with four accommodations:
+
+1. the autocast context is exited (inert on CPU anyway);
+2. the explicit bfloat16 cast of the tracker features is **kept**, and handed on as float32 where
+   AMP would have kept bfloat16 -- the only one that touches a value;
+3. hardcoded `"cuda"` allocations, `pin_memory`, `.cuda()` calls and the tracker's state storage
+   stay on the CPU (storage only);
+4. Meta's CPU connected components (`perflib/connected_components.py`) fails on an empty batch, a
+   frame with no objects; it returns the empty result the CUDA path returns.
+
+### Measured
+
+GATE_RESULTS
 
 ## Dependencies
 

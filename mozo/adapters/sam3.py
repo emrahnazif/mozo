@@ -61,6 +61,17 @@ CLICK_LEVELS = ("click0", "click1", "click2")
 _log = logging.getLogger(__name__)
 
 
+def _phrases(text: Union[str, Sequence[str]]) -> list[str]:
+    """One phrase or several, as a list; refused if empty. SAM 3 will happily encode the empty
+    string and return whatever it finds most salient, which is not what an empty prompt means."""
+    phrases = [text] if isinstance(text, str) else list(text)
+    if not phrases:
+        raise ValueError("SAM 3 needs a concept to look for; no text was given.")
+    if any(not p.strip() for p in phrases):
+        raise ValueError("SAM 3 needs a concept to look for; text was empty.")
+    return phrases
+
+
 class GraphVision:
     """A graph artifact standing in for SAM 3's torch vision encoder.
 
@@ -259,11 +270,7 @@ class Sam3Predictor(Preparing):
                 "or boxes=."
             )
 
-        prompts = [text] if isinstance(text, str) else list(text)
-        if not prompts:
-            raise ValueError("SAM 3 needs a concept to look for; no text was given.")
-        if any(not p.strip() for p in prompts):
-            raise ValueError("SAM 3 needs a concept to look for; text was empty.")
+        prompts = _phrases(text)
 
         pixels = load_image(image)
         self._after_prepare(pixels)
@@ -316,7 +323,7 @@ class Sam3Predictor(Preparing):
             >>> for frame in pf.VideoReader("street.mp4"):                    # doctest: +SKIP
             ...     found = tracker.update(frame, text="person")
         """
-        if self._segmenter.tracker_net is None or self.runtime != "torch-fp32":
+        if self._segmenter.tracker_net is None:
             raise ValueError(
                 f"SAM 3's tracker runs on torch-fp32 only; this model was loaded on "
                 f"{self.runtime}. Load it with runtime='torch-fp32' to track."
@@ -384,11 +391,7 @@ class Sam3Tracker:
         """
         texts = None
         if text is not None:
-            texts = [text] if isinstance(text, str) else list(text)
-            if not texts:
-                raise ValueError("SAM 3 needs a concept to look for; no text was given.")
-            if any(not t.strip() for t in texts):
-                raise ValueError("SAM 3 needs a concept to look for; text was empty.")
+            texts = _phrases(text)
             if self._texts is not None and texts == self._texts:
                 texts = None
         prompts = split_prompts(points, labels, boxes)

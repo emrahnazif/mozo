@@ -158,8 +158,10 @@ class Segmenter:
         if "click" in getattr(self.vision, "stacks", ("concept",)):
             self.click = ClickHead()
             self.click.load_state_dict(click_state_dict(state), strict=True)
+        if vision is None:
             # The video tracker's own weights (memory attention, memory encoder, pointers):
-            # 7.5 M parameters, loaded always so the checkpoint loads with nothing left over.
+            # 7.5 M parameters, loaded with the torch encoder -- the only one the tracker has
+            # been checked against -- so the checkpoint loads with nothing left over.
             self.tracker_net = TrackerNet(self.click)
             self.tracker_net.load_state_dict(tracker_state_dict(state), strict=True)
         self.text = TextEncoder()

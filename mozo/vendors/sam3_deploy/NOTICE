@@ -23,8 +23,17 @@ anyone you serve predictions to, and it binds recipients on use rather than on a
 distribution must ship a copy of that agreement alongside the weights. mozo does not
 redistribute them from this package.
 
+VIDEO TRACKING
+--------------
+The video tracker (memory attention, the memory encoder, object pointers, and the concept
+tracker's matching, probation, re-seeding and occlusion rules) derives from the SAM 3 video
+implementation in HuggingFace Transformers (src/transformers/models/sam3_tracker_video and
+src/transformers/models/sam3_video), licensed under the Apache License, Version 2.0. Where its
+behaviour had to follow Meta's published model rather than that source, it was established by
+running Meta's model and comparing numbers; no code from facebookresearch/sam3 is included. See
+PROVENANCE.md.
+
 NOT INCLUDED
 ------------
-The video path is not part of this package: memory attention, the memory encoder, temporal
-disambiguation and the tracklet bookkeeping that drives them are all left behind, along
-with the training code and the evaluation harness. See PROVENANCE.md.
+Multi-GPU inference, interactive refinement of a tracked object, SAM 3.1, the training code and
+the evaluation harness. See PROVENANCE.md.

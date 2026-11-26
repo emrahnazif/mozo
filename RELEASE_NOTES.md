@@ -6,10 +6,12 @@
   V2's relative variants return -- an `HxW` float32 map at the image's size, inverse depth on an
   arbitrary scale, larger meaning nearer, `unit=None` -- so the two families are interchangeable in
   code and in workflows (a `depth_anything_v3` node). Bit-identical to the authors' code on every
-  intermediate. On CUDA with TensorRT 11 installed, `auto` runs an fp32 TensorRT engine built from
-  the published ONNX graph, with the same accuracy; `runtime="tensorrt-fp16"` is faster still
-  for `small` and `base`. See the family's page for speeds. The non-commercial sizes, and the
-  metric model (which needs the camera's focal length), are not offered.
+  intermediate, on CUDA (RTX 3060, torch 2.13, CUDA 12.6) in fp32 and under upstream's own bf16
+  and fp16 autocast, and on the CPU. On CUDA with TensorRT 11 installed, `auto` runs an fp32
+  TensorRT engine built from the published ONNX graph, with the same accuracy;
+  `runtime="tensorrt-fp16"` is faster still for `small` and `base`. See the family's page for
+  speeds. The non-commercial sizes, and the metric model (which needs the camera's focal length),
+  are not offered.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a

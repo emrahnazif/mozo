@@ -24,8 +24,9 @@ is `DepthAnything3.inference([image])`: `InputProcessor`, then `DepthAnything3Ne
 package returns at the processed resolution is `torch.equal` to upstream's
 `DepthAnything3Net` through upstream's `InputProcessor` and `OutputProcessor` -- and so is every
 intermediate the two networks share by name. With autocast on, as upstream's `inference` always
-runs, this package under the same autocast equals upstream's unmodified `inference`. The chain
-stops there: accuracy numbers are the authors'.
+runs, this package under the same autocast equals upstream's unmodified `inference`. Both hold
+on CUDA (RTX 3060, torch 2.13.0, CUDA 12.6, cuDNN 9.10.2), in fp32 and under upstream's bf16 and
+fp16 autocast, and on the CPU. The chain stops there: accuracy numbers are the authors'.
 
 ## Checkpoints, and why only these three
 
@@ -130,7 +131,8 @@ which only the giant model uses.
 ## Verification
 
 `tools/verify/depth_anything_v3.py` reproduces all of the following against a checkout of the
-commit above and the Hugging Face snapshots, on the CPU with `MKL_CBWR=AVX2,STRICT`:
+commit above and the Hugging Face snapshots, in one process with upstream: on CUDA
+(`--device cuda`, the primary gate) and on the CPU with `MKL_CBWR=AVX2,STRICT`:
 
 - **Standalone** -- nothing imported outside stdlib, torch, torchvision, numpy and cv2.
 - **Every stage** -- the preprocessed tensor, every call of every module the two networks share
@@ -148,6 +150,19 @@ block and of the final norm, the position-grid offset, `INTER_AREA` to `INTER_LI
 multiple-of-14 tie rule (at the input), and for `small` and `base` the RoPE frequency, the QK-norm
 eps, swapped camera tokens and the head's UV-embedding ratio x1.0000001; for `mono-large` the
 sky seed and the sky threshold (at the final depth).
+
+**On CUDA**, measured 2026-11-26 on an RTX 3060 (vision-002; torch 2.13.0+cu126, CUDA 12.6,
+cuDNN 9.10.2, driver 550.144.03), with mozo's production settings (torch's defaults: cuDNN TF32
+on, matmul TF32 off, every SDPA backend enabled, `cudnn.benchmark` off): six photographs and the
+seven synthetic inputs per variant, in fp32 (mozo's `torch-fp32`) and under upstream's own bf16
+and fp16 autocast -- every stage of every image of every variant byte-identical, 42,120
+comparisons, upstream and the vendor each deterministic run to run. Upstream's RoPE caches its
+cos/sin table under a key that ignores autocast, so whichever precision the first call in a
+process had sticks; the gate empties that cache before each upstream run, which is the answer a
+fresh process gives. On CUDA the same eleven perturbations are caught, and five that change only
+the hardware arithmetic on the vendor's side: TF32 matmuls on, cuDNN TF32 off, channels-last
+convolution inputs, SDPA forced to its math kernel (the default is the memory-efficient fp32
+kernel), and the attention's unfused path.
 
 ## Export
 

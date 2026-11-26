@@ -379,6 +379,13 @@ Reproduce them, and record them:
   answer came out of an fp32 table and differed from the vendor's (and from a fresh process). CPU
   autocast does not lower `einsum`, so the CPU gate never saw it. Empty every cache a reference
   keeps on its modules before each run, so each run is the fresh-process answer.
+- **A determinism check that passes by luck.** Two runs agreeing shows only that those two runs
+  agreed. Depth Anything 3's `mono-large` on a 42x504 input recomputes one `qkv` GEMM with a
+  different last bit about once per five gate passes, in upstream and the vendor alike, with the
+  same cuBLAS kernel each time; in isolation it repeated 800,000 times without a difference. Rerun
+  each side several times (`--repeats`), print how many reruns differed from the first per side,
+  name the first module that moved, and let a difference fail the gate. A reference recorded on
+  the odd run makes every vendor run "differ" from upstream: the determinism line says so.
 - **A non-strict hub loader.** `PyTorchModelHubMixin.from_pretrained` loads with `strict=False`;
   Depth Anything 3's small/base leave six LayerNorm tensors at init. Enumerate what is missing
   before trusting the reference, and load the vendor strict.

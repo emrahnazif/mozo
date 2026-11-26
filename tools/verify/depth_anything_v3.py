@@ -45,8 +45,18 @@ Checks, per ``--dtype``, every one exact -- no tolerance:
 4. **mozo** (with ``fp32``) -- ``DepthAnythingV3Predictor`` through the registry, the weights
    resolver (point ``MOZO_BASE_URL`` at a staged ``weights/`` tree) and the adapter on
    ``--device``, against the vendor's depth resized and inverted here. Skipped with ``--no-mozo``.
-5. **Determinism** -- upstream twice and the vendor twice on the same image, byte-identical,
-   every recorded intermediate.
+5. **Determinism** -- upstream and the vendor each rerun ``--repeats`` times (default 1) on the
+   same image, every recorded intermediate byte-identical to that side's first run. A failure
+   names the side, how many reruns differed and the first module that differed; each variant
+   ends with the totals (``reruns differing from the side's first run``), so a pass reads as "no
+   difference in N reruns", which is all a rerun can show.
+
+   On CUDA this is not always so. mono-large on the 42x504 input (``wide-2000x150``) now and then
+   gives a different result in one ``attn.qkv`` Linear (cuBLAS ``ampere_sgemm_128x32_tn``), on
+   either side, in about one gate pass in five, and every later stage follows (final depth
+   max|d| ~1e-4). The same GEMM on the same input repeated 800,000 times in isolation never
+   differed; ``CUBLAS_WORKSPACE_CONFIG`` does not remove it; ``use_deterministic_algorithms``
+   does not change that kernel. The gate reports it as a failure rather than retrying.
 
 Global settings are mozo's production ones: whatever torch defaults to after ``import mozo``.
 Upstream's ``api`` sets ``torch.backends.cudnn.benchmark = False`` at import; the settings are
@@ -104,8 +114,12 @@ UPSTREAM = {"small": "DA3-SMALL", "base": "DA3-BASE", "mono-large": "DA3MONO-LAR
 
 DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
 
+#: Reruns that differed from the side's first run, and reruns made, per side, for the variant
+#: being gated (upstream's counted when its records are built, not when read from the cache).
+RERUNS: dict[str, list[int]] = {"upstream": [0, 0], "vendor": [0, 0]}
+
 #: Bump when what the cache holds changes shape.
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 
 def _pinned_commit() -> str:
@@ -147,6 +161,7 @@ def settings() -> dict[str, object]:
         "matmul.allow_tf32": torch.backends.cuda.matmul.allow_tf32,
         "float32_matmul_precision": torch.get_float32_matmul_precision(),
         "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+        "CUBLAS_WORKSPACE_CONFIG": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
     }
     for name in ("flash", "mem_efficient", "math", "cudnn"):
         out[f"sdp.{name}"] = getattr(torch.backends.cuda, f"{name}_sdp_enabled")()
@@ -160,6 +175,10 @@ def restore(saved: dict[str, object]) -> None:
     torch.backends.cuda.matmul.allow_tf32 = saved["matmul.allow_tf32"]
     torch.set_float32_matmul_precision(saved["float32_matmul_precision"])
     torch.use_deterministic_algorithms(saved["deterministic_algorithms"])
+    if saved["CUBLAS_WORKSPACE_CONFIG"] is None:
+        os.environ.pop("CUBLAS_WORKSPACE_CONFIG", None)
+    else:
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = saved["CUBLAS_WORKSPACE_CONFIG"]
     for name in ("flash", "mem_efficient", "math", "cudnn"):
         getattr(torch.backends.cuda, f"enable_{name}_sdp")(saved[f"sdp.{name}"])
 
@@ -342,14 +361,29 @@ def _upstream_once(upstream, rgb: np.ndarray, dtype: str, shared: set[str]):
     return record(up_input), calls, depth
 
 
+def first_difference(a, b) -> str | None:
+    """Where two runs ``(input record, Calls, depth)`` of one side first differ, or ``None``."""
+    if a[0] != b[0]:
+        return "input"
+    for key, i in a[1].order:
+        if key not in b[1].by_name or i >= len(b[1].by_name[key]):
+            return f"{key}[{i}] missing"
+        if a[1].by_name[key][i] != b[1].by_name[key][i]:
+            return f"{key}[{i}]"
+    return None if _equal(a[2], b[2]) else "depth"
+
+
 def reference(upstream, rgb: np.ndarray, dtype: str, shared: set[str], device: torch.device,
-              autocast: bool) -> dict:
-    """Upstream's records for one image at one dtype, run twice to show it is deterministic."""
+              autocast: bool, repeats: int = 1) -> dict:
+    """Upstream's records for one image at one dtype, rerun *repeats* times to show it is
+    deterministic."""
     first = _upstream_once(upstream, rgb, dtype, shared)
-    second = _upstream_once(upstream, rgb, dtype, shared)
+    diffs = [d for d in (first_difference(first, _upstream_once(upstream, rgb, dtype, shared))
+                         for _ in range(repeats)) if d]
     ref = {"input": first[0], "calls": first[1], "depth": first[2],
-           "deterministic": (first[0] == second[0] and first[1].by_name == second[1].by_name
-                             and _equal(first[2], second[2]))}
+           "deterministic": not diffs, "repeats": repeats, "differing": diffs}
+    RERUNS["upstream"][0] += len(diffs)
+    RERUNS["upstream"][1] += repeats
     if autocast and dtype == "fp32":
         # Upstream's unmodified API, in the dtype it picks itself on this device.
         picked = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
@@ -369,7 +403,7 @@ def _ours_once(ours: vendor.Predictor, rgb: np.ndarray, dtype: str, shared: set[
 
 
 def gate_image(ref: dict, ours: vendor.Predictor, rgb: np.ndarray, dtype: str,
-               shared: set[str], full: bool = True) -> list[Stage]:
+               shared: set[str], full: bool = True, repeats: int = 1) -> list[Stage]:
     """Compare the vendor with upstream's records *ref*. *full* adds the checks falsification
     does not need (upstream's API, determinism, shape inputs)."""
     stages: list[Stage] = []
@@ -392,11 +426,20 @@ def gate_image(ref: dict, ours: vendor.Predictor, rgb: np.ndarray, dtype: str,
                   else _delta(ref["api"], our_auto))
         stages.append(Stage("api autocast", same, detail))
 
-    again = _ours_once(ours, rgb, dtype, shared)
-    stages.append(Stage("deterministic",
-                        ref["deterministic"] and again[0] == our_input
-                        and again[1].by_name == mine.by_name and _equal(again[2], our_depth),
-                        "" if ref["deterministic"] else "upstream is not"))
+    # Both sides rerun: a difference names the side, how often, and the first module it shows in.
+    ours_diffs = [d for d in (first_difference((our_input, mine, our_depth),
+                                               _ours_once(ours, rgb, dtype, shared))
+                              for _ in range(repeats)) if d]
+    RERUNS["vendor"][0] += len(ours_diffs)
+    RERUNS["vendor"][1] += repeats
+    problems = []
+    if not ref["deterministic"]:
+        problems.append(f"upstream {len(ref['differing'])}/{ref['repeats']} reruns differ, "
+                        f"first at {ref['differing'][0]}")
+    if ours_diffs:
+        problems.append(f"vendor {len(ours_diffs)}/{repeats} reruns differ, first at "
+                        f"{ours_diffs[0]}")
+    stages.append(Stage("deterministic", not problems, "; ".join(problems)))
     if dtype == "fp32":
         # The shape-only tensors a graph is handed: computed beforehand, they must give exactly
         # what the network computes for itself.
@@ -696,6 +739,9 @@ def main() -> int:
                              "autocast path on both sides")
     parser.add_argument("--reference-cache", type=Path,
                         help="directory keeping upstream's records per variant")
+    parser.add_argument("--repeats", type=int, default=1,
+                        help="reruns per side and image for the determinism check (upstream's "
+                             "when its records are built)")
     parser.add_argument("--falsify", action="store_true")
     parser.add_argument("--no-autocast", action="store_true")
     parser.add_argument("--no-mozo", action="store_true")
@@ -748,7 +794,7 @@ def main() -> int:
         refs = References(
             args.reference_cache / f"{variant}.pt" if args.reference_cache else None, meta,
             lambda rgb, dtype: reference(upstream_model(), rgb, dtype, shared, device,
-                                         not args.no_autocast))
+                                         not args.no_autocast, args.repeats))
         shared = getattr(refs, "shared", None) or shared_modules(upstream_model(), ours)
 
         counts: dict[str, list[int]] = {}
@@ -758,7 +804,7 @@ def main() -> int:
                 try:
                     ref, hit = refs.get(name, rgb, dtype)
                     cached += hit
-                    stages = gate_image(ref, ours, rgb, dtype, shared)
+                    stages = gate_image(ref, ours, rgb, dtype, shared, repeats=args.repeats)
                 except Exception as error:  # noqa: BLE001 - reported as a failing image
                     stages = [Stage("error", False, repr(error))]
                 line = "  ".join(f"{s.name} {'ok' if s.ok else 'FAIL'}"
@@ -781,6 +827,12 @@ def main() -> int:
         print(f"  {variant}: " + ", ".join(f"{k} {p}/{t}" for k, (p, t) in counts.items())
               + f" -> {'PASS' if ok else 'FAIL'}"
               + (f"  ({cached} reference records from the cache)" if cached else ""))
+        # A determinism check passes or fails by chance when the arithmetic is not deterministic:
+        # say how many reruns there were and how many differed, so a pass reads as what it is.
+        print(f"  {variant} reruns differing from the side's first run: "
+              + ", ".join(f"{side} {d}/{n}" for side, (d, n) in RERUNS.items() if n))
+        for counter in RERUNS.values():
+            counter[:] = [0, 0]
         all_ok &= ok
         if args.falsify:
             chosen = [(name, rgb) for name, rgb in images if name in FALSIFY_IMAGES]

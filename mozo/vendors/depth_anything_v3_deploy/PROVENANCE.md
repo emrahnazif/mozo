@@ -156,13 +156,26 @@ cuDNN 9.10.2, driver 550.144.03), with mozo's production settings (torch's defau
 on, matmul TF32 off, every SDPA backend enabled, `cudnn.benchmark` off): six photographs and the
 seven synthetic inputs per variant, in fp32 (mozo's `torch-fp32`) and under upstream's own bf16
 and fp16 autocast -- every stage of every image of every variant byte-identical, 42,120
-comparisons, upstream and the vendor each deterministic run to run. Upstream's RoPE caches its
+comparisons. Upstream's RoPE caches its
 cos/sin table under a key that ignores autocast, so whichever precision the first call in a
 process had sticks; the gate empties that cache before each upstream run, which is the answer a
 fresh process gives. On CUDA the same eleven perturbations are caught, and five that change only
 the hardware arithmetic on the vendor's side: TF32 matmuls on, cuDNN TF32 off, channels-last
 convolution inputs, SDPA forced to its math kernel (the default is the memory-efficient fp32
 kernel), and the attention's unfused path.
+
+**Not always deterministic on CUDA.** With mozo's production settings, `mono-large` on a 42x504
+input (a 2000x150 strip) now and then computes one attention `qkv` Linear differently from the
+time before: same input, same weights, same cuBLAS kernel (`ampere_sgemm_128x32_tn`), a
+different last bit, after which every later stage differs (final depth up to ~1e-4). It happens
+on upstream and on this package alike, so it is not a difference between them. Measured
+2026-11-26/27 on the RTX 3060 above: 4 occurrences in 22 gate passes over the 13 images; 1 in 24
+with `CUBLAS_WORKSPACE_CONFIG=:4096:8`; 0 in 24 with `torch.use_deterministic_algorithms(True)`
+as well, although that setting launches the same `qkv` kernel and only changes the head's
+bilinear upsampling (other bits, 14% slower), so it is not shown to be the cure. In isolation
+the same GEMM on the same input never differed in 800,000 calls, nor 9,000 whole forwards, nor
+2,160 forwards of that input alone in the gate's loop. No other variant, image or module has
+shown it. The gate reports it as a failure, naming the side and the module.
 
 ## Export
 

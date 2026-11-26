@@ -148,6 +148,11 @@ checkout of the pinned commit, and was made to fail on purpose, at the right sta
 eleven perturbations (nine apply to `small` and `base`, seven to `mono-large`), plus on CUDA five
 that change only the GPU kernels (TF32, channels-last, the attention kernel).
 
+On CUDA, `mono-large` is not always bit-for-bit repeatable on very elongated inputs: for a
+2000x150 strip, about one gate pass in five gives a result that differs in the last bits of one
+attention matrix multiply from the time before (final depth by up to about 1e-4), in the
+authors' code exactly as in mozo's. No torch setting has been shown to remove it.
+
 Upstream's API always runs in reduced precision (bf16 on recent GPUs, fp16 otherwise, even on the
 CPU); mozo's `torch-fp32` runs in full fp32, the checkpoint's own arithmetic.
 

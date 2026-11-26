@@ -206,3 +206,23 @@ def test_the_same_picture_gives_the_same_answer(panoptic, picture):
     a, b = panoptic.predict(picture), panoptic.predict(picture)
     assert [d.class_id for d in a] == [d.class_id for d in b]
     assert all(np.array_equal(x.masks[0], y.masks[0]) for x, y in zip(a, b))
+
+
+# --- the runtimes ---
+
+
+@pytest.mark.parametrize("variant", VARIANTS)
+def test_auto_is_half_precision_on_cuda_and_fp32_elsewhere(variant):
+    """Measured: fp16 autocast leaves PQ and mIoU where they were, at 1.25-4x a call. A TensorRT
+    fp32 engine is not derived: it would outrank torch-fp16 in ``auto`` while being slower."""
+    from mozo.registry import DERIVES, EXECUTES
+    from mozo.runtimes import select_runtime
+
+    keys = published(FAMILY, variant)
+    if not keys:
+        pytest.skip(f"{FAMILY}/{variant} publishes nothing")
+    pick = lambda device: select_runtime(device, keys, "auto", executes=EXECUTES[FAMILY],  # noqa: E731
+                                         derives=DERIVES[FAMILY])
+    assert pick("cuda") == "torch-fp16"
+    assert pick("cpu") == "torch-fp32"
+    assert "tensorrt-fp32" not in DERIVES[FAMILY]

@@ -118,7 +118,10 @@ class EomtPredictor:
         if framework == "tensorrt":
             runner = TensorRTRunner(parts(FAMILY, variant, self.runtime, revision=revision)[""],
                                     self.device)
-            network = _one_at_a_time(lambda pixels: runner(pixels))
+            # By name: an engine declares its outputs in an order of its own.
+            order = [runner.outputs.index(name) for name in ("mask_logits", "class_logits")]
+            network = _one_at_a_time(
+                lambda pixels: tuple(runner(pixels)[i].float() for i in order))
         elif framework == "onnx":
             runner = make_runner(resolve(FAMILY, variant, self.runtime, revision=revision),
                                  self.runtime, device=self.device)
@@ -128,7 +131,9 @@ class EomtPredictor:
         else:
             weights = (Path(checkpoint_path) if checkpoint_path is not None
                        else resolve(FAMILY, variant, "torch-fp32", revision=revision))
-        self._segmenter = Segmenter(weights, self._spec, device=self.device, network=network)
+        # ``torch-fp16`` is the fp32 checkpoint under CUDA fp16 autocast (``registry.DERIVES``).
+        self._segmenter = Segmenter(weights, self._spec, device=self.device, network=network,
+                                    half=self.runtime == "torch-fp16")
         _log.info("EoMT %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def predict(self, image: Union[str, Path, bytes, np.ndarray],

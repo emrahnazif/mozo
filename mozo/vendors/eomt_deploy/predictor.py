@@ -11,6 +11,7 @@ and two cold requests should not both build it.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
@@ -55,14 +56,17 @@ class Segmenter:
         device: Where the network runs and where its output is post-processed.
         network: A callable that replaces the torch network, for a graph runtime. *weights* is
             then unused.
+        half: Run the torch network under CUDA fp16 autocast (matrix products in half precision,
+            norms and softmax in fp32); the logits come back as fp32 for the post-processing.
     """
 
     def __init__(self, weights: str | Path | None, spec: Spec, device: str = "cpu",
-                 network: Network | None = None) -> None:
+                 network: Network | None = None, half: bool = False) -> None:
         self.spec = spec
         self.device = device
         self._weights = weights
         self._network = network
+        self._half = half
         self._lock = Lock()
 
     def network(self) -> Network:
@@ -83,8 +87,9 @@ class Segmenter:
         else:
             pixels, origins = resize_and_pad(image, side), []
         pixels = pixels.to(self.device)
-        mask_logits, class_logits = self.network()(pixels / 255.0)
-        return pixels, mask_logits, class_logits, origins
+        with torch.autocast("cuda", torch.float16) if self._half else nullcontext():
+            mask_logits, class_logits = self.network()(pixels / 255.0)
+        return pixels, mask_logits.float(), class_logits.float(), origins
 
     def segment(self, image: np.ndarray, threshold: float = postprocess.MASK_THRESHOLD) -> Segments:
         """Segment one ``HxWx3`` RGB ``uint8`` picture.
@@ -97,13 +102,13 @@ class Segmenter:
         with torch.inference_mode():
             _, mask_logits, class_logits, origins = self.raw(image)
             if self.spec.task == "semantic":
-                labels = postprocess.semantic(mask_logits.float(), class_logits.float(), origins,
-                                              size, self.spec.image_size)
+                labels = postprocess.semantic(mask_logits, class_logits, origins, size,
+                                              self.spec.image_size)
                 ids = torch.unique(labels)
                 masks = labels[None] == ids[:, None, None]
                 return Segments(masks.cpu().numpy(), ids.cpu().numpy(), None)
             segments, found = postprocess.panoptic(
-                mask_logits[0].float(), class_logits[0].float(), size, self.spec.image_size,
+                mask_logits[0], class_logits[0], size, self.spec.image_size,
                 self.spec.stuff, threshold=threshold)
             ids = torch.tensor([s for s, _, _ in found], dtype=torch.long, device=segments.device)
             masks = segments[None] == ids[:, None, None]

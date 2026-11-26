@@ -521,6 +521,11 @@
               "sha256": "260052775b497354addbc59423dc66f7da27a5e89daf7598f393712022eae133",
               "size": 6714
             },
+            "onnx-fp16": {
+              "path": "eomt/ade20k-semantic-large/2026-11-25/onnx-fp16.onnx",
+              "sha256": "848fa4c023fea350b4a0fcd5214376a164103e420255f86c938f4f1dd9f1109a",
+              "size": 634833135
+            },
             "torch-fp32": {
               "path": "eomt/ade20k-semantic-large/2026-11-25/torch-fp32.pth",
               "sha256": "14ad6488fcebac2d8ec6d6e8265e5fae8fc4e7ca42875190a0363fbd382baff7",
@@ -550,6 +555,11 @@
               "path": "eomt/coco-panoptic-base/2026-11-25/labels.json",
               "sha256": "75d87019910678d804832dfb975a1b81c99f49777415adb063a2dd9bb23a4b6e",
               "size": 6114
+            },
+            "onnx-fp16": {
+              "path": "eomt/coco-panoptic-base/2026-11-25/onnx-fp16.onnx",
+              "sha256": "4395ff9f2b29dde1dbd61349442937b2557440d40dd5f57d1980b9793ce7adbf",
+              "size": 190310715
             },
             "torch-fp32": {
               "path": "eomt/coco-panoptic-base/2026-11-25/torch-fp32.pth",
@@ -581,6 +591,11 @@
               "sha256": "75d87019910678d804832dfb975a1b81c99f49777415adb063a2dd9bb23a4b6e",
               "size": 6114
             },
+            "onnx-fp16": {
+              "path": "eomt/coco-panoptic-large/2026-11-25/onnx-fp16.onnx",
+              "sha256": "2a13c6d290d0ee720428c00aba3ae35444def371314c6a2d20f91e0d12c2b5d6",
+              "size": 637567184
+            },
             "torch-fp32": {
               "path": "eomt/coco-panoptic-large/2026-11-25/torch-fp32.pth",
               "sha256": "8f51efd5fa4171c3fb0cb37c10c2fdfdf886c97f342aeeb5035d925806f15fd3",
@@ -611,6 +626,11 @@
               "sha256": "75d87019910678d804832dfb975a1b81c99f49777415adb063a2dd9bb23a4b6e",
               "size": 6114
             },
+            "onnx-fp16": {
+              "path": "eomt/coco-panoptic-large-1280/2026-11-25/onnx-fp16.onnx",
+              "sha256": "20bc8a85da47c01c37eb3d0723ab04ad60dbf45708e2ed13d3f62b4f5ab98f55",
+              "size": 657227984
+            },
             "torch-fp32": {
               "path": "eomt/coco-panoptic-large-1280/2026-11-25/torch-fp32.pth",
               "sha256": "f00af5b873445eb8372013a369a7ce8feadf9c8e4f658643c78b5f89553b8a6e",
@@ -640,6 +660,11 @@
               "path": "eomt/coco-panoptic-small/2026-11-25/labels.json",
               "sha256": "75d87019910678d804832dfb975a1b81c99f49777415adb063a2dd9bb23a4b6e",
               "size": 6114
+            },
+            "onnx-fp16": {
+              "path": "eomt/coco-panoptic-small/2026-11-25/onnx-fp16.onnx",
+              "sha256": "82d9cbc25e7bab25bb4c3e2ac4c782f65a5c63513c5d10acd1b4f708aef72b77",
+              "size": 49490159
             },
             "torch-fp32": {
               "path": "eomt/coco-panoptic-small/2026-11-25/torch-fp32.pth",

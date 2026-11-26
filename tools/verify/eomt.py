@@ -85,9 +85,10 @@ FALSIFIERS = {
     "ln_eps": ("block 1 norm2 eps 1e-6 -> 1e-5", "block.2", "coco-panoptic-small"),
     "layerscale": ("block 3 ls2 skipped", "block.4", "coco-panoptic-small"),
     "eager": ("manual softmax attention instead of SDPA", "block.1", "coco-panoptic-small"),
-    "queries_early": ("queries enter one block early", "block.9", "coco-panoptic-small"),
+    "queries_early": ("queries enter one block early", "block.8", "coco-panoptic-small"),
     "mask_head_tanh": ("mask head GELU -> tanh approximation", "mask_logits", "coco-panoptic-small"),
-    "no_stuff_merge": ("stuff classes not merged per class", "segments", "coco-panoptic-small"),
+    "threshold": ("panoptic mask_thresh 0.8 -> 0.7", "segments", "coco-panoptic-small"),
+    "overlap": ("panoptic overlap_thresh 0.8 -> 0.5", "segments", "coco-panoptic-small"),
     "no_count": ("window overlap summed, not averaged", "segments", "ade20k-semantic-large"),
     "argmax_early": ("argmax before the upsample to the picture", "segments",
                      "ade20k-semantic-large"),
@@ -379,9 +380,10 @@ def perturb(name: str, network) -> None:
         network.num_blocks += 1
     elif name == "mask_head_tanh":
         network.mask_head[1] = torch.nn.GELU(approximate="tanh")
-    elif name == "no_stuff_merge":
+    elif name in ("threshold", "overlap"):
         original_panoptic = vpost.panoptic
-        vpost.panoptic = lambda *a, **k: original_panoptic(*a[:4], (), *a[5:], **k)
+        setting = {"threshold": 0.7} if name == "threshold" else {"overlap": 0.5}
+        vpost.panoptic = lambda *a, **k: original_panoptic(*a, **{**k, **setting})
     elif name == "no_count":
         original_div = torch.Tensor.__truediv__
 

@@ -93,13 +93,15 @@ PREPARES = frozenset({"edgetam", "owlv2", "sam2", "sam3"})
 #: The adapters read it from here, so there is one statement of it.
 EXECUTES: dict[str, tuple[str, ...]] = {
     **{family: ("torch",)
-       for family in ("ben2", "clip", "easyocr", "edgetam", "eomt", "moebius", "sam2", "siglip2")},
+       for family in ("ben2", "clip", "easyocr", "edgetam", "moebius", "sam2", "siglip2")},
     # A TensorRT engine exported from the checkpoint at the input size the user picks.
     "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
     # Not "onnx": the vision graph is published to build TensorRT engines from, and ONNX Runtime
     # ran it twice as slow as torch on the CPU. See the OWLv2 PROVENANCE, under Export.
     "owlv2": ("torch", "tensorrt"),
+    # Not "onnx": the fp16 graph is published to build a TensorRT engine from, nothing else.
+    "eomt": ("torch", "tensorrt"),
 }
 
 #: Runtimes a family builds at load time from another published artifact, rather than
@@ -127,6 +129,12 @@ DERIVES: dict[str, dict[str, str]] = {
     # (``seg-nano``) torch fp32 -- RF-DETR is launch-bound at batch 1. fp16 only where an fp16
     # graph is published (the detection variants), and only on request.
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # ``torch-fp16`` is ``auto`` on CUDA: on an RTX 3060, PQ on 500 COCO val images moved by at most
+    # 0.02 and ADE20K mIoU by 0.01, at 1.25x (``coco-panoptic-small``) to 4x (``-large-1280``)
+    # torch fp32 for a whole call. ``tensorrt-fp16`` is faster again (to 3.1x on ``large``) with
+    # PQ within 0.06, on request only: a degenerate picture can flip a segment to void.
+    # No ``tensorrt-fp32``: exact, but at most 1.2x a call, so slower than torch-fp16.
+    "eomt": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``

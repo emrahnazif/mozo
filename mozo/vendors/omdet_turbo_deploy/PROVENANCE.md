@@ -26,9 +26,13 @@ but not the same input; this package follows the authors.
 
 ## What mozo guarantees, and where the chain stops
 
-On the CPU, with the torch runtime, boxes, scores and prompt indices are **bit-identical** to the
-reference processor + model + `post_process_grounded_object_detection`, given the same RGB
-pixels and an empty language cache. `tools/verify/omdet_turbo.py` checks every stage, exactly.
+With the torch runtime, boxes, scores and prompt indices are **bit-identical** to the reference
+processor + model + `post_process_grounded_object_detection`, given the same RGB pixels and an
+empty language cache: **on CUDA** (RTX 3060, torch 2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2) in
+fp32, mozo's only torch precision for this family, and also on the CPU.
+`tools/verify/omdet_turbo.py` checks every stage, exactly. The text features the ONNX and
+TensorRT runtimes consume come from the same torch text tower, so they are covered too; the graph
+runtimes themselves are measured by parity and AP (below).
 
 - **Weights, measured to the authors' release:** every one of the 868 tensors in the published
   safetensors is bit-identical to a tensor in the authors' original `OmDet-Turbo_tiny_SWIN_T.pth`
@@ -114,6 +118,17 @@ class embeddings, task states, three Swin levels, three encoder levels, six deco
 boxes, logits, detections at 0.05 and 0.3; then mozo's adapter against the vendor through
 PixelFlow. Every comparison `torch.equal`. Falsified with eight deliberate errors, each caught at
 its own stage (see the plan's results).
+
+**On CUDA** (`--device cuda`, 2026-11-26): RTX 3060 (vision-003), driver 550.144.03, torch
+2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2 (91002), transformers 5.9.0, timm 1.0.28, both sides in one
+process. Global switches as mozo's runtime leaves them: TF32 on for cuDNN convolutions and off for
+matmuls, `cudnn.benchmark` and `cudnn.deterministic` off, deterministic algorithms off, all SDPA
+backends allowed. Each side run twice first: 780/780 stages byte-identical, both sides, so no
+setting had to be changed. Then 877 comparisons on the six fixture pictures and five vocabularies
+(780 stages plus 96 through the adapter, plus the vocabulary hash), every one `torch.equal`; the
+same eight falsifications, each caught at its own stage. There is no half-precision torch path to
+gate: mozo publishes no `torch-fp16` (autocast was slower than fp32), and its fp16 is the
+TensorRT engine.
 
 ## Export and runtimes
 

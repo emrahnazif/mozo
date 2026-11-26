@@ -7,8 +7,8 @@
   image: 22 ms in torch on an RTX 3090, and with TensorRT 11 installed `auto` builds an exact fp32
   engine that takes 14 ms (`runtime="tensorrt-fp16"`: 8 ms, 5 of 4,843 detections differ). On 500
   COCO images with the 80 class names it scores 43.8 AP, below OWLv2's and Grounding DINO's
-  50–51: pick it for speed. Code and weights are Apache-2.0; bit-identical to `transformers` on the
-  CPU at every stage.
+  50–51: pick it for speed. Code and weights are Apache-2.0; bit-identical to `transformers` at every
+  stage on CUDA (RTX 3060, torch 2.13, CUDA 12.6) in fp32, and on the CPU.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a

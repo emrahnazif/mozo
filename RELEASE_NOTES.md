@@ -1,5 +1,20 @@
 ## Unreleased
 
+- **SAM 3 tracks concepts through a video.** `mozo.get_model("sam3").tracker()` starts a session;
+  give it frames in order with `tracker.update(frame, text="person")` and it finds every instance
+  of the phrase on every frame and follows each with a `tracker_id` that stays with it, starting new
+  objects as new instances appear and dropping ones it judges spurious within their first fifteen
+  frames. Several phrases are tracked side by side, sharing each frame's image encode. Instead of a
+  phrase, clicks and boxes on the first frame follow those objects with SAM 3's own tracker. Each
+  frame returns PixelFlow detections: the phrase as `class_name`, the mask at the frame's size, and
+  SAM 3's probability that the object is visible. It is Meta's SAM 3 video model frame by frame, bit
+  for bit on CPU, except that Meta holds every frame back fifteen frames to hide spurious objects
+  before they show, and mozo answers each frame as it comes (on the clips Meta ships, that never
+  changed an answer). Nothing new to download: the published SAM 3 file already held the tracker's
+  weights, which now load with the rest (about 30 MB more in memory). A new workflow node,
+  `sam3_track`, tracks the phrases you give it. Tracking needs `torch-fp32` and, in practice, a GPU:
+  every frame costs a detector pass plus a tracker pass per object.
+
 - **SAM 2 tracks objects through a video.** `mozo.get_model("sam2/tiny").tracker()` starts a
   session; give it frames in order with `tracker.update(frame)`, and mark objects with the same
   `points`, `labels`, `boxes` and `name` that `predict` takes, on the first frame or any later one.

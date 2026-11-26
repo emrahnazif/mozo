@@ -378,6 +378,26 @@ found traps it had not predicted, and the predicted ones were mostly real.
   detection whose box has zero area. An empty mask has a zero box, so it disappears; a contract
   that promises "a row per prompt" must account for that.
 
+- **An output delay is not a dependency on the future.** SAM 3's video model holds each frame's
+  output back 15 frames and hides retroactively what it removes in that window. The *computation*
+  of frame *t* still reads only frames up to *t*: check by truncation (a 60-frame clip against the
+  first 60 of 120), not by reading, and reproduce the decisions without the delay.
+- **A reference that is a mixed-precision system.** SAM 3's video model enters a process-wide
+  bfloat16 autocast when built and casts features to bfloat16 explicitly; in float32 it refuses to
+  run. An exact float32 gate then needs a written-down accommodation (keep the explicit cast, hand
+  on float32), and its GPU numbers are bfloat16, not a target.
+- **A batch of two prompts is not one prompt.** SAM 3's video detector encodes the phrase together
+  with its exemplar placeholder, `"visual"`; encoded alone, the text features move by 8.5e-06 and
+  the masks by 6e-04. Encode what upstream encodes, in the batch it encodes it in.
+- **An "API visits the first frame twice" is part of the function.** SAM 3's `add_prompt` runs
+  frame 0 and `propagate_in_video` starts from frame 0 again, re-seeding what the first visit found.
+- **A port can silently degrade.** `transformers`' SAM 3 video model downloads its NMS and hole
+  filling as a compiled kernel from the Hub at run time and skips both, with one warning, when it
+  cannot. Check which function a port computes on a clean install before calling it the reference.
+- **A pinned upstream can stop being the model.** Meta's SAM 3.1 release rewrote the shared ViT's MLP
+  as a fused bfloat16 kernel in inference mode, changing SAM 3's own numbers. Pin the commit the
+  gate was recorded against, in PROVENANCE, not "the repo".
+
 ### Things that are upstream's behaviour, not bugs to fix
 
 Reproduce them, and record them:

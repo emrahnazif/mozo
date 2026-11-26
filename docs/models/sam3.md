@@ -8,8 +8,10 @@ keywords: mozo, sam 3, segment anything, concept segmentation, text prompt, prom
 
 SAM 3 segments from words or from a click, off one checkpoint. Name a concept, such as `"a cup"`,
 and it returns every instance with a mask, a box and a score. Or click one thing and it returns
-candidate masks, as [SAM 2](/docs/models/sam2.md) does. **Its weights carry Meta's SAM License,
-not an open-source licence**: read [Weights and licence](/docs/models/sam3.md#weights-and-licence) before you deploy it.
+candidate masks, as [SAM 2](/docs/models/sam2.md) does. In a video it follows every instance of a
+concept from frame to frame: see
+[Tracking concepts through a video](/docs/models/sam3.md#tracking-concepts-through-a-video).
+**Its weights carry Meta's SAM License, not an open-source licence**: read [Weights and licence](/docs/models/sam3.md#weights-and-licence) before you deploy it.
 
 ## Quick start
 
@@ -141,6 +143,60 @@ CPU the image encode alone is about 5 s.
 
 Inference runs at 1008×1008. SAM 3 squashes the image to that square instead of padding it, so the
 aspect ratio is not preserved; masks and boxes come back in pixels of your image.
+
+## Tracking concepts through a video
+
+`tracker()` starts a session that follows every instance of a phrase through a video, one frame at
+a time, starting new objects as they appear:
+
+```python
+import mozo
+import pixelflow as pf
+
+model = mozo.get_model("sam3/sam3")
+tracker = model.tracker()
+
+for index, frame in enumerate(pf.VideoReader("street.mp4")):
+    found = tracker.update(frame, text="person")
+    for row in found:
+        print(index, row.tracker_id, row.class_name, round(row.confidence, 3), row.bbox)
+```
+
+- **Phrases on the first frame.** `text` is one phrase or a list; each phrase is tracked on its own
+  (as Meta's model tracks one phrase per session), and the phrases share each frame's image
+  encode. Pass the same phrases on every frame, as above, or only on the first: both mean the same.
+  A different phrase later is refused; start a new `tracker()` to track something else.
+- **Objects come and go by themselves.** SAM 3 runs its detector on every frame: an instance it has
+  not seen before starts a new object with a new `tracker_id`; one it judges spurious within its
+  first fifteen frames is dropped. Every sixteenth frame, a confident detection re-seeds the object
+  it matches.
+- **One row per object shown.** `tracker_id` is the object's id, 0, 1, 2… in the order objects first
+  appear, across all phrases, never reused. `class_id` is the phrase's index and `class_name` the
+  phrase. `confidence` is SAM 3's probability that the object is visible on this frame (on its
+  first frame, its detection score). An object hidden on a frame has no row and comes back under
+  the same id; overlapping objects do not share pixels.
+- **Or clicks.** Instead of a phrase, give `points`/`labels` and `boxes` on the first frame, each
+  prompt one object, as on [SAM 2's tracker](/docs/models/sam2.md#tracking-objects-through-a-video);
+  SAM 3's tracker follows them without its detector. Clicks are taken on the first frame only:
+  Meta's tracker batches the objects it is given and takes no new ones once tracking has started.
+  A session tracks phrases or clicks, not both.
+- **Bounded memory.** The tracker keeps per batch of objects the frames a later frame can still read
+  (its recent conditioning frames and its fifteen best recent frames), so a long video or a camera
+  runs in bounded memory.
+- **It needs a GPU, and torch.** Every frame costs a detector pass plus a tracker pass per object.
+  Tracking runs on `torch-fp32` only: a model loaded with the CoreML runtime refuses `tracker()`.
+
+In a workflow, the `sam3_track` node tracks the phrases you give it through the video, with no
+detector wired in. Over HTTP, that workflow runs on an uploaded video through `/workflow/process`.
+
+**What it matches.** The tracker is Meta's SAM 3 video model (`build_sam3_video_model()`, its
+defaults) frame by frame, bit for bit on CPU, fed the same frames, with one difference by design:
+Meta holds every frame's output back fifteen frames, so that an object it removes as spurious is
+never shown at all. mozo answers each frame as it arrives, so such an object is shown until it is
+removed. On the clips Meta ships, with Meta's thresholds, that never happened. Two other
+differences are Meta's own: it runs in bfloat16 on a GPU, where mozo runs in float32 (masks agree
+to a mean IoU of 0.98 to 0.99 on the clips measured); and on a clip shorter than 16 frames its
+answer depends on the clip's length, which a stream does not have.
 
 ## Weights and licence
 

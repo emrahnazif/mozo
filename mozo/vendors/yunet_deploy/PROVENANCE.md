@@ -98,8 +98,9 @@ result to upstream's.
 ## Parity
 
 `tools/verify/yunet.py` runs upstream from a checkout at the pinned commit (no install: it is plain
-PyTorch) against this package and against mozo's adapter, on CPU, under `MKL_CBWR=AVX2,STRICT`, with
-`torch.equal` / `np.array_equal` and no tolerance (torch 2.13.0, OpenCV 4.10.0, numpy 2.3.5). 36
+PyTorch) against this package and against mozo's adapter, in one process on one device, with
+`torch.equal` / `np.array_equal` and no tolerance. **Bit-identical on CUDA** (the primary gate,
+below) **and on CPU** (under `MKL_CBWR=AVX2,STRICT`; torch 2.13.0, OpenCV 4.10.0, numpy 2.3.5). 36
 images per variant: the repository's photograph, eleven awkward synthetic cases (blank, noise, 37×23,
 one pixel, odd 641×479, 2400×300 panorama, 3000×2000, faces cut by the right and the top edge,
 greyscale, 480×320) and 24 random WIDER Face val images (seed 0).
@@ -115,6 +116,26 @@ landmarks at upstream's evaluation threshold 0.02 and at mozo's default 0.5; the
 | base | 5,436 | exact |
 
 20,160 comparisons in all, every one exact (2026-11-25), on the first build that loaded.
+
+**On CUDA** (`--device cuda`, 2026-11-26): RTX 3060 (vision-002), driver 550.144.03, torch
+2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2, OpenCV 5.1.0, numpy 2.5.4. fp32, the only precision YuNet
+runs through torch (its `auto` on CUDA is a TensorRT fp32 engine, measured by parity and accuracy
+above; mozo publishes no torch half runtime for it, and upstream has no half inference path). The
+settings are torch's defaults, the ones mozo leaves alone: cuDNN may use TF32 for convolutions,
+`cudnn.benchmark` and deterministic algorithms off. Upstream runs as its WIDER Face evaluation runs
+on CUDA: the float batch made on the host and moved to the device, network, decode and NMS on the
+device. The vendor makes its batch on the device (integers 0..255, exact either way). Each side first
+ran every image twice and repeated itself bit for bit (144 checks), then the same stages as on CPU:
+20,304 comparisons, every one exact, with no change to the vendored code.
+
+GPU falsifiers (`--device cuda --falsify all`, against one cached reference run): all ten caught.
+The eight above, each first at the same stage as on CPU, and two only a GPU has: cuDNN TF32 off on
+the vendor's side alone (first at `backbone.model3.conv1.conv1`, the first convolution cuDNN runs
+in TF32) and the batch in channels-last memory, values equal (first at `backbone.model0.conv1`:
+cuDNN picks other kernels). A falsifier that makes the vendor's batch on the host, as upstream does,
+is not one: its values are integers, exact on either side, so it is the same arithmetic. The cache
+keeps each intermediate as its shape, dtype and the sha256 of its bytes (the full tensors of 72
+images run to tens of GB), and an unperturbed run must pass against it before any falsifier runs.
 
 **Falsified** eight ways on `small` (`--falsify all`), each caught at its own stage and nowhere
 earlier: channels left RGB (the batch), padding 1 instead of 0 (the batch), stem BN eps 1e-5→1e-3

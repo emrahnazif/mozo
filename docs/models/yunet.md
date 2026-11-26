@@ -149,10 +149,12 @@ was slower than torch on CUDA and is not worth asking for.
 ### Parity
 
 Bit-identical to the authors' PyTorch (`ShiqiYu/libfacedetection.train` at commit `dca340aa`) on
-CPU: the padded input, the output of every one of the network's 124 (`small`) and 143 (`base`)
-modules, and the final boxes, scores and landmarks, compared with no tolerance on 36 images per
-variant at thresholds 0.02 and 0.5, and mozo's result through PixelFlow: 20,160 comparisons.
-`tools/verify/yunet.py` runs the comparison against a checkout of that repository.
+CUDA (RTX 3060, torch 2.13.0, CUDA 12.6, cuDNN 9.10.2) in fp32, the only precision YuNet runs
+through torch, with torch's default CUDA settings; and also on CPU. Compared with no tolerance: the
+padded input, the output of every one of the network's 124 (`small`) and 143 (`base`) modules, and
+the final boxes, scores and landmarks, on 36 images per variant at thresholds 0.02 and 0.5, and
+mozo's result through PixelFlow: 20,160 comparisons on each device. `tools/verify/yunet.py` runs
+the comparison against a checkout of that repository (`--device cuda` for the GPU).
 
 ## Weights and licence
 

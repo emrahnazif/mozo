@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Verify the vendored YuNet against the authors' PyTorch, stage by stage, exactly.
 
-    MKL_CBWR=AVX2,STRICT python -I tools/verify/yunet.py \\
+    python -I tools/verify/yunet.py --device cuda \\
         --upstream /path/to/libfacedetection.train --wider /path/to/WIDER_val/images [--mozo]
+    python -I tools/verify/yunet.py --device cuda ... --falsify all
+    MKL_CBWR=AVX2,STRICT python -I tools/verify/yunet.py ...      # the CPU gate (the default)
 
 The reference is ShiqiYu/libfacedetection.train at commit ``dca340aa`` (BSD-3-Clause), pure
 PyTorch since its 2026 refactor: nothing to install beyond what mozo already needs, the checkout
-only has to be on ``sys.path``, which this script does. Three paths are compared on CPU, with
-``torch.equal`` / ``np.array_equal`` and no tolerance:
+only has to be on ``sys.path``, which this script does. Three paths are compared in one process
+on one device, with ``torch.equal`` / ``np.array_equal`` and no tolerance:
 
 1. **upstream** -- ``build_yunet`` with a strict load of the *original* checkpoint file from the
    checkout's ``weights/``, upstream's evaluation transforms in "origin" mode (pad to a multiple
@@ -21,22 +23,40 @@ Stages compared per image: the float batch, **every named module's output** (the
 upstream's, so the two models are walked side by side with forward hooks), and the final boxes,
 scores and landmarks, at upstream's evaluation threshold of 0.02 and at mozo's default 0.5.
 
-**Set ``MKL_CBWR=AVX2,STRICT``.** MKL picks kernels by buffer alignment, so two CPU torch
+``--device cuda`` is the primary gate: upstream, the vendor and mozo run on the same GPU, in one
+process, with torch's default CUDA settings -- the ones mozo's runtime leaves alone (cuDNN may use
+TF32 for convolutions; ``cudnn.benchmark`` and deterministic algorithms are off). Upstream runs as
+its WIDER Face evaluation does on CUDA: the float batch is made on the host and moved to the
+device, and the network, decode and NMS run there. The vendor makes its batch on the device; every
+value is an integer 0..255 either way. Every stage is copied to the host, which is exact, and
+compared there. Each side first runs every image twice and must repeat itself bit for bit, or the
+comparison would mean nothing (VENDORING §2.7).
+
+``--dtype`` is fp32 only. YuNet's CUDA runtimes through torch are ``torch-fp32`` alone (its
+``auto`` on CUDA is a TensorRT fp32 engine, measured by parity and accuracy instead), mozo
+publishes no torch half runtime for it, and upstream has no half-precision inference path.
+
+**On CPU, set ``MKL_CBWR=AVX2,STRICT``.** MKL picks kernels by buffer alignment, so two CPU torch
 processes can differ in the last bit without it (VENDORING §5).
 
 ``--falsify NAME`` perturbs one thing in the vendor and expects the gate to fail at the stage
 named; ``--falsify list`` names them, ``--falsify all`` runs every one (each in a fresh process)
-and fails unless each was caught.
+and fails unless each was caught. On CUDA two falsifiers only a GPU has are added (see
+:data:`FALSIFIERS_CUDA`), and ``all`` first computes upstream's stages once, unperturbed, into a
+reference cache (``--reference-cache``) that every falsifier reuses: upstream never changes
+between them.
 """
 
 from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import os
 import random
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -64,6 +84,15 @@ FALSIFIERS = {
     "sqrt": "OpenCV's score, sqrt(cls * obj) (caught at the scores; boxes of t=0.02 rows too)",
     "nms": "NMS IoU 0.45 -> 0.4 (caught at the final rows only)",
     "centre": "priors at cell centres instead of corners (caught at boxes and landmarks)",
+}
+
+#: Perturbations only a GPU run can catch, added on ``--device cuda``. A falsifier that makes the
+#: vendor's batch on the host, as upstream does, is not among them: the batch holds integers
+#: 0..255, exact on either side, so it is the same arithmetic and could never be caught.
+FALSIFIERS_CUDA = {
+    "tf32-off": "cuDNN TF32 off on the vendor's side alone (caught at the first conv that uses it)",
+    "channels-last": "the batch in channels-last memory, values equal (caught at the network: "
+                     "cuDNN picks other kernels)",
 }
 
 
@@ -110,15 +139,26 @@ def capture(model: torch.nn.Module, names: set[str]) -> tuple[dict, list]:
 
 
 def tensors(value) -> list[torch.Tensor]:
-    """Every tensor in *value*, cloned: ReLU runs in place, so a hooked output can be overwritten."""
+    """Every tensor in *value*, copied to the host (exact): ReLU runs in place, so a hooked output
+    can be overwritten, and the stages are compared, and cached, on the CPU."""
     if torch.is_tensor(value):
-        return [value.detach().clone()]
+        return [value.detach().to("cpu", copy=True)]
     if isinstance(value, (list, tuple)):
         return [t for item in value for t in tensors(item)]
     return []
 
 
+def fingerprint(tensor: torch.Tensor) -> tuple:
+    """A host tensor's shape, dtype and the sha256 of its bytes: what the reference cache keeps
+    of each intermediate. The full tensors of 72 images run to tens of GB (one 3000x2000 image's
+    module outputs alone are about 3 GB); the final rows are kept whole."""
+    return (tuple(tensor.shape), str(tensor.dtype),
+            hashlib.sha256(tensor.contiguous().numpy().tobytes()).hexdigest())
+
+
 def equal(a, b) -> bool:
+    if isinstance(a, tuple):  # a cached fingerprint: the bytes must be the same
+        return a == fingerprint(b)
     if torch.is_tensor(a):
         return a.shape == b.shape and a.dtype == b.dtype and torch.equal(a, b)
     a, b = np.asarray(a), np.asarray(b)
@@ -126,6 +166,8 @@ def equal(a, b) -> bool:
 
 
 def delta(a, b) -> str:
+    if isinstance(a, tuple):
+        return f"bytes differ from the cached reference ({a[0]} {a[1]} vs {tuple(b.shape)} {b.dtype})"
     try:
         a = a.detach().double().cpu().numpy() if torch.is_tensor(a) else np.asarray(a, np.float64)
         b = b.detach().double().cpu().numpy() if torch.is_tensor(b) else np.asarray(b, np.float64)
@@ -197,8 +239,23 @@ def falsify(name: str, vendor) -> None:
     elif name == "nms":
         import dataclasses
         vendor.spec = dataclasses.replace(vendor.spec, nms_threshold=0.4)
+    elif name == "tf32-off":
+        # Around the vendor's forward only, so an upstream run in this process keeps the default.
+        forward = vendor.model.forward
+
+        def without_tf32(*args, **kwargs):
+            torch.backends.cudnn.allow_tf32 = False
+            try:
+                return forward(*args, **kwargs)
+            finally:
+                torch.backends.cudnn.allow_tf32 = True
+        vendor.model.forward = without_tf32
+    elif name == "channels-last":
+        original = preprocess.to_batch
+        predictor.to_batch = lambda *a: original(*a).contiguous(memory_format=torch.channels_last)
     else:
-        raise SystemExit(f"unknown falsifier {name!r}; known: {sorted(FALSIFIERS)}")
+        raise SystemExit(f"unknown falsifier {name!r}; known: "
+                         f"{sorted(FALSIFIERS) + sorted(FALSIFIERS_CUDA)}")
 
 
 def _opencv_decode(outputs, strides, threshold, iou_threshold, *, which):
@@ -212,7 +269,7 @@ def _opencv_decode(outputs, strides, threshold, iou_threshold, *, which):
 
     cls_preds, bbox_preds, obj_preds, kps_preds = outputs
     priors = pp.grid_priors([tuple(c.shape[2:]) for c in cls_preds], strides, torch.float32,
-                            torch.device("cpu"))
+                            cls_preds[0].device)
     cls, bbox = pp._flatten(cls_preds).sigmoid(), pp._flatten(bbox_preds)
     obj, kps = pp._flatten(obj_preds).squeeze(-1).sigmoid(), pp._flatten(kps_preds)
     stride = priors[:, 2:]
@@ -251,43 +308,98 @@ def upstream_pipeline(upstream: Path):
     return build_yunet, batch_of, YuNetPostprocessor
 
 
-def verify_variant(variant: str, args, pipeline, checkpoint: Path, mozo, frames, gate: Gate) -> None:
+def run_upstream(upstream, postprocessor, batch_of, bgr: np.ndarray, shared: set[str],
+                 device: torch.device) -> dict:
+    """Upstream's stages for one image, on the host: the batch, every shared module's output in
+    execution order, and the final rows at each threshold."""
+    batch = batch_of(bgr).to(device)
+    seen, handles = capture(upstream, shared)
+    try:
+        outputs = upstream(batch)
+    finally:
+        for handle in handles:
+            handle.remove()
+    rows = {}
+    for threshold in THRESHOLDS:
+        result = postprocessor(score_threshold=threshold)(outputs)[0]
+        rows[threshold] = (result.boxes.cpu().numpy(), result.scores.cpu().numpy(),
+                           result.keypoints.cpu().numpy())
+    return {"batch": tensors(batch)[0], "modules": seen, "rows": rows}
+
+
+def run_vendor(vendor, rgb: np.ndarray, shared: set[str]) -> dict:
+    """The vendor's stages for one image, in the same shape as :func:`run_upstream`'s."""
+    batch = sys.modules["mozo.vendors.yunet_deploy.predictor"].to_batch(
+        rgb, vendor.spec.size_divisor, vendor.device)
+    seen, handles = capture(vendor.model, shared)
+    try:
+        vendor.predict(rgb, THRESHOLDS[0])
+    finally:
+        for handle in handles:
+            handle.remove()
+    rows = {}
+    for threshold in THRESHOLDS:
+        faces = vendor.predict(rgb, threshold)
+        rows[threshold] = (faces.boxes, faces.scores, faces.keypoints.reshape(-1, 10))
+    return {"batch": tensors(batch)[0], "modules": seen, "rows": rows}
+
+
+def repeats(a: dict, b: dict) -> bool:
+    """Whether two runs of one side gave the same bytes at every stage."""
+    return (equal(a["batch"], b["batch"]) and a["modules"].keys() == b["modules"].keys()
+            and all(len(x) == len(y) and all(equal(u, v) for u, v in zip(x, y))
+                    for x, y in zip(a["modules"].values(), b["modules"].values()))
+            and all(equal(u, v) for t in THRESHOLDS for u, v in zip(a["rows"][t], b["rows"][t])))
+
+
+def verify_variant(variant: str, args, pipeline, checkpoint: Path, mozo, frames, gate: Gate,
+                   cached: dict | None, saved: dict) -> None:
     from mozo.vendors.yunet_deploy import Predictor, get_spec
 
-    build_yunet, batch_of, YuNetPostprocessor = pipeline
-    filename, _, pinned, _ = CHECKPOINTS[variant]
-    original = args.upstream / "weights" / filename
-    if digest(original) != pinned:
-        raise SystemExit(f"{original} is not the pinned upstream file (sha256 {pinned})")
-    upstream = build_yunet(get_spec(variant).upstream)
-    state = torch.load(original, map_location="cpu", weights_only=True)["state_dict"]
-    upstream.load_state_dict(state, strict=True)
-    upstream.eval()
-
-    vendor = Predictor(checkpoint, variant, "cpu")
+    device = torch.device(args.device)
+    vendor = Predictor(checkpoint, variant, device)
+    upstream = shared = None
+    if cached is None:
+        build_yunet, batch_of, YuNetPostprocessor = pipeline
+        filename, _, pinned, _ = CHECKPOINTS[variant]
+        original = args.upstream / "weights" / filename
+        if digest(original) != pinned:
+            raise SystemExit(f"{original} is not the pinned upstream file (sha256 {pinned})")
+        upstream = build_yunet(get_spec(variant).upstream)
+        state = torch.load(original, map_location="cpu", weights_only=True)["state_dict"]
+        upstream.load_state_dict(state, strict=True)
+        upstream.eval().to(device)
+        shared = {n for n, _ in upstream.named_modules()} & {n for n, _ in vendor.model.named_modules()}
     if args.falsify:
         falsify(args.falsify, vendor)
 
-    shared = ({n for n, _ in upstream.named_modules()} & {n for n, _ in vendor.model.named_modules()})
     compared = 0
+    check_repeats = device.type == "cuda" and not args.falsify
     for label, bgr in frames:
         rgb = np.ascontiguousarray(bgr[..., ::-1])
-        batch_up = batch_of(bgr)
-        batch_v = sys.modules["mozo.vendors.yunet_deploy.predictor"].to_batch(
-            rgb, vendor.spec.size_divisor, vendor.device)
-        gate.check(f"{variant}/{label}/batch", batch_up, batch_v)
+        if cached is not None:
+            up = cached[variant, label]
+            names = set(up["modules"])
+        else:
+            up = run_upstream(upstream, YuNetPostprocessor, batch_of, bgr, shared, device)
+            if check_repeats:
+                gate.record(f"{variant}/{label}/upstream repeats itself",
+                            repeats(up, run_upstream(upstream, YuNetPostprocessor, batch_of, bgr,
+                                                     shared, device)))
+            if args.reference_cache is not None:
+                saved[variant, label] = {
+                    "batch": fingerprint(up["batch"]), "rows": up["rows"],
+                    "modules": {n: [fingerprint(t) for t in ts] for n, ts in up["modules"].items()}}
+            names = shared
+        mine = run_vendor(vendor, rgb, names)
+        if check_repeats:
+            gate.record(f"{variant}/{label}/vendor repeats itself",
+                        repeats(mine, run_vendor(vendor, rgb, names)))
 
-        up_seen, up_handles = capture(upstream, shared)
-        v_seen, v_handles = capture(vendor.model, shared)
-        try:
-            outputs_up = upstream(batch_up)
-            vendor.predict(rgb, THRESHOLDS[0])
-        finally:
-            for handle in up_handles + v_handles:
-                handle.remove()
+        gate.check(f"{variant}/{label}/batch", up["batch"], mine["batch"])
         # In upstream's execution order, so the first difference listed is the earliest.
-        for name in [n for n in up_seen if n in v_seen]:
-            a, b = up_seen[name], v_seen[name]
+        for name in [n for n in up["modules"] if n in mine["modules"]]:
+            a, b = up["modules"][name], mine["modules"][name]
             if not gate.record(f"{variant}/{label}/module {name}", len(a) == len(b),
                                lambda: f"{len(a)} vs {len(b)} output tensors"):
                 continue
@@ -296,39 +408,70 @@ def verify_variant(variant: str, args, pipeline, checkpoint: Path, mozo, frames,
                 gate.check(f"{variant}/{label}/module {name}[{index}]", x, y)
 
         for threshold in THRESHOLDS:
-            result = YuNetPostprocessor(score_threshold=threshold)(outputs_up)[0]
-            faces = vendor.predict(rgb, threshold)
+            boxes, scores, landmarks = up["rows"][threshold]
+            v_boxes, v_scores, v_landmarks = mine["rows"][threshold]
             stage = f"{variant}/{label}/t={threshold}"
-            gate.check(f"{stage}/boxes", result.boxes.numpy(), faces.boxes)
-            gate.check(f"{stage}/scores", result.scores.numpy(), faces.scores)
-            gate.check(f"{stage}/landmarks", result.keypoints.numpy(),
-                       faces.keypoints.reshape(-1, 10))
+            gate.check(f"{stage}/boxes", boxes, v_boxes)
+            gate.check(f"{stage}/scores", scores, v_scores)
+            gate.check(f"{stage}/landmarks", landmarks, v_landmarks)
             if args.verbose:
-                print(f"  {stage}: {len(faces.scores)} faces")
+                print(f"  {stage}: {len(v_scores)} faces")
             if mozo is not None:
-                expected = mozo.detections(result.boxes.numpy(), result.scores.numpy(),
-                                           result.keypoints.numpy().reshape(-1, 5, 2),
+                expected = mozo.detections(boxes, scores, landmarks.reshape(-1, 5, 2),
                                            mozo.models[variant]._labels).to_dict()
                 actual = mozo.models[variant].predict(rgb, threshold=threshold).to_dict()
                 gate.check(f"{stage}/mozo rows", np.array(len(expected)), np.array(len(actual)))
                 gate.record(f"{stage}/mozo", expected == actual)
 
-    print(f"  {variant}: {len(shared)} shared module names, {compared} module outputs compared "
-          f"over {len(frames)} images")
+    print(f"  {variant}: {len(names)} shared module names, {compared} module outputs compared "
+          f"over {len(frames)} images" + (", each side run twice and repeated itself"
+                                          if check_repeats else ""))
 
 
-def falsify_all(argv: list[str]) -> int:
-    """Run every falsifier in a process of its own and report which were caught where."""
+def environment(device: torch.device) -> str:
+    """torch, CUDA, cuDNN, the GPU, its driver and the settings in force: what a result holds for."""
+    if device.type == "cpu":
+        return f"torch {torch.__version__}, CPU, MKL_CBWR={os.environ.get('MKL_CBWR', '')}"
+    driver = subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader",
+                             "-i", str(device.index or 0)], capture_output=True, text=True)
+    return (f"torch {torch.__version__}, CUDA {torch.version.cuda}, cuDNN "
+            f"{torch.backends.cudnn.version()}, {torch.cuda.get_device_name(device)}, driver "
+            f"{driver.stdout.strip() or 'unknown'}; cudnn.allow_tf32 "
+            f"{torch.backends.cudnn.allow_tf32}, matmul.allow_tf32 "
+            f"{torch.backends.cuda.matmul.allow_tf32}, cudnn.benchmark "
+            f"{torch.backends.cudnn.benchmark}, deterministic "
+            f"{torch.are_deterministic_algorithms_enabled()}")
+
+
+def falsify_all(argv: list[str], names: list[str], device: str) -> int:
+    """Run every falsifier in a process of its own and report which were caught where.
+
+    On CUDA, upstream's stages are first computed once, by an unperturbed run that must itself
+    pass, into a reference cache every falsifier then reads: upstream never changes between them.
+    A second unperturbed run must then pass against the cache, so a falsifier's failure is the
+    perturbation and not the cache.
+    """
     base = [a for a in argv if not a.startswith("--falsify") and a != "all"]
-    missed = []
-    for name in FALSIFIERS:
-        run = subprocess.run([sys.executable, "-I", __file__, *base, "--falsify", name],
-                             capture_output=True, text=True)
-        verdict = [line for line in run.stdout.splitlines() if line.startswith("falsifier")]
-        print(verdict[-1] if verdict else f"falsifier {name!r}: no verdict\n{run.stderr[-2000:]}")
-        if run.returncode != 0:
-            missed.append(name)
-    print(f"\n{len(FALSIFIERS) - len(missed)} of {len(FALSIFIERS)} falsifiers caught")
+    with tempfile.TemporaryDirectory() as scratch:
+        if device == "cuda" and not any(a.startswith("--reference-cache") for a in base):
+            base += ["--reference-cache", str(Path(scratch) / "reference.pt")]
+            for what in ("reference", "against the cache"):
+                run = subprocess.run([sys.executable, "-I", __file__, *base], capture_output=True,
+                                     text=True)
+                lines = run.stdout.strip().splitlines() or [run.stderr[-2000:]]
+                print(f"unperturbed, {what}: {lines[-1].strip()}")
+                if run.returncode != 0:
+                    print(run.stdout[-3000:], run.stderr[-3000:])
+                    return 1
+        missed = []
+        for name in names:
+            run = subprocess.run([sys.executable, "-I", __file__, *base, "--falsify", name],
+                                 capture_output=True, text=True)
+            verdict = [line for line in run.stdout.splitlines() if line.startswith("falsifier")]
+            print(verdict[-1] if verdict else f"falsifier {name!r}: no verdict\n{run.stderr[-2000:]}")
+            if run.returncode != 0:
+                missed.append(name)
+    print(f"\n{len(names) - len(missed)} of {len(names)} falsifiers caught")
     return 1 if missed else 0
 
 
@@ -342,25 +485,43 @@ def main() -> int:
     parser.add_argument("--wider", type=Path, default=None, help="WIDER Face val images")
     parser.add_argument("--count", type=int, default=24, help="random WIDER val images (seed 0)")
     parser.add_argument("--variants", nargs="*", default=list(CHECKPOINTS))
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--dtype", choices=("fp32", "fp16", "bf16"), default="fp32")
     parser.add_argument("--falsify", default=None)
+    parser.add_argument("--reference-cache", type=Path, default=None,
+                        help="upstream's stages: read from this file, or computed and saved there")
     parser.add_argument("--mozo", action="store_true", help="also check YuNetPredictor")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
+    if args.dtype != "fp32":
+        parser.error("YuNet runs through torch in fp32 only: mozo publishes no torch half runtime "
+                     "for it and upstream has no half-precision inference path")
+    falsifiers = {**FALSIFIERS, **(FALSIFIERS_CUDA if args.device == "cuda" else {})}
     if args.falsify == "list":
-        for name, what in FALSIFIERS.items():
-            print(f"{name:10s} {what}")
+        for name, what in falsifiers.items():
+            print(f"{name:14s} {what}")
         return 0
     if args.falsify == "all":
-        return falsify_all(sys.argv[1:])
-    if os.environ.get("MKL_CBWR") != "AVX2,STRICT":
+        return falsify_all(sys.argv[1:], list(falsifiers), args.device)
+    if args.falsify is not None and args.falsify not in falsifiers:
+        parser.error(f"--falsify {args.falsify} does not apply on {args.device}; "
+                     f"known: {', '.join(falsifiers)}")
+    if args.device == "cpu" and os.environ.get("MKL_CBWR") != "AVX2,STRICT":
         print("warning: MKL_CBWR is not AVX2,STRICT; CPU results may differ between processes")
+
+    cached = None
+    if args.reference_cache is not None and args.reference_cache.exists():
+        cached = torch.load(args.reference_cache, weights_only=False)
+        if cached.pop("for") != (args.device, torch.__version__, args.count):
+            raise SystemExit(f"{args.reference_cache} was made for another device, torch or count")
 
     commit = ((subprocess.run(["git", "-C", str(args.upstream), "rev-parse", "HEAD"],
                               capture_output=True, text=True).stdout.strip() or "?")
               if (args.upstream / ".git").exists() else "?")
-    print(f"torch {torch.__version__}, cv2 {cv2.__version__}, numpy {np.__version__}, "
-          f"upstream {commit[:8]} (pinned {COMMIT[:8]})")
+    device = torch.device(args.device)
+    print(f"{environment(device)}; cv2 {cv2.__version__}, numpy {np.__version__}, upstream "
+          f"{commit[:8]} (pinned {COMMIT[:8]})" + (", reference cached" if cached else ""))
     if commit not in ("?", COMMIT):
         print("warning: the upstream checkout is not at the pinned commit")
     torch.set_grad_enabled(False)
@@ -373,7 +534,7 @@ def main() -> int:
         from mozo.adapters.yunet import YuNetPredictor, detections
         mozo = types.SimpleNamespace(
             detections=detections,
-            models={v: YuNetPredictor(v, device="cpu", runtime="torch-fp32")
+            models={v: YuNetPredictor(v, device=args.device, runtime="torch-fp32")
                     for v in args.variants})
 
     def checkpoint_for(variant: str) -> Path:
@@ -383,9 +544,14 @@ def main() -> int:
         return resolve("yunet", variant, "torch-fp32")
 
     gate = Gate()
-    pipeline = upstream_pipeline(args.upstream)
+    pipeline = upstream_pipeline(args.upstream) if cached is None else None
+    saved: dict = {}
     for variant in args.variants:
-        verify_variant(variant, args, pipeline, checkpoint_for(variant), mozo, frames, gate)
+        verify_variant(variant, args, pipeline, checkpoint_for(variant), mozo, frames, gate,
+                       cached, saved)
+    if args.reference_cache is not None and cached is None and not args.falsify and not gate.failed:
+        torch.save({**saved, "for": (args.device, torch.__version__, args.count)},
+                   args.reference_cache)
 
     print(f"\n{gate.passed} comparisons exact, {len(gate.failed)} differ")
     for line in gate.failed[:40]:

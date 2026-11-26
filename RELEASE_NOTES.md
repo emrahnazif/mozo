@@ -8,7 +8,8 @@
   image's own size, so it finds faces a dozen pixels wide but misses faces much larger than about
   300 px: shrink a close-up selfie first. It has a workflow node, `yunet`, and blurring every face
   is that node into `blur_regions`. Scores are the authors' (OpenCV reports their square root, so
-  its 0.9 is 0.81 here). Bit-identical to the authors' PyTorch on CPU. On CUDA with TensorRT 11 or
+  its 0.9 is 0.81 here). Bit-identical to the authors' PyTorch on CUDA (RTX 3060, torch
+  2.13.0, CUDA 12.6) in fp32 and on the CPU. On CUDA with TensorRT 11 or
   later, `auto` runs an fp32 engine built from the published ONNX graph: on WIDER Face's 3,226
   validation images no face changed and AP was identical, and a whole call was 1.8 to 2.1 times
   faster than torch. On the CPU `runtime="onnx-fp32"` is the fast one. Code and weights are

@@ -426,6 +426,15 @@ Reproduce them, and record them:
 - **The global RNG inside a forward.** Depth Anything 3's sky fill draws `torch.randint` from the
   global generator: the output depends on the caller's RNG state and moves it. Give the vendor its
   own seeded generator; seed the reference's global one the same way, and the gate is exact.
+- **A reference cache whose key ignores autocast.** Depth Anything 3's RoPE keeps its cos/sin table
+  in a dict keyed by `(dim, seq_len, device, dtype)`, where dtype is the tokens' -- fp32 under
+  autocast too, because a LayerNorm (the QK-norm) runs just before. The first call in a process
+  builds the table, and its `einsum` runs in half precision under CUDA autocast, so every later
+  call reuses whatever precision the first one had. The gate calls upstream in fp32 and then
+  under autocast; without emptying the cache before each reference run, upstream's autocast
+  answer came out of an fp32 table and differed from the vendor's (and from a fresh process). CPU
+  autocast does not lower `einsum`, so the CPU gate never saw it. Empty every cache a reference
+  keeps on its modules before each run, so each run is the fresh-process answer.
 - **A non-strict hub loader.** `PyTorchModelHubMixin.from_pretrained` loads with `strict=False`;
   Depth Anything 3's small/base leave six LayerNorm tensors at init. Enumerate what is missing
   before trusting the reference, and load the vendor strict.

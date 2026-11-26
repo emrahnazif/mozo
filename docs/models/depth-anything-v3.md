@@ -138,13 +138,15 @@ own on the same input: 15.3 against 19.6 ms for `small`, 25.7 against 33.5 for `
 
 ### Parity
 
-Bit-identical to the authors' repository on all three variants. With autocast off, mozo's
-preprocessed tensor, every intermediate of every module the two networks share (292 per image for
-`small` and `base`), and the final depth are equal with no tolerance, on four photographs and seven
-synthetic inputs per variant; with upstream's own `inference` running under its autocast, mozo
-under the same autocast is equal too. `tools/verify/depth_anything_v3.py` re-runs the comparison
-against a checkout of the pinned commit, and was made to fail on purpose, at the right stage, by
-each of eleven perturbations (nine apply to `small` and `base`, seven to `mono-large`).
+Bit-identical to the authors' repository on all three variants, on CUDA (RTX 3060, torch 2.13,
+CUDA 12.6) and on the CPU. With autocast off, mozo's preprocessed tensor, every intermediate of
+every module the two networks share (292 per image for `small` and `base`), and the final depth
+are equal with no tolerance, on photographs and seven synthetic inputs per variant; with
+upstream's own `inference` running under its autocast (bf16 or fp16), mozo under the same
+autocast is equal too. `tools/verify/depth_anything_v3.py` re-runs the comparison against a
+checkout of the pinned commit, and was made to fail on purpose, at the right stage, by each of
+eleven perturbations (nine apply to `small` and `base`, seven to `mono-large`), plus on CUDA five
+that change only the GPU kernels (TF32, channels-last, the attention kernel).
 
 Upstream's API always runs in reduced precision (bf16 on recent GPUs, fp16 otherwise, even on the
 CPU); mozo's `torch-fp32` runs in full fp32, the checkpoint's own arithmetic.

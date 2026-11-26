@@ -123,7 +123,7 @@ the patch embedding; the input of every block; the final norm's input; class and
 post-processed partition (panoptic segment ids and classes, semantic classes) from this package's
 memory-bounded post-processing against upstream's own functions; each panoptic score against the
 `transformers` slow pipeline; and mozo's adapter (masks, classes, confidences) through the registry
-and the weights tree. Fourteen falsifiers (`--falsify all`) are each caught first at their stage.
+and the weights tree. Thirteen falsifiers (`--falsify all`) are each caught first at their stage.
 
 ## Runtimes
 

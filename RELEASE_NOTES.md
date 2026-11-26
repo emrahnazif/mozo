@@ -5,8 +5,9 @@
   `mozo.get_model("rtmo/small").predict(frame)` returns one detection per person, class `person`,
   with COCO's 17 joints attached, the same answer `rfdetr/keypoint-preview` gives, so it is called
   and served like any detector (`/predict/rtmo/small`) and has a workflow node. Each joint's
-  confidence is the model's estimate that it is visible. Bit-identical to MMPose v1.3.2 on CPU,
-  module by module, with no mmcv or mmpose installed. On CUDA with TensorRT 11 or later, `auto`
+  confidence is the model's estimate that it is visible. Bit-identical to MMPose v1.3.2 on CUDA
+  (RTX 3060, torch 2.13.0, CUDA 12.6) in fp32 and on the CPU, module by module, with no mmcv or
+  mmpose installed. On CUDA with TensorRT 11 or later, `auto`
   runs an fp32 engine built from the published ONNX graph: on 500 COCO images no person changed
   and AP was identical, with the network 1.5 to 4.1 times faster than torch. Code Apache-2.0; the
   weights are taken to be Apache-2.0 too, as MMPose states no separate terms for them.

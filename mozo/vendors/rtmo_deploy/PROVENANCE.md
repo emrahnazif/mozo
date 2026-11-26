@@ -92,8 +92,9 @@ and the kept set is identical — the gate compares the final rows exactly.
 
 `tools/verify/rtmo.py` runs MMPose v1.3.2 in a scratch environment (torch 2.13.0, mmengine 0.10.7,
 mmcv-lite 2.1.0, mmdet 3.3.0, numpy 2.3.5, OpenCV 4.10.0) against this package and against mozo's
-adapter, on CPU, under `MKL_CBWR=AVX2,STRICT`, with `torch.equal` / `np.array_equal` and no
-tolerance. 26 frames per variant: the repository's photograph, nine awkward synthetic cases (blank,
+adapter, in one process on one device, with `torch.equal` / `np.array_equal` and no tolerance.
+**Bit-identical on CUDA** (the primary gate, below) **and on CPU** (under `MKL_CBWR=AVX2,STRICT`).
+26 frames per variant: the repository's photograph, nine awkward synthetic cases (blank,
 noise, 2400×300 panorama, 200×1500 tower, 37×23, odd 641×479, 3000×2000, a person cut by the frame
 edge, greyscale) and 16 random COCO val2017 images, each at upstream's `score_thr` 0.1 and at 0.5.
 
@@ -123,6 +124,33 @@ cut-off frame's boxes only).
 `mmcv.ops`; the module-by-module comparison is what shows the stub reached nothing.
 
 49,719 comparisons in all, every one exact (2026-11-25).
+
+**On CUDA** (`--device cuda`, 2026-11-26): RTX 3060 (vision-002), driver 550.144.03, torch
+2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2, mmengine 0.10.7, mmcv-lite 2.1.0, mmdet 3.3.0, OpenCV 5.1.0,
+numpy 2.5.4. fp32, the only precision RTMO runs through torch: its `auto` on CUDA is a TensorRT fp32
+engine (measured by parity and accuracy below), the DCC that runs after a graph runtime is this
+package's torch fp32 code, mozo publishes no torch half runtime, and MMPose has no half inference
+path. The settings are torch's defaults, the ones mozo leaves alone: cuDNN may use TF32 for
+convolutions, matmuls do not, `cudnn.benchmark` and deterministic algorithms off. Upstream runs as
+`init_model(..., device="cuda")` + `inference_bottomup` run it: the letterbox on the host, the
+`uint8` batch moved to the GPU and cast there, then network, decode, NMS and DCC on the GPU. The
+vendor makes its float batch on the host and moves it (integers 0..255, exact either way). Each side
+first ran every frame twice and repeated itself bit for bit (208 checks), then the same stages as on
+CPU: 49,927 comparisons, every one exact, with no change to the vendored code (rerun on
+vision-002's CPU: 49,719, exact).
+
+GPU falsifiers (`--device cuda --falsify all`, on `small`, against one cached reference run):
+all twelve caught. The nine above, each first at the same stage as on CPU (the CPU falsifiers also
+rerun on vision-002's CPU: nine of nine), and three only a GPU has: cuDNN TF32 off on the vendor's
+network alone (first at `backbone.stage1.1.short_conv.conv`, the first convolution cuDNN runs in
+TF32: TF32 is in play), the batch in channels-last memory, values equal (first at
+`backbone.stem.conv.conv`: cuDNN picks other kernels), and the DCC run on the host from a CPU copy
+of the same module (first at the DCC output, everything before it exact). A falsifier that makes the
+vendor's batch on the GPU, as upstream does, is not one: its values are integers, exact on either
+side, so it is the same arithmetic. The cache keeps each large intermediate as its shape, dtype and
+the sha256 of its bytes (the final rows and the DCC's tensors whole), and an unperturbed run must
+pass against it before any falsifier runs. With OpenCV 5.1.0 the unclamped-boxes falsifier is also
+caught on the 37×23 frame, whose resized picture now puts a box past the square's edge.
 
 ## Runtimes
 

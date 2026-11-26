@@ -131,10 +131,12 @@ if you accept that.
 
 ### Parity
 
-Bit-identical to MMPose v1.3.2 on CPU: the output of every one of the network's 395 to 591 modules, the decoder's
-inputs and outputs, and the final boxes, scores and joints, compared with no tolerance on 26 images
-per variant, at thresholds 0.1 and 0.5. `tools/verify/rtmo.py` runs the comparison; it needs MMPose
-installed, which mozo does not.
+Bit-identical to MMPose v1.3.2 on CUDA (RTX 3060, torch 2.13.0, CUDA 12.6, cuDNN 9.10.2) in fp32,
+the only precision RTMO runs through torch, with torch's default CUDA settings; and also on CPU.
+Compared with no tolerance: the letterboxed input, the output of every one of the network's 395 to
+591 modules, the decoder's inputs and outputs, and the final boxes, scores and joints, on 26 images
+per variant at thresholds 0.1 and 0.5, and mozo's result through PixelFlow. `tools/verify/rtmo.py`
+runs the comparison (`--device cuda` for the GPU); it needs MMPose installed, which mozo does not.
 
 ## Weights and licence
 

@@ -7,10 +7,15 @@ Three paths reach the same weights. ``mozo/vendors/omdet_turbo_deploy`` is one; 
 ``PROVENANCE.md`` for why it rather than the authors' repository; mozo itself (registry, weights,
 adapter, PixelFlow) is the third.
 
-**Exact, at every stage**, on the CPU: pixels, token ids and masks, class embeddings, task
-states, the three Swin levels after their norms, the three encoder levels, each of six decoder
-layers, the final boxes and logits, and the post-processed detections at two thresholds; then the
-adapter against the vendor through PixelFlow's rounding.
+**Exact, at every stage**, on CUDA (the primary gate) and on the CPU: pixels, token ids and
+masks, class embeddings, task states, the three Swin levels after their norms, the three encoder
+levels, each of six decoder layers, the final boxes and logits, and the post-processed detections
+at two thresholds; then the adapter against the vendor through PixelFlow's rounding. Both sides
+run in one process, on one device, in fp32 -- mozo's only torch precision for this family.
+
+On CUDA the global switches stay as mozo's runtime leaves them (TF32 for cuDNN convolutions on,
+for matmuls off, ``cudnn.benchmark`` off, every SDPA backend allowed), and each side first runs
+twice and must repeat itself byte for byte; the GPU and the stack are printed with the result.
 
 What makes the comparison defined, and is pinned here:
 
@@ -30,10 +35,11 @@ The vendored vocabulary was checked id for id against the ``vocab.json`` and ``m
 Lab publishes (49,408 entries, 48,894 merges); its bytes are pinned below.
 
 ``--falsify`` re-runs the comparison under deliberate perturbations of the vendor and requires
-each to fail, and at the stage it should.
+each to fail, and at the stage it should. The reference is recorded once and reused.
 
 Run from the repository root, in an environment with ``transformers`` and ``timm``::
 
+    python tools/verify/omdet_turbo.py --device cuda --falsify
     python tools/verify/omdet_turbo.py
     python tools/verify/omdet_turbo.py --coco /data/coco --images 20 --falsify
 """
@@ -194,7 +200,7 @@ def _empty_caches(model) -> None:
 def _compare(stages) -> list[str]:
     problems = []
     for name, want, got in stages:
-        want, got = torch.as_tensor(want), torch.as_tensor(got)
+        want, got = torch.as_tensor(want).cpu(), torch.as_tensor(got).cpu()
         if want.shape != got.shape:
             problems.append(f"{name}: shape {tuple(want.shape)} one side, {tuple(got.shape)} the other")
         elif not torch.equal(want, got):
@@ -203,8 +209,15 @@ def _compare(stages) -> list[str]:
     return problems
 
 
-def against_upstream(model, processor, detector: Detector, pictures, quiet=False):
-    """Every stage of the vendor against the reference. Returns (checked, problems)."""
+def _where(label: str, vocabulary) -> str:
+    return f"{label}/{vocabulary[0][:14]}({len(vocabulary)})"
+
+
+def run_upstream(model, processor, pictures, device) -> dict[str, dict[str, torch.Tensor]]:
+    """The reference's every stage on every picture and vocabulary, on the CPU, keyed by case.
+
+    Recorded once and compared against as often as needed: upstream does not change between
+    falsifications."""
     from PIL import Image
 
     recorded: dict[str, object] = {}
@@ -214,72 +227,113 @@ def against_upstream(model, processor, detector: Detector, pictures, quiet=False
                  lambda m, i, o: recorded.__setitem__("encoder", o.extracted_states))]
     hooks += [layer.register_forward_hook(lambda m, i, o, k=k: recorded.__setitem__(f"layer{k}", o[0]))
               for k, layer in enumerate(model.decoder.layers)]
-    mine: dict[str, object] = {}
-    image_path = detector.image
-    own = [image_path.vision.register_forward_hook(lambda m, i, o: mine.__setitem__("vision", o)),
-           image_path.encoder.register_forward_hook(lambda m, i, o: mine.__setitem__("encoder", o))]
-    own += [layer.register_forward_hook(lambda m, i, o, k=k: mine.__setitem__(f"layer{k}", o[0]))
-            for k, layer in enumerate(image_path.decoder.layers)]
-
-    checked, problems = 0, []
+    cases = {}
     try:
         for label, pixels in pictures.items():
             for vocabulary in VOCABULARIES:
                 _empty_caches(model)
-                detector._prompts.clear()
                 encoded = processor(Image.fromarray(pixels), text=list(vocabulary),
                                     return_tensors="pt")
+                pixel_values = encoded["pixel_values"]
+                encoded = {key: value.to(device) if isinstance(value, torch.Tensor) else value
+                           for key, value in encoded.items()}
                 with torch.no_grad():
                     out = model(**encoded)
                     text = model.get_language_embedding(
                         encoded["classes_input_ids"], encoded["classes_attention_mask"],
                         encoded["tasks_input_ids"], encoded["tasks_attention_mask"],
                         encoded["classes_structure"])
+                stages = {
+                    "pixels": pixel_values,
+                    "class ids": encoded["classes_input_ids"],
+                    "task ids": encoded["tasks_input_ids"],
+                    "task mask": encoded["tasks_attention_mask"],
+                    "class embeddings": text[0], "task states": text[1],
+                    **{f"swin level {k}": recorded["vision"][k] for k in range(3)},
+                    **{f"encoder level {k}": recorded["encoder"][k] for k in range(3)},
+                    **{f"decoder layer {k}": recorded[f"layer{k}"] for k in range(6)},
+                    "boxes": out.decoder_coord_logits[0], "logits": out.decoder_class_logits[0],
+                }
+                for threshold in THRESHOLDS:
+                    found = processor.post_process_grounded_object_detection(
+                        out, text_labels=list(vocabulary), target_sizes=[pixels.shape[:2]],
+                        threshold=threshold)[0]
+                    stages.update({f"detections@{threshold} {kind}": found[kind]
+                                   for kind in ("boxes", "scores", "labels")})
+                cases[_where(label, vocabulary)] = {key: torch.as_tensor(value).cpu()
+                                                    for key, value in stages.items()}
+    finally:
+        for hook in hooks:
+            hook.remove()
+    return cases
+
+
+def run_vendor(detector: Detector, pictures) -> dict[str, dict[str, torch.Tensor]]:
+    """The vendor's same stages, keyed as :func:`run_upstream` keys them."""
+    mine: dict[str, object] = {}
+    image_path = detector.image
+    hooks = [image_path.vision.register_forward_hook(lambda m, i, o: mine.__setitem__("vision", o)),
+             image_path.encoder.register_forward_hook(lambda m, i, o: mine.__setitem__("encoder", o))]
+    hooks += [layer.register_forward_hook(lambda m, i, o, k=k: mine.__setitem__(f"layer{k}", o[0]))
+              for k, layer in enumerate(image_path.decoder.layers)]
+    cases = {}
+    try:
+        for label, pixels in pictures.items():
+            for vocabulary in VOCABULARIES:
+                detector._prompts.clear()
                 class_ids, _ = detector.tokenizer(list(vocabulary), truncate=False)
                 task_ids, task_mask = detector.tokenizer([task_sentence(vocabulary)], truncate=True)
                 classes, task = detector.encode_text(vocabulary)
                 boxes, logits = detector.raw(pixels, vocabulary)
-                where = f"{label}/{vocabulary[0][:14]}({len(vocabulary)})"
-                stages = [
-                    (f"{where}: pixels", encoded["pixel_values"], predictor_module.preprocess(pixels)),
-                    (f"{where}: class ids", encoded["classes_input_ids"], class_ids),
-                    (f"{where}: task ids", encoded["tasks_input_ids"], task_ids),
-                    (f"{where}: task mask", encoded["tasks_attention_mask"], task_mask),
-                    (f"{where}: class embeddings", text[0], classes),
-                    (f"{where}: task states", text[1], task),
-                    *[(f"{where}: swin level {k}", recorded["vision"][k], mine["vision"][k])
-                      for k in range(3)],
-                    *[(f"{where}: encoder level {k}", recorded["encoder"][k], mine["encoder"][k])
-                      for k in range(3)],
-                    *[(f"{where}: decoder layer {k}", recorded[f"layer{k}"], mine[f"layer{k}"])
-                      for k in range(6)],
-                    (f"{where}: boxes", out.decoder_coord_logits[0], boxes),
-                    (f"{where}: logits", out.decoder_class_logits[0], logits),
-                ]
-                count = 0
+                stages = {
+                    "pixels": predictor_module.preprocess(pixels),
+                    "class ids": class_ids, "task ids": task_ids, "task mask": task_mask,
+                    "class embeddings": classes, "task states": task,
+                    **{f"swin level {k}": mine["vision"][k] for k in range(3)},
+                    **{f"encoder level {k}": mine["encoder"][k] for k in range(3)},
+                    **{f"decoder layer {k}": mine[f"layer{k}"] for k in range(6)},
+                    "boxes": boxes, "logits": logits,
+                }
                 for threshold in THRESHOLDS:
-                    want = processor.post_process_grounded_object_detection(
-                        out, text_labels=list(vocabulary), target_sizes=[pixels.shape[:2]],
-                        threshold=threshold)[0]
-                    got = postprocess(boxes, logits, pixels.shape[:2], threshold)
-                    count = max(count, len(got[0]))
-                    stages += [(f"{where}: detections@{threshold} {kind}", want[kind], value)
-                               for kind, value in zip(("boxes", "scores", "labels"), got)]
-                found = _compare(stages)
-                checked += len(stages)
-                problems += found
-                if not quiet:
-                    print(f"  {where:38} {count:4d} detections  "
-                          f"{'identical' if not found else found[0]}")
+                    found = postprocess(boxes, logits, pixels.shape[:2], threshold)
+                    stages.update({f"detections@{threshold} {kind}": value
+                                   for kind, value in zip(("boxes", "scores", "labels"), found)})
+                cases[_where(label, vocabulary)] = {key: torch.as_tensor(value).cpu()
+                                                    for key, value in stages.items()}
     finally:
-        for hook in hooks + own:
+        for hook in hooks:
             hook.remove()
+    return cases
+
+
+def against_upstream(upstream, detector: Detector, pictures, quiet=False):
+    """Every stage of the vendor against the recorded reference. Returns (checked, problems)."""
+    checked, problems = 0, []
+    for where, mine in run_vendor(detector, pictures).items():
+        want = upstream[where]
+        found = _compare([(f"{where}: {stage}", want[stage], value) for stage, value in mine.items()])
+        checked += len(mine)
+        problems += found
+        if not quiet:
+            count = max(len(mine[f"detections@{t} scores"]) for t in THRESHOLDS)
+            print(f"  {where:38} {count:4d} detections  "
+                  f"{'identical' if not found else found[0]}")
     return checked, problems
 
 
-def against_mozo(detector: Detector, pictures) -> tuple[int, list[str]]:
+def repeatable(name: str, first, second) -> list[str]:
+    """Two runs of one side, byte for byte (VENDORING 2.7): without this a GPU mismatch could be
+    noise rather than a difference."""
+    problems = _compare([(f"{name} rerun {where}: {stage}", value, second[where][stage])
+                         for where, stages in first.items() for stage, value in stages.items()])
+    total = sum(len(stages) for stages in first.values())
+    print(f"  {name}: run twice, {total - len(problems)}/{total} stages byte-identical")
+    return problems
+
+
+def against_mozo(detector: Detector, pictures, device: str) -> tuple[int, list[str]]:
     """mozo's own path -- ModelManager, adapter, PixelFlow -- against the vendor."""
-    model = mozo.ModelManager().get_model("omdet_turbo", "tiny", device="cpu",
+    model = mozo.ModelManager().get_model("omdet_turbo", "tiny", device=device,
                                           runtime="torch-fp32")
     checked, problems = 0, []
     for label, pixels in pictures.items():
@@ -369,7 +423,7 @@ def falsifications() -> list[Falsification]:
     ]
 
 
-def falsify(checkpoint: Path, model, processor, pictures) -> list[str]:
+def falsify(checkpoint: Path, upstream, pictures, device: str) -> list[str]:
     """Each perturbation must fail, and the first failing stage must be the one named."""
     failures = []
     # A subset is enough to make each perturbation visible.
@@ -377,8 +431,8 @@ def falsify(checkpoint: Path, model, processor, pictures) -> list[str]:
     for case in falsifications():
         with case.patch:
             # Rebuilt inside the patch, so construction-time code (the shift masks) is covered.
-            detector = Detector(checkpoint, SPECS["tiny"])
-            checked, problems = against_upstream(model, processor, detector, subset, quiet=True)
+            detector = Detector(checkpoint, SPECS["tiny"], device=device)
+            checked, problems = against_upstream(upstream, detector, subset, quiet=True)
         first = problems[0] if problems else ""
         caught = bool(problems) and case.stage in first.split(": ", 1)[1]
         print(f"  {'caught' if caught else 'MISSED'}  {case.name:52} "
@@ -386,6 +440,29 @@ def falsify(checkpoint: Path, model, processor, pictures) -> list[str]:
         if not caught:
             failures.append(case.name)
     return failures
+
+
+def cuda_environment() -> str:
+    """What a GPU result depends on, printed with it: the stack, the card, and the global switches
+    (left as mozo's runtime leaves them)."""
+    import subprocess
+
+    try:
+        driver = subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader",
+                                 f"--id={torch.cuda.current_device()}"],
+                                capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        driver = "unknown"
+    backends = torch.backends
+    return (f"CUDA {torch.version.cuda}, cuDNN {backends.cudnn.version()}, "
+            f"{torch.cuda.get_device_name()}, driver {driver}\n"
+            f"TF32 matmul {backends.cuda.matmul.allow_tf32}, TF32 cuDNN {backends.cudnn.allow_tf32}, "
+            f"cudnn.benchmark {backends.cudnn.benchmark}, "
+            f"cudnn.deterministic {backends.cudnn.deterministic}, "
+            f"deterministic algorithms {torch.are_deterministic_algorithms_enabled()}, "
+            f"SDPA flash {backends.cuda.flash_sdp_enabled()} "
+            f"mem-efficient {backends.cuda.mem_efficient_sdp_enabled()} "
+            f"math {backends.cuda.math_sdp_enabled()}")
 
 
 def torchvision_distance(pictures) -> None:
@@ -409,7 +486,18 @@ def main() -> int:
     parser.add_argument("--falsify", action="store_true", help="also prove the gate can fail")
     parser.add_argument("--torchvision-distance", action="store_true",
                         help="report the default transformers image backend's distance")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu",
+                        help="where both sides run, in one process (default: cpu)")
+    parser.add_argument("--dtype", choices=("fp32", "fp16", "bf16"), default="fp32",
+                        help="the precision both sides run in; OmDet-Turbo's torch runtime is fp32 "
+                             "only, on every device")
     args = parser.parse_args()
+    if args.dtype != "fp32":
+        # mozo publishes no torch-fp16: autocast was slower than fp32 on CUDA (PROVENANCE). Its
+        # half precision is the TensorRT fp16 engine, which is held to parity and AP, not bits.
+        raise SystemExit(f"OmDet-Turbo has no {args.dtype} torch runtime to gate: mozo runs it "
+                         "through torch in fp32 only, and in half precision only through "
+                         "TensorRT, whose kernels are measured by parity and accuracy")
 
     try:
         import timm
@@ -419,7 +507,11 @@ def main() -> int:
                          "    pip install transformers timm")
     torch.set_grad_enabled(False)
     print(f"torch {torch.__version__}, transformers {transformers.__version__}, "
-          f"timm {timm.__version__}, MKL_CBWR={os.environ.get('MKL_CBWR')}, CPU")
+          f"timm {timm.__version__}, MKL_CBWR={os.environ.get('MKL_CBWR')}, {args.dtype}")
+    if args.device == "cuda":
+        if not torch.cuda.is_available():
+            raise SystemExit("--device cuda: no CUDA device visible")
+        print(cuda_environment())
 
     problems = []
     digest = hashlib.sha256(VOCAB_PATH.read_bytes()).hexdigest()
@@ -430,12 +522,24 @@ def main() -> int:
     checkpoint = Path(resolve("omdet_turbo", "tiny", "torch-fp32"))
     with contextlib.redirect_stdout(io.StringIO()):
         model, processor = reference(checkpoint)
-    detector = Detector(checkpoint, SPECS["tiny"])
+    model.to(args.device)
+    detector = Detector(checkpoint, SPECS["tiny"], device=args.device)
     pictures = images(args.coco, args.images)
+    upstream = run_upstream(model, processor, pictures, args.device)
 
-    print("\ntiny: omdet_turbo_deploy against transformers")
-    upstream_checked, upstream_problems = against_upstream(model, processor, detector, pictures)
-    mozo_checked, mozo_problems = against_mozo(detector, pictures)
+    if args.device == "cuda":
+        # Production settings, untouched on both sides; each must repeat itself before a
+        # mismatch between them can mean anything.
+        print("\ndeterminism: each side twice, same process, same settings")
+        problems += repeatable("transformers", upstream,
+                               run_upstream(model, processor, pictures, args.device))
+        problems += repeatable("omdet_turbo_deploy", run_vendor(detector, pictures),
+                               run_vendor(detector, pictures))
+        checked += 2 * sum(len(stages) for stages in upstream.values())
+
+    print(f"\ntiny: omdet_turbo_deploy against transformers, {args.device} {args.dtype}")
+    upstream_checked, upstream_problems = against_upstream(upstream, detector, pictures)
+    mozo_checked, mozo_problems = against_mozo(detector, pictures, args.device)
     checked += upstream_checked + mozo_checked
     problems += upstream_problems + mozo_problems
 
@@ -446,7 +550,7 @@ def main() -> int:
     missed = []
     if args.falsify:
         print("\nfalsification: each must fail, first at the stage named")
-        missed = falsify(checkpoint, model, processor, pictures)
+        missed = falsify(checkpoint, upstream, pictures, args.device)
 
     print()
     for problem in problems[:20]:

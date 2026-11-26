@@ -144,8 +144,9 @@ needs no network, no `transformers` and no `timm`.
 
 Mozo's extraction is checked against `transformers`' implementation on the tokenizer, the
 preprocessing, both text encodings, all three Swin levels, the encoder, all six decoder layers,
-the boxes, the logits and the detections, with no tolerance, on the CPU: every comparison
-bit-identical (`tools/verify/omdet_turbo.py`).
+the boxes, the logits and the detections, with no tolerance: every comparison bit-identical on
+CUDA (RTX 3060, torch 2.13, CUDA 12.6) in fp32, the precision mozo's torch runtime uses, and on
+the CPU (`tools/verify/omdet_turbo.py`).
 
 ## Weights and licence
 

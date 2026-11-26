@@ -8,7 +8,7 @@
   phrase, clicks and boxes on the first frame follow those objects with SAM 3's own tracker. Each
   frame returns PixelFlow detections: the phrase as `class_name`, the mask at the frame's size, and
   SAM 3's probability that the object is visible. It is Meta's SAM 3 video model frame by frame, bit
-  for bit on CPU, except that Meta holds every frame back fifteen frames to hide spurious objects
+  for bit on CUDA (RTX 3060, fp32) and on CPU, except that Meta holds every frame back fifteen frames to hide spurious objects
   before they show, and mozo answers each frame as it comes (on the clips Meta ships, that never
   changed an answer). Nothing new to download: the published SAM 3 file already held the tracker's
   weights, which now load with the rest (about 30 MB more in memory). A new workflow node,

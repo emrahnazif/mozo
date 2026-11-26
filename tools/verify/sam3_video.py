@@ -42,12 +42,20 @@ enter, and the vendor is told it anyway.
 - *short*: "person" on 10 frames, the clip's length given (it changes pointer encodings);
 - *end to end*: "person" through ``mozo.get_model`` -> ``tracker()`` -> PixelFlow, length not given.
 
+**On CUDA** (``--device cuda``, the primary gate), both sides run in this one process on the same
+GPU, fp32, with PyTorch's default TF32 and attention settings (what mozo runs with; Meta's import
+turns TF32 on process-wide, which is undone). Only accommodation 2 remains; Meta's GPU paths
+(triton connected components and NMS) run unpatched. Each side is first run twice and must be
+byte-identical.
+
 Run from the repository root (CPU; 12 threads take about an hour)::
 
     git clone https://github.com/facebookresearch/sam3 ~/src/sam3
     git -C ~/src/sam3 checkout 5eb25fb
     MKL_CBWR=AVX2,STRICT python tools/verify/sam3_video.py --reference ~/src/sam3
     MKL_CBWR=AVX2,STRICT python tools/verify/sam3_video.py --reference ~/src/sam3 --falsify
+    python tools/verify/sam3_video.py --reference ~/src/sam3 --device cuda
+    python tools/verify/sam3_video.py --reference ~/src/sam3 --device cuda --falsify
 
 ``--falsify`` runs the vendored side once per deliberate perturbation against the same reference
 runs, and passes only if every one is caught.
@@ -165,36 +173,55 @@ def _cpu(value):
 
 
 class Reference:
-    """Meta's SAM 3 video model on the CPU, with the accommodations in the module text."""
+    """Meta's SAM 3 video model, with the accommodations in the module text."""
 
-    def __init__(self, reference: Path, checkpoint: Path):
-        from tools.verify.sam3_reference import install
+    def __init__(self, reference: Path, checkpoint: Path, device: str = "cpu"):
+        # Meta's builder switches TF32 on, process-wide, when it is imported on an Ampere GPU
+        # (``_setup_tf32``). mozo leaves PyTorch's defaults, and both sides of this gate share
+        # one process, so the flags are put back to what they were before the import.
+        tf32 = (torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32)
+        if device == "cpu":
+            from tools.verify.sam3_reference import install
 
-        install(reference)
-        torch.Tensor.cuda = lambda self, *a, **k: self
-        torch.nn.Module.cuda = lambda self, *a, **k: self
+            install(reference)
+            torch.Tensor.cuda = lambda self, *a, **k: self
+            torch.nn.Module.cuda = lambda self, *a, **k: self
+        else:
+            # On CUDA nothing is redirected: Meta's GPU path (its triton connected components
+            # and NMS among it) runs as it is. Only the decord import, which no path here
+            # calls, is stubbed.
+            import types
+
+            sys.path.insert(0, str(reference))
+            decord = types.ModuleType("decord")
+            decord.cpu = lambda *a, **k: None
+            decord.VideoReader = type("VideoReader", (), {})
+            sys.modules.setdefault("decord", decord)
 
         from sam3.model.sam3_tracking_predictor import Sam3TrackerPredictor
         from sam3.model_builder import build_sam3_video_model
         import sam3.perflib.connected_components as components
 
-        init = Sam3TrackerPredictor.init_state
-        Sam3TrackerPredictor.init_state = lambda self, *a, **k: init(
-            self, *a, **{**k, "offload_state_to_cpu": True})
-        cpu_components = components.connected_components_cpu
+        torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32 = tf32
+        self.device = device
+        if device == "cpu":
+            init = Sam3TrackerPredictor.init_state
+            Sam3TrackerPredictor.init_state = lambda self, *a, **k: init(
+                self, *a, **{**k, "offload_state_to_cpu": True})
+            cpu_components = components.connected_components_cpu
 
-        def guarded(tensor):
-            if tensor.shape[0] == 0:
-                empty = torch.zeros(tensor.shape, dtype=torch.int32, device=tensor.device)
-                return empty, empty.clone()
-            return cpu_components(tensor)
+            def guarded(tensor):
+                if tensor.shape[0] == 0:
+                    empty = torch.zeros(tensor.shape, dtype=torch.int32, device=tensor.device)
+                    return empty, empty.clone()
+                return cpu_components(tensor)
 
-        components.connected_components_cpu = guarded
+            components.connected_components_cpu = guarded
 
         self.model = build_sam3_video_model(
             checkpoint_path=str(checkpoint), load_from_HF=False,
             bpe_path=str(reference / "sam3" / "assets" / "bpe_simple_vocab_16e6.txt.gz"),
-            apply_temporal_disambiguation=True, device="cpu").eval()
+            apply_temporal_disambiguation=True, device=device).eval()
         context = getattr(self.model.tracker, "bf16_context", None)
         if context is not None:
             context.__exit__(None, None, None)
@@ -287,7 +314,7 @@ class Reference:
         try:
             with frame_folder(frames, jpeg) as folder:
                 state = tracker.init_state(video_path=folder, offload_video_to_cpu=True,
-                                           offload_state_to_cpu=True)
+                                           offload_state_to_cpu=self.device == "cpu")
                 for obj, prompt in enumerate(prompts):
                     points = labels = box = None
                     if prompt.get("points") is not None:
@@ -431,7 +458,8 @@ class Comparison:
 class Cases:
     """The reference runs, computed once and reused by the gate and by every falsifier."""
 
-    def __init__(self, reference: Path, checkpoint: Path, count: int):
+    def __init__(self, reference: Path, checkpoint: Path, count: int, device: str = "cpu"):
+        self.device = device
         self.reference_path = reference
         self.checkpoint = checkpoint
         self.count = count
@@ -444,7 +472,7 @@ class Cases:
     def want(self, key: str) -> list:
         if key not in self._runs:
             if self._reference is None:
-                self._reference = Reference(self.reference_path, self.checkpoint)
+                self._reference = Reference(self.reference_path, self.checkpoint, self.device)
             ref = self._reference
             print(f"  reference: {key}", flush=True)
             if key == "people":
@@ -458,6 +486,33 @@ class Cases:
             elif key == "short":
                 self._runs[key] = ref.concept(self.people[:10], "person")
         return self._runs[key]
+
+
+def prefetch(cases: Cases) -> None:
+    """On CUDA: every reference run first (Meta twice on one clip, for determinism), then Meta is
+    unloaded. Two copies of a 3.4 GB model and their working memory do not fit one 12 GB GPU."""
+    for key in ("people", "hands", "nothing", "clicks", "short"):
+        cases.want(key)
+    print("determinism: Meta twice, 'hand' on 0001", flush=True)
+    same = Comparison()
+    same.traces("Meta twice", cases._reference.concept(cases.people, "hand"), cases.want("hands"))
+    if same.failed:
+        raise SystemExit(f"Meta is not deterministic ({len(same.failed)} differences)")
+    print(f"  deterministic over {same.checked} comparisons", flush=True)
+    cases._reference = None
+    torch.cuda.empty_cache()
+
+
+def determinism(cases: Cases, segmenter: Segmenter) -> None:
+    """mozo twice on the same clip: byte-identical, before anything is compared across."""
+    print("determinism: mozo twice, 'hand' on 0001", flush=True)
+    same = Comparison()
+    a = run_vendor(segmenter, cases.people, texts=["hand"], num_frames=cases.count)
+    b = run_vendor(segmenter, cases.people, texts=["hand"], num_frames=cases.count)
+    same.traces("mozo twice", b, a)
+    if same.failed:
+        raise SystemExit(f"not deterministic ({len(same.failed)} differences); see above")
+    print(f"  each side deterministic over {same.checked} comparisons", flush=True)
 
 
 def check(cases: Cases, segmenter: Segmenter, same: Comparison, end_to_end: bool = True) -> None:
@@ -491,7 +546,7 @@ def check_end_to_end(cases: Cases, same: Comparison) -> None:
     import mozo
 
     print("end to end: mozo.get_model('sam3').tracker(), 'person'", flush=True)
-    model = mozo.get_model("sam3/sam3", device="cpu")
+    model = mozo.get_model("sam3/sam3", device=cases.device)
     tracker = model.tracker()
     want = [v for s, f, v in cases.want("people") if s == "output"]
     # Meta's API visits frame 0 twice; the second visit is what both sides show.
@@ -517,10 +572,9 @@ FALSIFIERS = {
     "no-nms": "detections not thinned by mask NMS",
     "no-hole-filling": "tracks not cleaned of small holes and specks",
     "float32-memory": "memories stored in float32, not bfloat16",
-    "real-rotary": "memory attention's rotary encoding in real arithmetic, not complex",
     "single-first-visit": "the first frame visited once, not twice as Meta's API does",
     "reseed-period-15": "re-seeding every 15 frames instead of 16",
-    "no-memory-selection": "memory selection off: every past frame a candidate",
+    "selection-threshold": "memory selection keeping frames scoring above 0.9, not 0.01",
     "one-batch": "one batch per object, not one per arrival frame (objects arriving together)",
 }
 
@@ -562,16 +616,6 @@ def perturbed(name: str):
             memory, pos = self.net.encode_memory(feats[-1], masks, scores, from_points)
             return memory, self._pos_enc(pos)
         patch(vendor_group.ObjectGroup, "_encode", encode)
-    elif name == "real-rotary":
-        from mozo.vendors.sam3_deploy.tracker import memory as vendor_memory
-
-        def rotate(x, table):
-            cos = table.real.repeat_interleave(2, -1).view(1, 1, *x.shape[-2:])
-            sin = table.imag.repeat_interleave(2, -1).view(1, 1, *x.shape[-2:])
-            pairs = x.float().view(*x.shape[:-1], -1, 2)
-            turned = torch.stack((-pairs[..., 1], pairs[..., 0]), -1).flatten(-2)
-            return (x.float() * cos + turned * sin).type_as(x)
-        patch(vendor_memory, "_rotate", rotate)
     elif name == "single-first-visit":
         original_step = vendor_concept.ConceptSession.step
 
@@ -591,10 +635,17 @@ def perturbed(name: str):
             from dataclasses import replace
             self.spec = replace(self.spec, recondition_every=15)
         patch(vendor_concept.ConceptSession, "__init__", init)
-    elif name == "no-memory-selection":
+    elif name == "selection-threshold":
+        original_select = vendor_network.TrackerNet.select_frames
+
         def select(self, outputs, frame, reach):
-            return [t for t in range(max(0, frame - reach + 1), frame) if t in outputs] or \
-                ([frame - 1] if frame else [])
+            from dataclasses import replace
+            saved = self.spec
+            self.spec = replace(saved, memory_selection_threshold=0.9)
+            try:
+                return original_select(self, outputs, frame, reach)
+            finally:
+                self.spec = saved
         patch(vendor_network.TrackerNet, "select_frames", select)
     elif name == "one-batch":
         original_add = vendor_concept.ConceptSession._add_objects
@@ -651,6 +702,10 @@ def main() -> int:
                         help="run each deliberate perturbation; every one must fail")
     parser.add_argument("--falsifier", action="append", choices=sorted(FALSIFIERS),
                         help="with --falsify, run only this perturbation (repeatable)")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu",
+                        help="where both sides run (default cpu); cuda is the primary gate")
+    parser.add_argument("--dtype", choices=("fp32",), default="fp32",
+                        help="precision; mozo's tracker runs torch-fp32 only")
     parser.add_argument("--allow-commit-drift", action="store_true",
                         help="run against a reference other than the pinned commit")
     arguments = parser.parse_args()
@@ -667,19 +722,36 @@ def main() -> int:
                          f"PROVENANCE.md pins {PINNED}. Check it out, or pass --allow-commit-drift.")
 
     torch.set_grad_enabled(False)
+    device = arguments.device
     checkpoint = (arguments.checkpoint or published()).resolve()
     print(f"reference  {reference} @ {head[:12]}")
     print(f"weights    {checkpoint}")
-    print(f"versions   torch {torch.__version__}, numpy {np.__version__}; device cpu, "
-          f"{torch.get_num_threads()} threads, MKL_CBWR={os.environ.get('MKL_CBWR')}")
-    cases = Cases(reference, checkpoint, arguments.frames)
-    segmenter = Segmenter(checkpoint, device="cpu")
+    if device == "cuda":
+        driver = subprocess.run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+                                capture_output=True, text=True).stdout.strip()
+        print(f"versions   torch {torch.__version__}, CUDA {torch.version.cuda}, cuDNN "
+              f"{torch.backends.cudnn.version()}, {torch.cuda.get_device_name(0)}, driver {driver}; "
+              f"fp32, TF32 matmul {torch.backends.cuda.matmul.allow_tf32} / cuDNN "
+              f"{torch.backends.cudnn.allow_tf32} (PyTorch defaults, as mozo runs)")
+    else:
+        print(f"versions   torch {torch.__version__}, numpy {np.__version__}; device cpu, "
+              f"{torch.get_num_threads()} threads, MKL_CBWR={os.environ.get('MKL_CBWR')}")
+    cases = Cases(reference, checkpoint, arguments.frames, device)
+    if device == "cuda":
+        prefetch(cases)
+    segmenter = Segmenter(checkpoint, device=device)
+    if device == "cuda" and not arguments.falsify:
+        determinism(cases, segmenter)
 
     if arguments.falsify:
         return falsify(cases, segmenter, arguments.falsifier)
 
     same = Comparison()
-    check(cases, segmenter, same)
+    check(cases, segmenter, same, end_to_end=False)
+    del segmenter  # the end-to-end model is a second copy of the weights; make room for it
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    check_end_to_end(cases, same)
     print()
     if same.failed:
         print(f"{len(same.failed)} of {same.checked} comparisons differ.\nSAM 3 video gate: FAIL")

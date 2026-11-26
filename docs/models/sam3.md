@@ -190,13 +190,16 @@ In a workflow, the `sam3_track` node tracks the phrases you give it through the 
 detector wired in. Over HTTP, that workflow runs on an uploaded video through `/workflow/process`.
 
 **What it matches.** The tracker is Meta's SAM 3 video model (`build_sam3_video_model()`, its
-defaults) frame by frame, bit for bit on CPU, fed the same frames, with one difference by design:
+defaults) frame by frame, fed the same frames: bit-identical on CUDA (RTX 3060, torch 2.13, CUDA
+12.6, fp32) and also on CPU. One difference is by design:
 Meta holds every frame's output back fifteen frames, so that an object it removes as spurious is
 never shown at all. mozo answers each frame as it arrives, so such an object is shown until it is
 removed. On the clips Meta ships, with Meta's thresholds, that never happened. Two other
-differences are Meta's own: it runs in bfloat16 on a GPU, where mozo runs in float32 (masks agree
-to a mean IoU of 0.98 to 0.99 on the clips measured); and on a clip shorter than 16 frames its
-answer depends on the clip's length, which a stream does not have.
+differences are Meta's own: its demo runs in bfloat16 autocast on a GPU, where mozo runs in float32
+(masks agree to a mean IoU of 0.98 to 0.99 on the clips measured; the match above is with Meta in
+float32); and on a clip shorter than 16 frames its answer depends on the clip's length, which a
+stream does not have. Importing Meta's `sam3` package switches TF32 on for the whole process on an
+Ampere GPU; mozo leaves PyTorch's defaults.
 
 ## Weights and licence
 

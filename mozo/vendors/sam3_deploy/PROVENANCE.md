@@ -230,7 +230,46 @@ refuses float32. The gate runs it on the CPU in float32 with four accommodations
 
 ### Measured
 
-GATE_RESULTS
+**On CUDA** (the primary gate; `--device cuda`): Meta and mozo in one process on an RTX 3060
+(vision-003), torch 2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2, driver 550.144.03, fp32, PyTorch's
+default TF32 settings (matmul off, cuDNN on: what mozo runs with), Meta's triton connected
+components and NMS unpatched. Each side run twice first: byte-identical (147 comparisons each).
+Then **852 of 852 comparisons bit-identical**, the same stages and cases as on CPU below.
+Found on the way: importing Meta's `sam3.model_builder` turns TF32 on for the whole process on an
+Ampere GPU (`_setup_tf32`); the gate restores the flags, and before it did, the trunk's features
+differed by 0.06. All 10 falsifiers caught on CUDA too (`--device cuda --falsify`, 17 frames), at the same stages as on CPU.
+
+**On CPU** (`--device cpu`): float32 (vision-003, torch 2.13.0, 6
+threads, `MKL_CBWR=AVX2,STRICT`), 20 frames per clip: **852 of 852 comparisons bit-identical**,
+every stage of every frame (frame tensor, tracker features, detections after NMS, propagated tracks
+after hole filling, the update plan, the masks built, the frame's output after the overlap rule) on:
+"person" on `0001` (four objects, the frame-16 re-seed); "hand" on `0001` (objects arriving in
+several batches); "toy" on `bedroom` (never found); "person" and "hand" in one session, each
+against Meta with that phrase alone; a click, a box and a click pair on `bedroom` through Meta's
+tracker without the detector; "person" on 10 frames with the length given; and end to end through
+`mozo.get_model` -> `tracker()` -> PixelFlow, length not given.
+
+**Falsified** (`--falsify`, 17 frames), each perturbation caught at its own stage, 10 of 10:
+float16 frames stored as float32 (frame 0 pixels, 4.9e-04); tracker features not rounded through
+bfloat16 (frame 0 features, 8.7e-04); the phrase encoded without `"visual"` (frame 0 detections,
+9.5e-05); no NMS (frame 8, five detections instead of four); no hole filling (frame 0 masks, 48
+pixels); float32 memories (frame 1 propagation, 0.05); the first frame visited once (one
+propagation fewer); re-seeding every 15 frames (frame 16, 8.9); memory selection at 0.9 (frame 3 of
+"hand", 14.6); one batch per object (frame 0 propagation, 193). **A predicted trap that was not
+one:** rotating in real arithmetic (`x·cos + rot(x)·sin`, from the same table) is bit-identical to
+the complex multiply in memory attention, on CPU and here; the trunk's divergence came from
+rebuilding the tables, not from the arithmetic. Its falsifier was never caught and was dropped;
+"memory selection off" (every past frame a candidate) was equivalent on these clips, where every
+frame scores above 0.01, and was replaced by the threshold one.
+
+Against Meta's own bfloat16 demo default on the RTX 3060, mozo's float32 masks agree to a mean
+IoU of 0.991 ("person") and 0.977 ("hand") (Phase 0).
+
+Speed, RTX 3060, float32, 120 frames of `0001`, measured while a CPU job ran on the same machine:
+2.95 s a frame with four people, 4.57 s with eight to nine hands; Meta in float32 2.64 and 4.20 s
+under the same conditions. Peak CUDA memory 4.7 GB (people) and 5.3 GB (hands), flat once the
+objects are there (Meta, which keeps every frame: 6.7 and 8.1 GB at 120 frames). Two phrases over
+270 frames: 6.9 s a frame, 22 objects by the end, 5.6 GB.
 
 ## Dependencies
 

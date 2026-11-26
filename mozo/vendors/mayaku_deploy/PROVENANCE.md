@@ -8,7 +8,7 @@ street models), from
 |---|---|
 | Reference | `mayaku==3.1.1` from PyPI (tag `v3.1.1`, commit `5c9ecf16da85`) |
 | Extracted | 2026-11-24 |
-| Verified against | `mayaku` 3.1.1, `torch` 2.13.0+cu130, `torchvision` 0.28.0, Python 3.12, CPU |
+| Verified against | `mayaku` 3.1.1, `torch` 2.13.0+cu126, `torchvision` 0.28.0, Python 3.12, CUDA 12.6, cuDNN 9.10.2, RTX 3060 (fp32); also `torch` 2.13.0+cu130 and +cu126 on the CPU |
 | Gate | `tools/verify/mayaku.py` |
 
 **Why 3.1.1.** The checkpoints were written by Mayaku 3.0.0 and, by the 3.1.1 changelog, "download
@@ -81,8 +81,13 @@ the `tower` aux arm, export, the CLI, the download client, and the dependencies 
   the gate compares the canvas and the input tensor directly.
 - **One image at a time.** Upstream decodes a batch; the vendor decodes one image, with the same
   operations on the same shapes (the mask chunking is upstream's).
-- **The decode runs on the CPU** whatever ran the graph. Upstream decodes on the GPU when its model
-  is on CUDA.
+- **Upstream's device rules are kept.** On the CPU the input is divided on the host; on another
+  device the uint8 canvas is sent there and divided there, and the decode (masks included) runs on
+  the GPU when the maps are on CUDA, else on the CPU (`network_input`, `host_side`). The two paths
+  are not the same bits: torch's CUDA division by a scalar multiplies by its reciprocal, so the
+  GPU input differs from the host's in the last bit, and the GPU decode from the CPU's. Following
+  upstream is what makes the torch runtime bit-identical to upstream on the same GPU. A graph
+  runtime (ONNX, TensorRT) is handed the host-made input; its decode follows where its maps land.
 - **A threshold outside [0, 1) is refused.** Upstream raises `ZeroDivisionError` at 1 and a math
   domain error at 0; the vendor accepts 0 (keeps everything up to top-k) and refuses the rest with
   a message.
@@ -94,7 +99,21 @@ the `tower` aux arm, export, the CLI, the download client, and the dependencies 
 
 ## Parity
 
-`tools/verify/mayaku.py`, 2026-11-25, `mayaku` 3.1.1 on torch 2.13.0+cu130, CPU: all four
+**On CUDA** (the primary gate), `tools/verify/mayaku.py --device cuda`, 2026-11-26: upstream, the
+vendor and mozo in one process on an RTX 3060 (vision-002), torch 2.13.0+cu126, CUDA 12.6, cuDNN
+9.10.2 (91002), driver 550.144.03, fp32, with torch's default CUDA settings, which neither mozo nor
+upstream changes (cuDNN TF32 on, matmul TF32 off, `cudnn.benchmark` off, deterministic algorithms
+off). Each side ran every image twice and repeated itself bit for bit first. The same 4 variants x
+23 images x 2 thresholds: 184 runs, 7,994 detections, every stage `torch.equal`, and mozo's path
+exact against the vendor on every run. fp32 is the only precision: Mayaku's only CUDA runtime
+through torch is `torch-fp32` (its fp16 is a TensorRT engine) and upstream has no half-precision
+inference path. Falsified on the GPU (`--device cuda --falsify all`, street-seg-nano, one cached
+reference): pad, BN epsilon, NMS IoU and coordinate scale caught at the same stages as on the CPU;
+the input divided on the host instead of on the device caught at the input; cuDNN TF32 turned off
+on the vendor's side alone caught at the raw maps. Multiplying by 1/255 instead of dividing is not
+a falsifier on CUDA: on the device it is the same arithmetic torch's division already does.
+
+**On the CPU**, `tools/verify/mayaku.py`, 2026-11-25, `mayaku` 3.1.1 on torch 2.13.0+cu130, CPU: all four
 variants, 23 images (the fixture photograph, 16 street-validation images across all six sources,
 and six constructed cases: an empty grey frame, a tiny image, extreme wide and tall crops, an
 image already 800x800, noise at an odd size), at thresholds 0.4 and 0.05. 184 runs, 8,002
@@ -112,8 +131,8 @@ the raw maps; NMS IoU 0.5 -> 0.51 fails at the decoded detections; the mask coor
 ## Upstream behaviour reproduced, not fixed
 
 - **Class-wise NMS can merge two classes at the image edge.** Upstream calls
-  `torchvision.ops.batched_nms`, which for at most 1,000 boxes on the CPU (always, after the top
-  1,000) separates classes by offsetting them `max coordinate + 1` apart. Canvas boxes can start at negative coordinates (a
+  `torchvision.ops.batched_nms`, which for at most 1,000 boxes (always, after the top 1,000; on
+  the CPU and on CUDA) separates classes by offsetting them `max coordinate + 1` apart. Canvas boxes can start at negative coordinates (a
   side regressed up to 15 strides out from an anchor near the edge), and then two classes' bands
   can overlap and suppress each other. Measured with torchvision 0.28: two identical boxes at -1000..10 of classes 0 and 1 keep one.
   Rare, and what the published numbers were measured with,

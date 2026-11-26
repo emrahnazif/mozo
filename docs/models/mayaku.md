@@ -105,8 +105,10 @@ model = ModelManager().get_model("mayaku", "street-nano", runtime="onnx-fp32")
 
 Measured on an RTX 3090 and an i9-10900X (10 threads) with torch 2.13, ONNX Runtime 1.21 (CPU)
 and TensorRT 11.5, on 500 random images of Mayaku's street validation set. Time is the network's
-forward pass on one 800×800 canvas, median; the decode and, for masks, the mask network run on the
-CPU on every runtime and add 3–11 ms. AP is COCO box AP (mask AP for `street-seg-`) on those 500 images at
+forward pass on one 800×800 canvas, median; the decode and, for masks, the mask network ran on the
+CPU and add 3–11 ms. On CUDA they now run on the GPU, as Mayaku runs them (6.4 against 7.5 ms for
+`street-seg-nano`, 7.2 against 7.4 ms for `street-seg-medium`, RTX 3060, vision-002, 16 street
+images). AP is COCO box AP (mask AP for `street-seg-`) on those 500 images at
 threshold 0.05 with mozo's prediction decode, so it is lower than Mayaku's published numbers and
 only for comparing runtimes. A detection "changes" when, against torch fp32 on the CPU, it scores
 above 0.52 on one side with no same-class partner (IoU above 0.5) above 0.5 on the other.
@@ -162,4 +164,6 @@ Code and weights are Apache-2.0: the publisher states it on each model card ("Th
 Apache 2.0, like the library"). `torch-fp32` is the publisher's checkpoint, byte for byte. The
 training labels were made with SAM 3; the NOTICE published beside each checkpoint records what
 that does and does not mean. Mozo's extraction is checked against `mayaku` 3.1.1 at every stage,
-with no tolerance; see `mozo/vendors/mayaku_deploy/PROVENANCE.md`.
+with no tolerance: bit-identical on CUDA (RTX 3060, torch 2.13.0, CUDA 12.6, cuDNN 9.10.2) in
+fp32, the only precision Mayaku runs through torch, and also on the CPU; see
+`mozo/vendors/mayaku_deploy/PROVENANCE.md`.

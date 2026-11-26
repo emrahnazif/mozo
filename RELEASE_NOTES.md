@@ -7,7 +7,8 @@
   `street-medium` give boxes; `street-seg-nano` and `street-seg-medium` the same boxes with a
   mask each. It is the first detector in mozo that finds faces and plates by name, so footage can be blurred before it is kept. Code and
   weights are Apache-2.0; the weights are the publisher's own files, and mozo's results are
-  identical to `mayaku` 3.1.1's at every stage. Default threshold 0.4, the checkpoints' own. On
+  identical to `mayaku` 3.1.1's at every stage, bit for bit on CUDA (RTX 3060, torch 2.13.0,
+  CUDA 12.6) in fp32 and on the CPU. Default threshold 0.4, the checkpoints' own. On
   CUDA with TensorRT 11 or later, `auto` runs an fp32 engine with the same detections, 1.4 to 1.9
   times faster than torch; `runtime="tensorrt-fp16"` is 2.5 to 3.4 times faster and changed no
   confident detection in 500 street images. On the CPU, `runtime="onnx-fp32"` is about twice as

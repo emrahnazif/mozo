@@ -126,8 +126,8 @@ pixel or one character. `auto` stays on torch, the path the parity check covers.
 ### On CUDA, torch is not bit-identical to the CPU
 
 torch on CUDA computes convolutions in TF32 by default. It changes 1 to 2.5% of the lines read
-compared to the CPU (accuracy is the same within noise). Pass `device="cpu"` for exactly the
-verified numbers.
+compared to the CPU (accuracy is the same within noise). On either device mozo is bit-identical to
+PaddleOCR's pipeline run on that device: the check runs on CUDA and on the CPU.
 
 ### TensorRT fp16, `medium` only, pages up to 2048 pixels
 
@@ -148,8 +148,9 @@ Code and weights are Apache-2.0. The weights are PaddlePaddle's own PyTorch chec
 (`PaddlePaddle/PP-OCRv6_<size>_<det|rec>_safetensors` on the Hugging Face Hub), the tensors
 unmodified. Mozo's extraction was checked against PaddleOCR 3.7.0's own pipeline, with the networks
 run by PaddlePaddle's PyTorch implementation, at every stage from the page tensor through each box,
-crop and recogniser batch to the decoded string, with no tolerance: 1,976 comparisons across the
-three sizes, every one identical. PaddleOCR's own Paddle engine computes the same networks with Paddle's
+crop and recogniser batch to the decoded string, with no tolerance: bit-identical to upstream on
+CUDA (RTX 3060, torch 2.13, CUDA 12.6) in fp32, mozo's only torch precision for this family,
+4,120 comparisons across the three sizes; also on the CPU. PaddleOCR's own Paddle engine computes the same networks with Paddle's
 arithmetic: on ICDAR 2015 it reads 99.95% of lines exactly as mozo does, with the same accuracy; `tiny`'s recogniser is a different
 training snapshot from the one in PaddlePaddle's Paddle and ONNX files. Both are measured in
 `mozo/vendors/ppocrv6_deploy/PROVENANCE.md`.

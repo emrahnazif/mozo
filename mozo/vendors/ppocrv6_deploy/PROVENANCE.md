@@ -36,8 +36,8 @@ PaddlePaddle's PyTorch implementation on PaddlePaddle's safetensors.** Every sta
 code: the networks are transformers' modules, everything around them is PaddleX's. The gate drives
 `PaddleOCR.predict` itself, with the Paddle runner replaced.
 
-**The guarantee:** on the CPU, this package's quadrilaterals, strings and confidences are identical
-to that reference. **Where the chain stops:** Paddle's own arithmetic (measured below), and the tiny
+**The guarantee:** on CUDA and on the CPU, this package's quadrilaterals, strings and confidences
+are identical to that reference, run on the same device. **Where the chain stops:** Paddle's own arithmetic (measured below), and the tiny
 recogniser, whose safetensors checkpoint is not the snapshot in PaddlePaddle's Paddle and ONNX
 files (below).
 
@@ -69,7 +69,26 @@ and the first ten ICDAR 2015 test pages, for all three sizes: 1,976 comparisons,
 including 211 unclips through both implementations, plus 200,000 random boxes through pyclipper and
 `boxes.unclip`, 0 different.
 
-**Falsified** (on `small`), each caught at its own stage and nowhere upstream of it: the blue
+**On CUDA, the primary gate** (2026-11-26, RTX 3060 on vision-003, driver 550.144.03, torch
+2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2): both sides in one process on the GPU, in fp32 -- mozo's only
+torch precision for this family -- with the switches as mozo leaves them (TF32 on for cuDNN
+convolutions, off for matmuls, `cudnn.benchmark` off, every SDPA backend allowed). The reference's
+network forwards move to the GPU as PaddleX's own transformers engine moves them. Each side ran
+twice first and repeated itself byte for byte (1,023 / 935 / 824 stages for medium / small / tiny).
+Nine text fixtures, the photograph and the first twenty ICDAR 2015 test pages, all three sizes:
+**4,120 comparisons, every one identical**, on the first attempt, with no change to this package.
+torch on CUDA reads 1-2.5% of lines differently from torch on the CPU (TF32, below); on each device
+this package and the reference agree exactly.
+
+The falsifications below were rerun on CUDA on every size, plus four that change only the
+hardware's arithmetic on this package's side: TF32 matmuls on, SDPA forced to its math kernel,
+the attention written out as `softmax(q k^T * scale) v`, and channels-last network inputs. Every
+one that applies was caught at its stage (29 on CUDA, 17 on the CPU for small and tiny). The ones
+that do not apply: `tiny` has no LayerNorm or attention, and on CUDA `small`'s SDPA already runs the
+math kernel (head size 15: fp32 has no flash kernel and the memory-efficient one wants a multiple of
+8), so forcing it changes nothing; the written-out attention covers `small` instead.
+
+**Falsified** (on `small`, first on the CPU), each caught at its own stage and nowhere upstream of it: the blue
 channel's mean 0.485 -> 0.486 (detector input, then the map and the box scores); LayerNorm eps
 1e-6 -> 1e-5 (recogniser probabilities and confidences only, every detector stage still exact);
 Clipper's arc tolerance 0.25 -> 0.3 and the union's output order rotated by one vertex (the

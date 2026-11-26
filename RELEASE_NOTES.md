@@ -5,7 +5,8 @@
   Korean, English and other Latin scripts, Cyrillic, Greek, Arabic and more — so there is no
   language to choose, only a size; `tiny` leaves out Japanese kana. Each line comes back like
   EasyOCR's: the string in `text`, the four corners in `segments`. Checked against PaddleOCR 3.7.0
-  stage by stage with no tolerance. No new dependency: the box expansion PaddleOCR does with
+  stage by stage with no tolerance: bit-identical on CUDA (RTX 3060, torch 2.13, CUDA 12.6) in
+  fp32, mozo's only torch precision for this family, and on the CPU. No new dependency: the box expansion PaddleOCR does with
   `pyclipper` is carried in mozo, exactly. A `ppocrv6` workflow node reads text like `easyocr`.
   Code and weights are Apache-2.0; 6 MB (`tiny`) to 165 MB (`medium`).
 - PP-OCRv6 publishes ONNX graphs. On the CPU, `runtime="onnx-fp32"` runs the detector about

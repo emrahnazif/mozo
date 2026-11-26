@@ -368,6 +368,18 @@ found traps it had not predicted, and the predicted ones were mostly real.
   re-derived unclip, every line in a batch stretched to the widest. Gate each stage against the
   code whose numbers are published, not against the engine that happens to be torch.
 
+### Falsifiers on a GPU
+
+- **A kernel falsifier can equal what the GPU already does at one size and not another.** Forcing
+  SDPA's math kernel was caught on PP-OCRv6 `medium` (head size 24, memory-efficient kernel by
+  default) and on the CPU, and missed on `small` on CUDA: at head size 15 fp32 attention has no
+  flash kernel and the memory-efficient one needs a multiple of 8, so math already runs. Check the
+  kernel the default would pick before counting a miss, and add a falsifier that changes the
+  arithmetic itself (attention written out) for that size.
+- **Falsify per variant when variants differ in architecture.** A LayerNorm-eps falsifier means
+  nothing for a variant without LayerNorm (PP-OCRv6 `tiny`'s convolutional CTC head); say it does
+  not apply rather than counting it as caught or missed.
+
 ### Things that are upstream's behaviour, not bugs to fix
 
 Reproduce them, and record them:

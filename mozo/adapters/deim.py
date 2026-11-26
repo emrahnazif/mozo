@@ -99,16 +99,18 @@ class DEIMPredictor:
         _log.info("DEIM %s ready on %s via %s.", variant, self.device, self.runtime)
 
     def _forward(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
-        """Raw logits and boxes on the CPU, whichever runtime made them. Graph outputs are matched
-        by name, not position: a runtime is free to declare its outputs in an order of its own."""
+        """Raw logits and boxes, left on the device that made them: the decode runs there, as
+        upstream's runs where its network ran (CUDA's ``sigmoid`` is not the CPU's in the last
+        bit). Graph outputs are matched by name, not position: a runtime is free to declare its
+        outputs in an order of its own."""
         if self._model is not None:
             with torch.inference_mode():
                 out = self._model(batch.to(self.device))
-            return {name: out[name].cpu() for name in OUTPUTS}
+            return {name: out[name] for name in OUTPUTS}
         if self._tensorrt:
             found = dict(zip(self._runner.outputs, self._runner(batch.to(self._runner.device))))
             # The fp16 engine returns half precision; the decode runs at full width either way.
-            return {name: found[name].float().cpu() for name in OUTPUTS}
+            return {name: found[name].float() for name in OUTPUTS}
         found = dict(zip(self._runner.outputs, self._runner(batch.numpy())))
         return {name: torch.from_numpy(np.asarray(found[name], np.float32)) for name in OUTPUTS}
 
@@ -133,8 +135,11 @@ class DEIMPredictor:
             threshold -- upstream's decode, kept as it is.
         """
         batch, size = preprocess(load_image(image), self.spec.size)
-        class_ids, boxes, scores = postprocess(self._forward(batch), size, self.spec.num_classes,
-                                               self.spec.num_top_queries)
+        outputs = self._forward(batch)
+        with torch.inference_mode():
+            class_ids, boxes, scores = (t.cpu() for t in postprocess(
+                outputs, size.to(outputs["pred_logits"].device), self.spec.num_classes,
+                self.spec.num_top_queries))
         keep = scores[0] > threshold
         if self.device == "mps" and self._model is not None:
             torch.mps.empty_cache()

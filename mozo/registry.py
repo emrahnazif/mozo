@@ -132,7 +132,8 @@ DERIVES: dict[str, dict[str, str]] = {
     # ``torch-fp16`` is ``auto`` on CUDA: on an RTX 3060, PQ on 500 COCO val images moved by at most
     # 0.02 and ADE20K mIoU by 0.01, at 1.25x (``coco-panoptic-small``) to 4x (``-large-1280``)
     # torch fp32 for a whole call. ``tensorrt-fp16`` is faster again (to 3.1x on ``large``) with
-    # PQ within 0.06, on request only: a degenerate picture can flip a segment to void.
+    # PQ within 0.06, on request only: a degenerate picture can flip a segment to void. No fp16
+    # graph for ``coco-panoptic-large-1280``, where the engine is slower than torch-fp16.
     # No ``tensorrt-fp32``: exact, but at most 1.2x a call, so slower than torch-fp16.
     "eomt": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "onnx-fp16"},
 }

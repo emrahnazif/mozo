@@ -114,7 +114,27 @@ BSD-3-Clause, images for non-commercial research and educational use under MIT C
 
 ## Verification
 
-`tools/verify/eomt.py`, CPU, `MKL_CBWR=AVX2,STRICT`: see "Results" below for the counts.
+`tools/verify/eomt.py`, CPU, `MKL_CBWR=AVX2,STRICT`, in an environment pinned to upstream's
+`requirements.txt`: **5,576 of 5,576 comparisons exact** across the five variants on 28 pictures each
+(8 awkward fixtures -- portrait, exactly 640x640, a size where `round` and `floor` differ, 37x50
+upsampled, 2000x120, black, grey -- and 20 random COCO val2017 photographs). Stages: every tensor of
+the published checkpoint against the authors' `pytorch_model.bin`; the network's `uint8` input;
+the patch embedding; the input of every block; the final norm's input; class and mask logits; the
+post-processed partition (panoptic segment ids and classes, semantic classes) from this package's
+memory-bounded post-processing against upstream's own functions; each panoptic score against the
+`transformers` slow pipeline; and mozo's adapter (masks, classes, confidences) through the registry
+and the weights tree. Fourteen falsifiers (`--falsify all`) are each caught first at their stage.
+
+## Runtimes
+
+Measured on an RTX 3060 (12 GB) with torch 2.13 and TensorRT 11.5: PQ on 500 COCO val2017 panoptic
+images, mIoU on all 2,000 ADE20K validation images. `torch-fp16` (CUDA fp16 autocast, `auto` on
+CUDA) moves PQ and mIoU by at most 0.02 at 1.25x (`coco-panoptic-small`) to 4.1x
+(`coco-panoptic-large-1280`) a whole call. `tensorrt-fp16`, an engine from the published fp16 ONNX
+graph, is faster again (up to 3.1x on the 640/512 large variants) with PQ within 0.06 and mIoU 0.01,
+offered on request; not for `coco-panoptic-large-1280`, where the engine (575 ms a call) is slower
+than torch-fp16 (500 ms), so no fp16 graph is published for it. A TensorRT fp32 engine matches torch to 3e-07 of pixels but gains at most 1.2x
+a call, and is not offered. Full table: `docs/models/eomt.md`.
 
 ## Where this diverges, and why
 

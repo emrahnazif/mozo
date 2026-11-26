@@ -48,16 +48,47 @@ PNG (`{"format": "png", "data": "...", "shape": [1281, 1920], "dtype": "bool"}`)
 
 | ID | Task | Classes | Input | Weights (torch) | PQ / mIoU (authors) | Runtimes | Licence |
 |---|---|---|---|---|---|---|---|
-| `eomt/coco-panoptic-small` | panoptic | COCO, 133 | 640 | 96 MB | PQ 46.7 | torch | MIT |
-| `eomt/coco-panoptic-base` | panoptic | COCO, 133 | 640 | 375 MB | PQ 51.6 | torch | MIT |
-| `eomt/coco-panoptic-large` | panoptic | COCO, 133 | 640 | 1.3 GB | PQ 56.0 | torch | MIT |
-| `eomt/coco-panoptic-large-1280` | panoptic | COCO, 133 | 1280 | 1.3 GB | PQ 58.3 | torch | MIT |
-| `eomt/ade20k-semantic-large` | semantic | ADE20K, 150 | 512 windows | 1.3 GB | mIoU 58.4 | torch | MIT |
+| `eomt/coco-panoptic-small` | panoptic | COCO, 133 | 640 | 96 MB | PQ 46.7 | torch; fp16 and tensorrt-fp16 on CUDA | MIT |
+| `eomt/coco-panoptic-base` | panoptic | COCO, 133 | 640 | 375 MB | PQ 51.6 | torch; fp16 and tensorrt-fp16 on CUDA | MIT |
+| `eomt/coco-panoptic-large` | panoptic | COCO, 133 | 640 | 1.3 GB | PQ 56.0 | torch; fp16 and tensorrt-fp16 on CUDA | MIT |
+| `eomt/coco-panoptic-large-1280` | panoptic | COCO, 133 | 1280 | 1.3 GB | PQ 58.3 | torch; fp16 on CUDA | MIT |
+| `eomt/ade20k-semantic-large` | semantic | ADE20K, 150 | 512 windows | 1.3 GB | mIoU 58.4 | torch; fp16 and tensorrt-fp16 on CUDA | MIT |
 
 `coco-panoptic-small` is the default and the fastest; `coco-panoptic-large` is the one most people
 use. COCO's 133 classes are its 80 things (person, car, cup, ...) and 53 kinds of stuff (sky, wall,
 road, ...; ids 80 to 132, many of them merged COCO-stuff classes such as `wall-other-merged`).
 ADE20K's 150 are scene classes: wall, floor, ceiling, tree, building, road, sky, person, and so on.
+
+### On CUDA: half precision, and TensorRT
+
+On CUDA, `auto` runs EoMT as `torch-fp16`: the same checkpoint with the network under fp16
+autocast. Nothing extra is downloaded, and PQ and mIoU do not move. `runtime="tensorrt-fp16"` is
+faster again for every variant but `coco-panoptic-large-1280`: a TensorRT 11 engine built from a
+published fp16 ONNX graph (50–640 MB), which needs
+TensorRT installed (`pip install tensorrt-cu12` or `-cu13`; see
+[Runtimes](/docs/deployment/runtimes.md#tensorrt)) and is only used when asked for.
+`runtime="torch-fp32"` gives exactly the authors' numbers.
+
+Measured on an RTX 3060 (12 GB) with torch 2.13 and TensorRT 11.5. PQ on the first 500 COCO
+val2017 panoptic images, mIoU on all 2,000 ADE20K validation images, computed the way the COCO
+panoptic API and upstream do. Time is a whole `predict` on the 1920x1281 example photograph, which
+includes resizing it and bringing every mask back to full size (about 60 ms whatever the runtime).
+*Moved* is the mean share of pixels whose class differs from torch fp32's.
+
+| Variant | torch fp32 | `torch-fp16` (`auto`) | `tensorrt-fp16` |
+|---|---|---|---|
+| `coco-panoptic-small` | 91 ms, PQ 47.24 | 73 ms, 1.25×, PQ 47.24, moved 0.05% | 67 ms, 1.35×, PQ 47.19, moved 0.25% |
+| `coco-panoptic-base` | 158 ms, PQ 52.12 | 97 ms, 1.6×, PQ 52.14, moved 0.03% | 84 ms, 1.9×, PQ 52.15, moved 0.55% |
+| `coco-panoptic-large` | 341 ms, PQ 56.61 | 160 ms, 2.1×, PQ 56.61, moved 0.04% | 114 ms, 3.0×, PQ 56.67, moved 0.15% |
+| `coco-panoptic-large-1280` | 2,028 ms, PQ 58.78 | 500 ms, 4.1×, PQ 58.78, moved 0.02% | not offered: 575 ms, slower than `torch-fp16` (PQ 58.79) |
+| `ade20k-semantic-large` | 346 ms, mIoU 58.40 | 171 ms, 2.0×, mIoU 58.39, moved 0.02% | 111 ms, 3.1×, mIoU 58.39, moved 0.11% |
+
+`tensorrt-fp16` changes more pixels than `torch-fp16` and is not the default for that reason: on an
+occasional picture a large segment whose confidence sits right at the 0.8 threshold drops to void
+in one runtime and not the other (the worst of 500 COCO images changed 92% of its pixels on
+`coco-panoptic-base`), although PQ does not move. An fp32 TensorRT engine was measured too and is
+not offered: it matches torch to within one pixel in three million, but a whole call is at most
+1.2 times faster than torch fp32, slower than `torch-fp16`.
 
 ## Inputs and outputs
 

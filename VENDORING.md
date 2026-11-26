@@ -346,6 +346,20 @@ found traps it had not predicted, and the predicted ones were mostly real.
   not include it.
 - **Second passes are part of the model.** EasyOCR re-runs low-contrast crops and keeps the better
   read.
+- **Full-resolution upsampling can be the biggest allocation in the pipeline.** EoMT's evaluation
+  code upsamples all 200 queries' mask logits to the photograph before keeping the confident ones
+  (about 2 GB of floats at 1920x1281), and all 150 semantic class maps before the argmax (1.5 GB).
+  Bilinear interpolation is per channel, so upsampling only the kept channels, or the classes a
+  slice at a time with a running maximum (later class wins only on strictly greater, `argmax`'s
+  tie rule), gives identical numbers -- and the gate proves it against upstream's all-at-once path.
+- **A code path the weights never take cannot be falsified.** EoMT's panoptic merge joins two
+  segments of one stuff class; on 28 pictures the model never proposed two, so disabling the merge
+  failed no comparison. Keep the code (it is upstream's), and pick falsifiers that move numbers --
+  a threshold, an overlap ratio -- rather than counting an uncaught one as coverage.
+- **A training-time mechanism that is off in every checkpoint.** EoMT's masked attention is
+  annealed to probability zero during training, so `attn_mask_probs = 0` turns every mask into
+  "attend everywhere". Measured `torch.equal` with and without it before dropping it; the buffer
+  stays for the strict load.
 
 ### Things that are upstream's behaviour, not bugs to fix
 
@@ -361,6 +375,10 @@ Reproduce them, and record them:
   process-wide torch allocator setting that is not a library's to write. Do not carry it.
 - **A default that silently does nothing.** EasyOCR's `quantize=True` swallows `NoQEngine` in a bare
   `except`; on a machine with fbgemm the gate would compare two different models.
+- **The port's default processor is not the port's slow one.** `transformers`' EoMT network is
+  `torch.equal` to the authors', but `AutoImageProcessor` loads `EomtImageProcessorFast`, which
+  resizes about one grey level differently and moves thousands of pixels to another class;
+  `use_fast=False` matches the authors exactly. Witness with the slow one.
 - **Two entry points that disagree.** EasyOCR's array path documents BGR and its path entry decodes
   greyscale with libjpeg directly — 27 and 7 grey levels apart. Hand both sides the same array.
 - **Mutable module globals** (`imgH`) become spec fields when vendored.

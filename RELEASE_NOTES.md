@@ -12,6 +12,13 @@
   as JSON, and a workflow node, `eomt`, on the existing Detections port. Bit-identical to the
   authors' own code. Code and weights are MIT; ADE20K's *images* are licensed for non-commercial
   research and education, which the NOTICE and the docs state for that variant.
+- **EoMT runs in half precision on CUDA by default**, 1.25 times (`coco-panoptic-small`) to 4 times
+  (`coco-panoptic-large-1280`) faster for a whole `predict` on an RTX 3060, with PQ and mIoU within
+  0.02 of fp32. `runtime="tensorrt-fp16"` is faster again (about 3 times fp32 for the large
+  variants) with PQ within 0.06, for every variant but `coco-panoptic-large-1280`; it needs TensorRT 11 or
+  later, downloads an fp16 graph of 50-640 MB
+  to build from, and is never picked by `auto`. `runtime="torch-fp32"` gives the authors' exact
+  numbers.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a

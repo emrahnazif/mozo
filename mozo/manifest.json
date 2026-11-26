@@ -626,11 +626,6 @@
               "sha256": "75d87019910678d804832dfb975a1b81c99f49777415adb063a2dd9bb23a4b6e",
               "size": 6114
             },
-            "onnx-fp16": {
-              "path": "eomt/coco-panoptic-large-1280/2026-11-25/onnx-fp16.onnx",
-              "sha256": "20bc8a85da47c01c37eb3d0723ab04ad60dbf45708e2ed13d3f62b4f5ab98f55",
-              "size": 657227984
-            },
             "torch-fp32": {
               "path": "eomt/coco-panoptic-large-1280/2026-11-25/torch-fp32.pth",
               "sha256": "f00af5b873445eb8372013a369a7ce8feadf9c8e4f658643c78b5f89553b8a6e",

@@ -14,21 +14,39 @@ port onto converted weights, not the reference. The post-processor (with ``<OD>`
 from the ``Florence-2-base`` repository for every variant: the ``-ft`` repositories carry an older
 copy that predates the scores.
 
-**Every stage, then every step.** Pixels, prompt ids, each DaViT stage, the projected image tokens,
-the encoder's input and each encoder layer -- then every decoding step's processed log-probabilities
-for all three beams, the number of steps, the sequence, the beam indices, the transition scores, and
-the parsed boxes, labels and scores. ``torch.equal`` and ``==``, no tolerance.
+**Every stage, then every step.** Pixels, prompt ids, each parameter's ``requires_grad``, each
+DaViT stage, the projected image tokens, the encoder's input and each encoder layer -- then every
+decoding step's processed log-probabilities for all three beams, the number of steps, the sequence,
+the beam indices, the transition scores, and the parsed boxes, labels and scores; and for mozo's
+served path, the exact arrays the adapter hands ``pf.detections.from_arrays``, then the
+Detections through PixelFlow's door. ``torch.equal`` and ``==``, no tolerance.
 
-**What is pinned.** CPU, float32 (the published fp16 weights upcast at load on both sides), eager
-attention, the reference's parameters re-allocated before comparing, ``MKL_CBWR=AVX2,STRICT``
-expected in the environment. Versions in :data:`PINNED` are printed, not enforced.
+**On the CPU** (the default): float32 (the published fp16 weights upcast at load on both sides),
+eager attention, ``MKL_CBWR=AVX2,STRICT`` expected in the environment.
 
-**The gate is shown to fail.** ``--falsify NAME`` (or ``all``) perturbs one thing in the vendored
-package and requires the comparison to fail at the stage that thing reaches first.
+**On CUDA** (``--device cuda``): both sides in this process, on the same GPU, with the global
+settings mozo's runtime leaves (it sets none: TF32 on for cuDNN, off for matmul; every SDPA
+backend enabled; cuDNN benchmark and deterministic off), checked unchanged after the reference is
+loaded. ``--dtype`` picks the precision; omitted, CUDA checks ``fp32`` and ``fp16``, the
+``torch-fp16`` runtime ``auto`` picks there. **fp16 is the whole model in half precision, upstream's
+own mechanism**: the model card's CUDA path is ``from_pretrained(..., torch_dtype=torch.float16)``
+with the processor's pixels cast ``.to(device, torch.float16)``, and mozo's ``torch-fp16`` loads the
+published fp16 tensors as they are and casts the pixels the same way. No autocast on either side.
+The reference runs ``generate`` under ``no_grad`` (see :meth:`Reference.run`), mozo under
+``inference_mode``, as each does in production.
+
+In both cases the reference's parameters are re-allocated before comparing, and every case runs
+``--repeat`` times (default 2) on each side, each run byte-identical to the first (determinism).
+
+**The gate is shown to fail.** ``--falsify NAME`` (or ``all``) perturbs one thing on mozo's side
+and requires the comparison to fail at the stage that thing reaches first. ``--reference-cache DIR``
+keeps the reference's records per (variant, device, precision, case) as each tensor's shape, dtype
+and sha256, so falsifiers and reruns reuse one reference run (delete the directory for a fresh one).
 
     python tools/verify/florence2_detect.py --reference base=DIR          # base, every fixture
     python tools/verify/florence2_detect.py --reference base=DIR large=DIR2 --quick
     python tools/verify/florence2_detect.py --reference base=DIR --falsify all
+    python tools/verify/florence2_detect.py --device cuda --reference base=DIR --reference-cache C
 
 ``--reference VARIANT=DIR`` names a local snapshot of the variant's Hub repository at the pinned
 commit (``hf download <repo> --revision <commit> --local-dir DIR``); ``--processor DIR`` the
@@ -39,17 +57,22 @@ The vendor and mozo read the published ``torch-fp16.pth`` from ``weights/``.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import gc
+import hashlib
 import io
 import math
 import os
+import subprocess
 import sys
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
@@ -71,6 +94,9 @@ from mozo.vendors.florence2_deploy.tokenizer import PROMPTS  # noqa: E402
 PINNED = {"torch": "2.13.0", "transformers": "4.53.3", "tokenizers": "0.21.4"}
 FIXTURES = ROOT / "tests" / "fixtures"
 
+#: Each ``--dtype``, as both sides load the model: mozo's ``torch-fp32`` / ``torch-fp16``.
+PRECISIONS = {"fp32": torch.float32, "fp16": torch.float16}
+
 
 def versions() -> str:
     import tokenizers
@@ -79,6 +105,36 @@ def versions() -> str:
            "tokenizers": tokenizers.__version__}
     return ", ".join(f"{k} {v}" + ("" if v.split("+")[0] == PINNED[k] else f" (pinned {PINNED[k]})")
                      for k, v in got.items())
+
+
+def settings() -> dict[str, object]:
+    """The process-wide switches that change GPU arithmetic, as they stand."""
+    out: dict[str, object] = {
+        "cudnn.benchmark": torch.backends.cudnn.benchmark,
+        "cudnn.deterministic": torch.backends.cudnn.deterministic,
+        "cudnn.allow_tf32": torch.backends.cudnn.allow_tf32,
+        "matmul.allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+        "matmul.fp16_reduced_precision_reduction":
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
+        "float32_matmul_precision": torch.get_float32_matmul_precision(),
+        "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+    }
+    for name in ("flash", "mem_efficient", "math", "cudnn"):
+        out[f"sdp.{name}"] = getattr(torch.backends.cuda, f"{name}_sdp_enabled")()
+    return out
+
+
+def environment(device: str) -> str:
+    line = f"versions: {versions()}"
+    if device == "cuda":
+        driver = subprocess.run(["nvidia-smi", "--query-gpu=driver_version",
+                                 "--format=csv,noheader", "--id=0"],
+                                capture_output=True, text=True).stdout.strip()
+        line += (f"; CUDA {torch.version.cuda}, cuDNN {torch.backends.cudnn.version()}, "
+                 f"{torch.cuda.get_device_name(0)}, driver {driver or 'unknown'}")
+    else:
+        line += f"; MKL_CBWR={os.environ.get('MKL_CBWR', 'unset')}; threads {torch.get_num_threads()}"
+    return line
 
 
 @dataclass(frozen=True, eq=False)
@@ -90,6 +146,12 @@ class Case:
     task: str = "<OD>"
     max_new_tokens: int = 1024
     also_large: bool = False
+
+    def key(self) -> str:
+        """What identifies this case's reference records in the cache."""
+        digest = hashlib.sha256(np.ascontiguousarray(self.rgb).tobytes()).hexdigest()
+        return hashlib.sha256(f"{self.name}|{self.task}|{self.max_new_tokens}|{digest}"
+                              .encode()).hexdigest()[:16]
 
 
 def cases(quick: bool) -> list[Case]:
@@ -122,14 +184,23 @@ def cases(quick: bool) -> list[Case]:
     ]
 
 
+def _parsed(task: str, parsed: dict) -> dict:
+    """The parsed answer in one shape for both sides."""
+    if task == "<OD>":
+        return {"boxes": parsed["bboxes"], "labels": parsed["labels"],
+                "scores": parsed.get("scores", [])}
+    return {"quads": parsed["quad_boxes"], "text": parsed["labels"]}
+
+
 class Reference:
     """Microsoft's code, with hooks on every stage the vendor reports."""
 
-    def __init__(self, model_dir: str, processor_dir: str) -> None:
+    def __init__(self, model_dir: str, processor_dir: str, device: str = "cpu",
+                 dtype: torch.dtype = torch.float32) -> None:
         from transformers import AutoModelForCausalLM, AutoProcessor
 
         model = AutoModelForCausalLM.from_pretrained(
-            model_dir, trust_remote_code=True, torch_dtype=torch.float32,
+            model_dir, trust_remote_code=True, torch_dtype=dtype,
             attn_implementation="eager").eval()
         # Re-allocated, so what is compared is arithmetic, not the checkpoint's memory offsets.
         for parameter in model.parameters():
@@ -138,7 +209,8 @@ class Reference:
             for name, buffer in list(module._buffers.items()):
                 if buffer is not None:
                     module._buffers[name] = buffer.clone()
-        self.model = model
+        self.model = model.to(device)
+        self.device, self.dtype = device, dtype
         self.processor = AutoProcessor.from_pretrained(processor_dir, trust_remote_code=True)
         self.caught: dict[str, torch.Tensor] = {}
         for index, block in enumerate(model.vision_tower.blocks):
@@ -163,15 +235,23 @@ class Reference:
     def _embeds(self, module, args, kwargs):
         self.caught.setdefault("encoder_input", kwargs["inputs_embeds"].detach().clone())
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def run(self, case: Case) -> dict:
+        """One ``generate`` as the model card runs it on this device and precision.
+
+        Under ``no_grad``: the remote ``generate`` is not decorated with it (only the language
+        model's, transformers', is), so the card's code records autograd through DaViT and the
+        projection -- which on CUDA does not fit ``large`` twice in 12 GB. Grad mode picks no
+        kernel: base passed every fixture in fp32, and the photograph in fp16, with it on.
+        """
         from PIL import Image
 
         self.caught = {}
         inputs = self.processor(text=case.task, images=Image.fromarray(case.rgb),
                                 return_tensors="pt")
         out = self.model.generate(
-            input_ids=inputs["input_ids"], pixel_values=inputs["pixel_values"],
+            input_ids=inputs["input_ids"].to(self.device),
+            pixel_values=inputs["pixel_values"].to(self.device, self.dtype),
             max_new_tokens=case.max_new_tokens, return_dict_in_generate=True, output_scores=True)
         sequence = out.sequences[0]
         transition = self.model.compute_transition_scores(
@@ -181,27 +261,77 @@ class Reference:
             sequence=sequence, transition_beam_score=transition, task=case.task,
             image_size=size)[case.task]
         return {**self.caught, "pixel_values": inputs["pixel_values"],
-                "input_ids": inputs["input_ids"][0], "scores": list(out.scores),
-                "sequence": sequence, "beam_indices": out.beam_indices[0],
-                "transition": transition, "parsed": parsed}
+                "input_ids": inputs["input_ids"][0].tolist(), "scores": list(out.scores),
+                "sequence": sequence, "beam_indices": out.beam_indices[0].to(torch.int64),
+                "transition": transition, "parsed": _parsed(case.task, parsed),
+                "requires_grad": {name: p.requires_grad
+                                  for name, p in self.model.named_parameters()}}
 
 
-def _same(a, b) -> str | None:
-    if a.shape != b.shape:
-        return f"shape {tuple(a.shape)} vs {tuple(b.shape)}"
-    if torch.equal(a, b):
-        return None
-    finite = torch.isfinite(a) & torch.isfinite(b)
-    if not torch.equal(torch.isfinite(a), torch.isfinite(b)):
-        return "different -inf positions"
-    return f"max |d| {(a[finite] - b[finite]).abs().max().item():.2g}"
-
-
-def compare(case: Case, want: dict, vendor: Florence2Predictor, depth: int) -> tuple[int, list[str]]:
-    """Every comparison for *case*: how many were made, and the failures in stage order."""
+def ours(case: Case, vendor: Florence2Predictor) -> dict:
+    """The vendored package's records for *case*, in the reference's shape."""
     hooks: dict[str, torch.Tensor] = {}
     output = vendor.run(case.rgb, case.task, hooks, max_new_tokens=case.max_new_tokens)
     beams = output.beams
+    if case.task == "<OD>":
+        boxes = vendor.parse_od(output)
+        parsed = {"boxes": [b.box for b in boxes], "labels": [b.label for b in boxes],
+                  "scores": [b.score for b in boxes]}
+    else:
+        lines = vendor.parse_ocr(output)
+        parsed = {"quads": [line.quad for line in lines], "text": [line.text for line in lines]}
+    return {**hooks, "input_ids": list(PROMPTS[case.task]), "scores": list(beams.scores),
+            "sequence": beams.sequence, "beam_indices": beams.beam_indices[0].to(torch.int64),
+            "transition": vdecoding.transition_scores(beams, vendor.spec.language.vocab),
+            "parsed": parsed,
+            "requires_grad": {name: p.requires_grad
+                              for name, p in vendor.model.named_parameters()}}
+
+
+def digest(t: torch.Tensor) -> tuple:
+    """A tensor as its shape, dtype and the sha256 of its bytes."""
+    flat = t.detach().cpu().contiguous().reshape(-1)
+    return (tuple(t.shape), str(t.dtype), hashlib.sha256(flat.view(torch.uint8).numpy()).hexdigest())
+
+
+def digested(record: dict) -> dict:
+    """*record* with every tensor replaced by :func:`digest` -- what the cache keeps."""
+    out = {}
+    for name, value in record.items():
+        if isinstance(value, torch.Tensor):
+            out[name] = digest(value)
+        elif name == "scores":
+            out[name] = [digest(t) for t in value]
+        else:
+            out[name] = value
+    return out
+
+
+def _same(a, b) -> str | None:
+    """None when equal to the bit; otherwise what differs. Either side may be a digest."""
+    if isinstance(a, tuple) or isinstance(b, tuple):
+        a = a if isinstance(a, tuple) else digest(a)
+        b = b if isinstance(b, tuple) else digest(b)
+        if a == b:
+            return None
+        return f"shape/dtype {a[:2]} vs {b[:2]}" if a[:2] != b[:2] else "bytes differ"
+    a, b = a.detach().cpu(), b.detach().cpu()
+    if a.shape != b.shape:
+        return f"shape {tuple(a.shape)} vs {tuple(b.shape)}"
+    if a.dtype != b.dtype:
+        return f"dtype {a.dtype} vs {b.dtype}"
+    if torch.equal(a, b):
+        return None
+    if not a.is_floating_point():
+        return f"{int((a != b).sum())} of {a.numel()} differ"
+    if not torch.equal(torch.isfinite(a), torch.isfinite(b)):
+        return "different -inf positions"
+    finite = torch.isfinite(a) & torch.isfinite(b)
+    return f"max |d| {(a[finite].double() - b[finite].double()).abs().max().item():.2g}"
+
+
+def compare(mine: dict, theirs: dict, depth: int) -> tuple[int, list[str]]:
+    """Every comparison between two records: how many were made, and the failures in stage order."""
     checks = 0
     failures = []
 
@@ -211,63 +341,120 @@ def compare(case: Case, want: dict, vendor: Florence2Predictor, depth: int) -> t
         if problem:
             failures.append(f"{name}: {problem}")
 
-    check("input_ids", None if list(PROMPTS[case.task]) == want["input_ids"].tolist()
-          else "prompt ids differ")
+    check("input_ids", None if mine["input_ids"] == theirs["input_ids"] else "prompt ids differ")
+    flags, upstream = mine["requires_grad"], theirs["requires_grad"]
+    absent = sorted(set(flags) - set(upstream))
+    moved = sorted(name for name in set(flags) & set(upstream) if flags[name] != upstream[name])
+    check("requires_grad", None if not absent and not moved else
+          f"{len(moved)} flags differ ({moved[:2]}), {len(absent)} not upstream ({absent[:2]})")
     stages = (["pixel_values"] + [f"vision_stage_{i}" for i in range(4)]
               + ["image_features", "encoder_input"] + [f"encoder_layer_{i}" for i in range(depth)])
     for name in stages:
-        check(name, _same(hooks[name], want[name]))
-    for step, (ours, theirs) in enumerate(zip(beams.scores, want["scores"])):
-        check(f"step_{step}", _same(ours, theirs))
-    check("steps", None if len(beams.scores) == len(want["scores"])
-          else f"{len(beams.scores)} vs {len(want['scores'])}")
-    check("sequence", _same(beams.sequence, want["sequence"]))
-    check("beam_indices", _same(beams.beam_indices[0].to(torch.int64),
-                                want["beam_indices"].to(torch.int64)))
-    check("transition", _same(vdecoding.transition_scores(beams, vendor.spec.language.vocab),
-                              want["transition"]))
-    parsed = want["parsed"]
-    if case.task == "<OD>":
-        boxes = vendor.parse_od(output)
-        ours = ([b.box for b in boxes], [b.label for b in boxes], [b.score for b in boxes])
-        theirs = (parsed["bboxes"], parsed["labels"], parsed.get("scores", []))
-        names = ("parsed_boxes", "parsed_labels", "parsed_scores")
-    else:
-        lines = vendor.parse_ocr(output)
-        ours = ([line.quad for line in lines], [line.text for line in lines])
-        theirs = (parsed["quad_boxes"], parsed["labels"])
-        names = ("parsed_quads", "parsed_text")
-    for name, a, b in zip(names, ours, theirs):
-        check(name, None if a == b else f"{a[:2]!r}... vs {b[:2]!r}...")
+        check(name, _same(mine[name], theirs[name]))
+    for step, (a, b) in enumerate(zip(mine["scores"], theirs["scores"])):
+        check(f"step_{step}", _same(a, b))
+    check("steps", None if len(mine["scores"]) == len(theirs["scores"])
+          else f"{len(mine['scores'])} vs {len(theirs['scores'])}")
+    for name in ("sequence", "beam_indices", "transition"):
+        check(name, _same(mine[name], theirs[name]))
+    for name, a in mine["parsed"].items():
+        b = theirs["parsed"][name]
+        check(f"parsed_{name}", None if a == b else f"{a[:2]!r}... vs {b[:2]!r}...")
     return checks, failures
 
 
-def against_mozo(variant: str, case: Case, want: dict) -> tuple[int, list[str]]:
+def against_mozo(model, case: Case, want: dict) -> tuple[int, list[str]]:
     """The served path: registry, weights from the mirror, the adapter, PixelFlow.
 
-    PixelFlow rounds coordinates and scores to its own precision, so the reference's parsed boxes
-    go through the same door (``pf.detections.from_arrays``) before they are compared.
+    First the exact arrays the adapter hands ``pf.detections.from_arrays`` against the reference's
+    parsed boxes and scores. Then the Detections: PixelFlow rounds coordinates and scores to its
+    own precision, so the reference's parsed boxes go through the same door before comparing.
     """
     import pixelflow as pf
 
-    import mozo
+    handed: dict = {}
+    original = pf.detections.from_arrays
 
-    found = mozo.get_model(f"florence2_detect/{variant}", device="cpu").predict(case.rgb)
+    def spy(**kwargs):
+        handed.update(kwargs)
+        return original(**kwargs)
+    with mock.patch.object(pf.detections, "from_arrays", spy):
+        found = model.predict(case.rgb)
     parsed = want["parsed"]
-    door = pf.detections.from_arrays(
-        boxes=np.array(parsed["bboxes"], dtype=float).reshape(-1, 4),
-        scores=np.array(parsed.get("scores", []), dtype=float))
+    boxes = np.array(parsed["boxes"], dtype=float).reshape(-1, 4)
+    scores = np.array(parsed["scores"], dtype=float)
+    door = pf.detections.from_arrays(boxes=boxes, scores=scores)
     failures = []
-    for name, ours, theirs in (
+    for name, a, b in (
+            ("mozo_arrays_boxes", handed["boxes"], boxes),
+            ("mozo_arrays_scores", handed["scores"], scores)):
+        if a.dtype != b.dtype or not np.array_equal(a, b):
+            failures.append(f"{name}: {a[:2]!r}... vs {b[:2]!r}...")
+    for name, a, b in (
             ("mozo_boxes", [d.bbox for d in found], [d.bbox for d in door]),
             ("mozo_labels", [d.class_name for d in found], parsed["labels"]),
             ("mozo_scores", [d.confidence for d in found], [d.confidence for d in door])):
-        if ours != theirs:
-            failures.append(f"{name}: {ours[:2]!r}... vs {theirs[:2]!r}...")
-    return 3, failures
+        if a != b:
+            failures.append(f"{name}: {a[:2]!r}... vs {b[:2]!r}...")
+    return 5, failures
+
+
+class References:
+    """The reference's records per case: from ``--reference-cache`` when there, else run.
+
+    The model is loaded only on a cache miss. A run repeats ``repeat`` times and must repeat
+    itself to the byte; the cache keeps the first run's digests.
+    """
+
+    def __init__(self, variant: str, model_dir: str, processor_dir: str, device: str,
+                 precision: str, cache: Path | None, repeat: int, depth: int) -> None:
+        self.args = (model_dir, processor_dir, device, PRECISIONS[precision])
+        self.tag = f"{variant}-{device}-{precision}"
+        self.cache, self.repeat, self.depth = cache, repeat, depth
+        self.model: Reference | None = None
+        self.determinism = 0
+
+    def get(self, case: Case) -> dict:
+        path = self.cache / f"{self.tag}-{case.key()}.pt" if self.cache else None
+        if path is not None and path.exists():
+            return torch.load(path, weights_only=False)
+        if self.model is None:
+            before = settings()
+            self.model = Reference(*self.args)
+            if settings() != before:
+                raise SystemExit(f"loading the reference changed global settings: {before} -> "
+                                 f"{settings()}")
+        first = self.model.run(case)
+        for _ in range(self.repeat - 1):
+            checks, failures = compare(self.model.run(case), first, self.depth)
+            self.determinism += checks
+            if failures:
+                raise SystemExit(f"the reference is not deterministic on {case.name}: {failures[0]}")
+        if path is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(digested(first), path)
+        return first
+
+    def close(self) -> None:
+        self.model = None
+
+
+def run_ours(case: Case, vendor: Florence2Predictor, repeat: int, depth: int) -> tuple[dict, int]:
+    """The vendor's records, run *repeat* times; each must equal the first to the byte."""
+    first = ours(case, vendor)
+    checks = 0
+    for _ in range(repeat - 1):
+        more, failures = compare(ours(case, vendor), first, depth)
+        checks += more
+        if failures:
+            raise SystemExit(f"mozo's vendor is not deterministic on {case.name}: {failures[0]}")
+    return first, checks
 
 
 # --- Falsification: each perturbation must be caught at the stage it reaches first. ---
+# Each touches mozo's side only: the reference shares torch, so patching a torch function or a
+# global flag for both would move both sides and prove nothing. The reference's records are
+# produced (or read from the cache) before any perturbation is entered.
 
 def _bilinear_preprocess(image):
     from PIL import Image
@@ -385,28 +572,123 @@ def _no_half_bin():
     return mock.patch.object(vparse, "_boxes", boxes)
 
 
+# CUDA only: the same code, another kernel or another place.
+
+@contextlib.contextmanager
+def _flag(owner, attribute: str, value):
+    saved = getattr(owner, attribute)
+    setattr(owner, attribute, value)
+    try:
+        yield
+    finally:
+        setattr(owner, attribute, saved)
+
+
+def _sdpa_math():
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+    return sdpa_kernel(SDPBackend.MATH)
+
+
+@contextlib.contextmanager
+def _channels_last(vendor):
+    """Every convolution's input channels-last: ``torch.equal`` values, other strides."""
+    def last(_module, args):
+        return (args[0].contiguous(memory_format=torch.channels_last),) + args[1:]
+    handles = [m.register_forward_pre_hook(last) for m in vendor.model.modules()
+               if isinstance(m, torch.nn.Conv2d)]
+    try:
+        yield
+    finally:
+        for handle in handles:
+            handle.remove()
+
+
+@contextlib.contextmanager
+def _frozen(vendor):
+    """Every parameter ``requires_grad=False`` -- upstream leaves them trainable."""
+    for parameter in vendor.model.parameters():
+        parameter.requires_grad_(False)
+    try:
+        yield
+    finally:
+        for parameter in vendor.model.parameters():
+            parameter.requires_grad_(True)
+
+
+def _log_softmax_on_host():
+    """Each step's log-softmax on the CPU, then back: upstream takes it where the logits are."""
+    def log_softmax(x, dim):
+        return F.log_softmax(x.cpu(), dim=dim).to(x.device)
+    return mock.patch.object(vdecoding, "F", SimpleNamespace(log_softmax=log_softmax))
+
+
+@contextlib.contextmanager
+def _autocast_not_half(vendor):
+    """fp32 weights under fp16 autocast, instead of the whole model in fp16 as upstream runs it."""
+    vendor.model.float()
+    vendor.dtype = torch.float32
+    run = vendor.run
+
+    def autocast_run(*args, **kwargs):
+        with torch.autocast("cuda", torch.float16):
+            return run(*args, **kwargs)
+    vendor.run = autocast_run
+    try:
+        yield
+    finally:
+        del vendor.run
+        vendor.model.half()  # the values came from fp16, so the round trip is exact
+        vendor.dtype = torch.float16
+
+
+_ALL = {"cpu-fp32", "cuda-fp32", "cuda-fp16"}
+_CUDA = {"cuda-fp32", "cuda-fp16"}
+
+#: name: (perturbation(vendor) -> context manager, fixture, first stage that must fail, where).
 FALSIFICATIONS = {
-    "resize-bilinear": (lambda: mock.patch("mozo.vendors.florence2_deploy.predictor.preprocess",
-                                           _bilinear_preprocess), "small", "pixel_values"),
-    "pil-reducing-gap": (lambda: mock.patch("mozo.vendors.florence2_deploy.predictor.preprocess",
-                                            _reducing_gap), "cut", "pixel_values"),
-    "channel-attn-scale": (_channel_scale_by_group, "small", "vision_stage_0"),
-    "pos-embed-rows-columns": (_rows_columns_swapped, "small", "image_features"),
-    "no-temporal-embed": (_no_temporal, "small", "image_features"),
-    "position-offset-0": (_encoder_offset_zero, "small", "encoder_layer_0"),
-    "decoder-norm-eps": (_decoder_norm_eps, "small", "step_1"),
+    "resize-bilinear": (lambda _: mock.patch("mozo.vendors.florence2_deploy.predictor.preprocess",
+                                             _bilinear_preprocess), "small", "pixel_values", _ALL),
+    "pil-reducing-gap": (lambda _: mock.patch("mozo.vendors.florence2_deploy.predictor.preprocess",
+                                              _reducing_gap), "cut", "pixel_values", _ALL),
+    "channel-attn-scale": (lambda _: _channel_scale_by_group(), "small", "vision_stage_0", _ALL),
+    "pos-embed-rows-columns": (lambda _: _rows_columns_swapped(), "small", "image_features", _ALL),
+    "no-temporal-embed": (lambda _: _no_temporal(), "small", "image_features", _ALL),
+    "position-offset-0": (lambda _: _encoder_offset_zero(), "small", "encoder_layer_0", _ALL),
+    "decoder-norm-eps": (lambda _: _decoder_norm_eps(), "small", "step_1", _ALL),
     # Only where the beams would repeat a 3-token sequence; the blank image's do.
-    "no-repeat-ngram-off": (_no_ngram, "blank", "step_"),
-    "forced-eos-off": (_no_forced_eos, "cut", "step_23"),
+    "no-repeat-ngram-off": (lambda _: _no_ngram(), "blank", "step_", _ALL),
+    "forced-eos-off": (lambda _: _no_forced_eos(), "cut", "step_23", _ALL),
     # The length penalty only decides between finished hypotheses of different lengths, so it
     # never shows in a step's scores: the first thing it moves is which sequence wins.
-    "length-penalty-2": (lambda: _rules(length_penalty=2.0), "ocr-blank", "sequence"),
-    "od-score-shifted-tokens": (_label_scores, "small", "parsed_scores"),
-    "box-without-half-bin": (_no_half_bin, "small", "parsed_boxes"),
+    "length-penalty-2": (lambda _: _rules(length_penalty=2.0), "ocr-blank", "sequence", _ALL),
+    "od-score-shifted-tokens": (lambda _: _label_scores(), "small", "parsed_scores", _ALL),
+    "box-without-half-bin": (lambda _: _no_half_bin(), "small", "parsed_boxes", _ALL),
+    # The parameters' flags are a recorded stage of their own. (On CUDA they change no
+    # arithmetic here: frozen, every later stage still matched.)
+    "requires-grad-off": (_frozen, "small", "requires_grad", _ALL),
+    # CUDA only. The first Linear is in DaViT stage 0.
+    "tf32-on": (lambda _: _flag(torch.backends.cuda.matmul, "allow_tf32", True), "small",
+                "vision_stage_0", {"cuda-fp32"}),
+    # Measured on an RTX 3060: stage 0's convolutions (3 -> 128, 7 x 7, and the depthwise ones)
+    # get no TF32 kernel, so the first convolution TF32 reaches is stage 1's embedding.
+    "cudnn-tf32-off": (lambda _: _flag(torch.backends.cudnn, "allow_tf32", False), "small",
+                       "vision_stage_1", {"cuda-fp32"}),
+    # Measured on an RTX 3060: only from stage 2's shapes does cuBLAS pick a kernel whose
+    # reduction the flag changes.
+    "fp16-full-reduction": (lambda _: _flag(torch.backends.cuda.matmul,
+                                            "allow_fp16_reduced_precision_reduction", False),
+                            "small", "vision_stage_2", {"cuda-fp16"}),
+    "channels-last": (_channels_last, "small", "vision_stage_0", _CUDA),
+    # SDPA is only in the BART half (DaViT's attention is written out).
+    "sdpa-math": (lambda _: _sdpa_math(), "small", "encoder_layer_0", _CUDA),
+    # Step 0 is forced (every score -inf but <s>), so the first step the log-softmax shows in is 1.
+    "log-softmax-on-host": (lambda _: _log_softmax_on_host(), "small", "step_1", _CUDA),
+    "autocast-not-half": (_autocast_not_half, "small", "vision_stage_0", {"cuda-fp16"}),
 }
 
 
-def falsify(names: list[str], reference: Reference, vendor: Florence2Predictor, depth: int) -> int:
+def falsify(names: list[str], references: References, vendor: Florence2Predictor, depth: int,
+            where: str) -> int:
     """Each perturbation must make the comparison fail, at the stage it reaches first."""
     from PIL import Image
 
@@ -418,18 +700,30 @@ def falsify(names: list[str], reference: Reference, vendor: Florence2Predictor, 
                           "<OCR_WITH_REGION>"),
         "cut": Case("photo cut at 24", photo, max_new_tokens=24),
     }
+    names = [name for name in names if where in FALSIFICATIONS[name][3]]
     needed = {FALSIFICATIONS[name][1] for name in names}
-    wanted = {name: reference.run(case) for name, case in fixtures.items() if name in needed}
+    wanted = {name: references.get(case) for name, case in fixtures.items() if name in needed}
+    references.close()
+    unperturbed = {name: compare(ours(fixtures[name], vendor), wanted[name], depth)[1]
+                   for name in needed}
+    if any(unperturbed.values()):
+        raise SystemExit(f"the gate fails before any perturbation: {unperturbed}")
     missed = 0
     for name in names:
-        perturbation, fixture, stage = FALSIFICATIONS[name]
-        with perturbation():
-            _, failures = compare(fixtures[fixture], wanted[fixture], vendor, depth)
+        perturbation, fixture, stage, _ = FALSIFICATIONS[name]
+        with perturbation(vendor):
+            _, failures = compare(ours(fixtures[fixture], vendor), wanted[fixture], depth)
         first = failures[0] if failures else "nothing"
         caught = bool(failures) and first.startswith(stage)
         missed += not caught
-        print(f"  {'caught' if caught else 'MISSED'} {name:26s} first failure: {first[:90]}"
+        then = f"; then {failures[1][:60]}" if len(failures) > 1 else ""
+        print(f"  {'caught' if caught else 'MISSED'} {name:26s} first failure: {first[:80]}{then}"
               + ("" if caught else f"   (expected {stage})"), flush=True)
+    # A perturbation must leave nothing behind: the unperturbed comparison passes again.
+    for name in needed:
+        if compare(ours(fixtures[name], vendor), wanted[name], depth)[1]:
+            raise SystemExit(f"a perturbation leaked: {fixtures[name].name} no longer passes")
+    print(f"  {len(names) - missed} of {len(names)} caught ({where})", flush=True)
     return missed
 
 
@@ -437,13 +731,38 @@ def weights(variant: str) -> Path:
     return published(variant)
 
 
+def served(variant: str, device: str, precision: str):
+    """mozo's adapter as a user gets it; on CUDA fp16 through ``auto``, which must pick fp16."""
+    from mozo.adapters.florence2_detect import Florence2DetectPredictor
+
+    wanted = {"fp32": "torch-fp32", "fp16": "torch-fp16"}[precision]
+    runtime = "auto" if (device, precision) in (("cpu", "fp32"), ("cuda", "fp16")) else wanted
+    model = Florence2DetectPredictor(variant, device=device, runtime=runtime)
+    if model.runtime != wanted:
+        raise SystemExit(f"{variant} on {device} via {runtime} ran {model.runtime}, not {wanted}")
+    return model
+
+
+def free() -> None:
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--reference", nargs="+", required=True, metavar="VARIANT=DIR")
     parser.add_argument("--processor", help="Florence-2-base snapshot (post-processor)")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--dtype", choices=tuple(PRECISIONS),
+                        help="default: fp32 on the CPU; fp32 and fp16 on CUDA")
     parser.add_argument("--quick", action="store_true", help="the photograph only")
     parser.add_argument("--no-mozo", action="store_true", help="skip the served path")
+    parser.add_argument("--repeat", type=int, default=2,
+                        help="runs per case on each side, each byte-identical to the first")
+    parser.add_argument("--reference-cache", type=Path, metavar="DIR",
+                        help="keep and reuse the reference's records (digests)")
     parser.add_argument("--falsify", nargs="+", metavar="NAME",
                         choices=[*FALSIFICATIONS, "all"], help="perturbations that must be caught")
     args = parser.parse_args()
@@ -451,35 +770,66 @@ def main() -> int:
     processor = args.processor or references.get("base")
     if processor is None:
         raise SystemExit("--processor is needed when base is not among the references")
-    print(f"versions: {versions()}; MKL_CBWR={os.environ.get('MKL_CBWR', 'unset')}; "
-          f"threads {torch.get_num_threads()}")
+    if args.device == "cpu" and args.dtype not in (None, "fp32"):
+        raise SystemExit("mozo runs Florence-2 in fp16 on CUDA only")
+    precisions = [args.dtype] if args.dtype else (["fp32", "fp16"] if args.device == "cuda"
+                                                  else ["fp32"])
+    if args.device == "cuda" and not torch.cuda.is_available():
+        raise SystemExit("--device cuda, but torch sees no GPU")
+    print(environment(args.device))
+    before = settings()
+    if args.device == "cuda":
+        print("settings:", ", ".join(f"{k}={v}" for k, v in before.items()))
 
     failed = 0
-    for variant, model_dir in references.items():
-        reference = Reference(model_dir, processor)
-        vendor = Florence2Predictor(weights(variant), variant)
-        depth = vendor.spec.language.layers
-        if args.falsify:
-            names = list(FALSIFICATIONS) if "all" in args.falsify else args.falsify
-            print(f"{variant}: falsifying {len(names)}", flush=True)
-            failed += falsify(names, reference, vendor, depth)
-            continue
-        total = 0
-        for case in cases(args.quick):
-            if variant not in ("base", "base-ft") and not case.also_large:
+    grand = 0
+    for precision in precisions:
+        for variant, model_dir in references.items():
+            vendor = Florence2Predictor(weights(variant), variant, args.device,
+                                        PRECISIONS[precision])
+            depth = vendor.spec.language.layers
+            upstream = References(variant, model_dir, processor, args.device, precision,
+                                  args.reference_cache, args.repeat, depth)
+            where = f"{args.device}-{precision}"
+            if args.falsify:
+                names = list(FALSIFICATIONS) if "all" in args.falsify else args.falsify
+                print(f"{variant} {where}: falsifying", flush=True)
+                failed += falsify(names, upstream, vendor, depth, where)
+                del vendor, upstream
+                free()
                 continue
-            want = reference.run(case)
-            checks, failures = compare(case, want, vendor, depth)
-            if not args.no_mozo and case.task == "<OD>" and case.max_new_tokens == Case.max_new_tokens:
-                more, extra = against_mozo(variant, case, want)
-                checks += more
-                failures += extra
-            total += checks
-            failed += bool(failures)
-            print(f"  {variant:8s} {case.name:44s} {checks:4d} comparisons, "
-                  f"{len(want['scores']):4d} steps: "
-                  + ("all equal" if not failures else f"FAILED {failures[0][:100]}"), flush=True)
-        print(f"{variant}: {total} comparisons", flush=True)
+            mozo_model = None
+            total = determinism = 0
+            for case in cases(args.quick):
+                if variant not in ("base", "base-ft") and not case.also_large:
+                    continue
+                want = upstream.get(case)
+                mine, repeats = run_ours(case, vendor, args.repeat, depth)
+                determinism += repeats
+                checks, failures = compare(mine, want, depth)
+                if not args.no_mozo and case.task == "<OD>" and case.max_new_tokens == Case.max_new_tokens:
+                    if mozo_model is None:
+                        mozo_model = served(variant, args.device, precision)
+                    more, extra = against_mozo(mozo_model, case, want)
+                    checks += more
+                    failures += extra
+                total += checks
+                failed += bool(failures)
+                print(f"  {variant:8s} {precision} {case.name:44s} {checks:4d} comparisons, "
+                      f"{len(want['scores']):4d} steps: "
+                      + ("all equal" if not failures else f"FAILED {failures[0][:100]}"), flush=True)
+            determinism += upstream.determinism
+            grand += total + determinism
+            print(f"{variant} {where}: {total} comparisons against the reference, {determinism} "
+                  f"determinism (mozo repeats {determinism - upstream.determinism}, reference "
+                  f"{upstream.determinism})", flush=True)
+            del vendor, upstream, mozo_model
+            free()
+    if settings() != before:
+        print(f"global settings changed during the run: {before} -> {settings()}")
+        failed += 1
+    if not args.falsify:
+        print(f"{grand} comparisons in all")
     print("PASS" if not failed else f"FAIL ({failed})")
     return 1 if failed else 0
 

@@ -37,16 +37,22 @@ weights (below), run under **transformers 4.53.3**, torch 2.13.0, on CPU in floa
   torchvision image processor the pixels move by one 8-bit level and `<OD>` came out 6 tokens
   different.
 
-**What mozo guarantees:** for the same image, on CPU in float32, the same `pixel_values`, the same
+**What mozo guarantees:** for the same image, on CUDA in float32 and in float16 (the `torch-fp16`
+runtime `auto` picks there; RTX 3060, torch 2.13.0, CUDA 12.6, cuDNN 9.10.2), and on CPU in
+float32, the same `pixel_values`, the same parameters' `requires_grad`, the same
 output of each DaViT stage, the same projected image tokens, the same encoder input and each
 encoder layer's output, **the same processed log-probabilities of all three beams at every decoding
 step**, the same number of steps, the same sequence, beam indices and transition scores, and the same
-parsed boxes, labels and scores (floats compared with `==`) -- `tools/verify/florence2_detect.py`.
+parsed boxes, labels and scores (floats compared with `==`), and the same arrays handed to
+PixelFlow -- `tools/verify/florence2_detect.py`. Each against Microsoft's code on the same device in
+the same precision: float16 is the whole model in half precision, the model card's own CUDA path
+(`torch_dtype=torch.float16`, pixels `.to(device, torch.float16)`), on both sides.
 
 **Where the chain stops.** Microsoft's benchmark numbers (COCO detection 34.7 / 37.5 / 41.4 / 43.4
 mAP for base / large / base-ft / large-ft on the model card) are claimed, not reproduced: they were
 measured with Microsoft's own evaluation, and for `large` with the checkpoint Microsoft replaced in
-December 2024. On CUDA and in fp16 the results are not bit-identical (measured below).
+December 2024. Results on CUDA are not bit-identical to results on the CPU, nor fp16 to fp32
+(measured below): each is identical to Microsoft's code run the same way.
 
 ## The weights
 
@@ -128,7 +134,8 @@ additionally needs a text encoder for user phrases, which is not built.
 
 ## Gate
 
-`tools/verify/florence2_detect.py`, CPU, float32, `MKL_CBWR=AVX2,STRICT`, transformers 4.53.3:
+`tools/verify/florence2_detect.py`. **On the CPU**, float32, `MKL_CBWR=AVX2,STRICT`, transformers
+4.53.3:
 
 | variant | fixtures | comparisons | machine |
 |---|---|---|---|
@@ -145,6 +152,32 @@ LayerNorm eps 1e-6 at `step_1`; the n-gram ban off at `step_6` (on the blank ima
 repeat a trigram); the forced `</s>` off at `step_23` of the 24-token case; length penalty 2 at
 `sequence` (it only ranks finished hypotheses, never shows in a step's scores); the OD score read
 from shifted tokens at `parsed_scores`; boxes without the half-bin at `parsed_boxes`.
+
+**On CUDA (2026-11-26)**, `--device cuda`: vision-003, NVIDIA GeForce RTX 3060, driver
+550.144.03, torch 2.13.0+cu126, CUDA 12.6, cuDNN 91002, transformers 4.53.3; both sides in one
+process with the global settings mozo leaves (TF32 on for cuDNN, off for matmul; every SDPA
+backend; cuDNN benchmark and deterministic off). The same fixtures per variant, in fp32 and fp16:
+
+| | `base` | `large` | `base-ft` | `large-ft` |
+|---|---|---|---|---|
+| fp32 | 830 | 220 | 842 | 268 |
+| fp16 | 815 | 220 | 842 | 268 |
+
+All 4,305 equal, mozo's served path included (`auto` checked to pick `torch-fp16`). Every case runs
+twice on each side and repeats itself to the byte (8,290 more comparisons); a second run with a
+fresh reference and three runs per case was equal too. No production setting had to change.
+The reference runs `generate` under `no_grad`: Microsoft's remote `generate` does not disable
+autograd itself, which on CUDA did not fit `large` twice in 12 GB; base passed every fixture in
+fp32, and the photograph in fp16, with autograd on, so grad mode changes no bit.
+
+**Falsified on CUDA, base, 18 in fp32 and 18 in fp16, all caught**: the 12 above at the same
+stages, plus every parameter frozen at `requires_grad` (it changes no arithmetic here: every later
+stage still matched), matmul TF32 on at `vision_stage_0`, cuDNN TF32 off at `vision_stage_1` (stage
+0's 3-channel and depthwise convolutions get no TF32 kernel), every convolution's input
+channels-last at `vision_stage_0`, SDPA forced to the math backend at `encoder_layer_0`, each step's
+log-softmax taken on the CPU at `step_1`; in fp16, GEMMs without reduced-precision reduction at
+`vision_stage_2`, and fp32 weights under fp16 autocast instead of the half model at
+`vision_stage_0`.
 
 ## Runtimes (measured; nothing beyond torch published)
 

@@ -125,8 +125,10 @@ a lower bound; it compares runtimes and variants fairly, not this model with oth
 Mozo's extraction is checked against Microsoft's own code (the remote code in its Hugging Face
 repositories, under transformers 4.53.3) with no tolerance: the pixels, each stage of the vision
 tower, the encoder, every decoding step's scores for all three beams, the chosen sequence, and the
-final boxes, labels and scores. That is 2,096 comparisons across the four variants, every one
-identical. On a CPU it runs 3–5% faster than Microsoft's code on the same weights.
+final boxes, labels and scores. On CUDA (an RTX 3060, torch 2.13, CUDA 12.6) all four variants are
+bit-identical to Microsoft's code in fp32 and in fp16, the precision `auto` uses there: 4,305
+comparisons, every one identical, with both sides run twice to show they repeat themselves. On the
+CPU, in fp32, another 2,096. On a CPU it runs 3–5% faster than Microsoft's code on the same weights.
 
 ## Weights and licence
 

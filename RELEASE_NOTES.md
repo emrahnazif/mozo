@@ -8,9 +8,9 @@
   Microsoft's own score, how sure the decoder was of the box, not a calibrated probability; every box
   is returned unless you pass `threshold`, and `labels` is refused. Decoding is Microsoft's default
   3-beam search, deterministic. On CUDA `auto` runs the published half-precision weights, about
-  twice as fast as fp32 with COCO AP within 0.3; on the CPU they load as exact fp32. Checked against
-  Microsoft's own code on every stage and every decoding step, with no tolerance. A workflow node
-  comes with it.
+  twice as fast as fp32 with COCO AP within 0.3; on the CPU they load as exact fp32. Bit-identical
+  to Microsoft's own code on every stage and every decoding step, on CUDA (RTX 3060, torch 2.13,
+  CUDA 12.6) in fp32 and fp16, and on the CPU in fp32. A workflow node comes with it.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a

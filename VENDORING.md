@@ -388,6 +388,14 @@ Reproduce them, and record them:
 - **PIL's `reducing_gap` only matters past a 2x downscale** (factor `floor(scale / gap)`), so a
   preprocessing falsifier for it needs a large image; and `x / 255` in float32 equals upstream's
   float64-then-float32 rescale for every uint8 value, so that "difference" cannot be falsified.
+- **Remote code's own `generate` may not turn off autograd.** Florence-2's is not decorated with
+  `no_grad` (only the language model's, transformers', is), so the model card's code records
+  autograd through the vision tower. On CUDA that did not fit `large` twice in 12 GB; the GPU gate
+  runs the reference under `no_grad`, after showing on base that grad mode changes no bit.
+- **Predict a hardware falsifier's first stage, then measure it.** On an RTX 3060, cuDNN TF32 off
+  first moved DaViT's *second* stage (the 3-channel 7 x 7 embedding and the depthwise convolutions
+  get no TF32 kernel), and fp16 GEMMs without reduced-precision reduction first moved its *third*
+  (only those shapes pick a kernel the flag changes). Both were caught; the prediction was wrong.
 
 ### Environment traps
 

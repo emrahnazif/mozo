@@ -3,7 +3,8 @@
 - **Granite Embedding R2 embeds 200+ languages: `granite_embedding_r2/multilingual-small`.** IBM's
   `granite-embedding-97m-multilingual-r2`: 384-d vectors, up to 32,768 tokens a text, 52 languages
   with explicit retrieval training plus code, and a question in one language finds its answer in
-  another. Bit-identical to `transformers` on the CPU at every stage; its tokenizer is pure Python
+  another. Bit-identical to `transformers` at every stage on CUDA (RTX 3060, torch 2.13, CUDA 12.6)
+  in fp32 and on the CPU, as is the English `small`; its tokenizer is pure Python
   like the English one, checked against the reference on every Unicode codepoint and on Belebele
   in 122 languages. Apache-2.0, 195 MB. Its vectors do not mix with `small`'s. It runs on torch:
   TensorRT was measured (up to 4.6 times faster on short texts, retrieval unchanged) but cannot

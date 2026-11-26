@@ -21,7 +21,16 @@ tokenizer — unlike the larger multilingual model's card (see *Left behind*).
 ## What mozo guarantees, exactly
 
 **mozo's vector equals `F.normalize(ModernBertModel(ids).last_hidden_state[:, 0])`, bit for bit,
-on the CPU in float32 with SDPA attention.** `tools/verify/granite_embedding_r2.py` proves it on
+in float32 with SDPA attention, on CUDA and on the CPU.** On CUDA (RTX 3060, torch 2.13.0, CUDA
+12.6, cuDNN 9.10.2, driver 550.144.03; `--device cuda`) both variants were compared in one process
+with the global switches as mozo leaves them (TF32 off for matmuls, every SDPA backend allowed):
+2,022 comparisons identical, each side first repeating itself byte for byte, every fixture up to
+16,384 tokens and a 79-text call of mixed lengths. Both sides launch the same memory-efficient
+SDPA kernel (`fmha_cutlassF_f32`) at every length; `transformers` picks SDPA by default there
+(no FlashAttention installed), and fp32 rules out flash and cuDNN attention anyway. The 32,768-token
+text is gated on the CPU only: the reference builds its sliding mask as an int64 `abs(q - k)`,
+8 GiB, and does not fit on a 12 GB card, where mozo runs it in 5.8 GiB. fp32 is the only CUDA
+precision: no `torch-fp16` is published (see *Export*). `tools/verify/granite_embedding_r2.py` proves it on
 every run, with `torch.equal` and no tolerance: token ids, the embeddings, each of the twelve
 layers, the final norm (whose first row is the raw vector) and the normalised vector, on fixtures
 either side of the attention window, a long text and a text at the full context (8,192 tokens;
@@ -29,14 +38,16 @@ the multilingual 32,768 with `--long`); and the token ids alone on every line of
 documentation and 20,000 random mixtures of Unicode's awkward corners, plus, for the multilingual
 tokenizer, every passage, question and answer of Belebele in 122 languages. `--fuzz` adds every
 codepoint. `--falsify` perturbs the vendor nine ways per variant and requires each to be caught at
-the stage it reaches first.
+the stage it reaches first; on CUDA it adds three that change only the kernels (TF32 matmuls, SDPA
+held to its math kernel, attention written out), all caught at layer 0.
 
 **What the weights owe IBM's training run is not something mozo can measure**, and it is not
 claimed. IBM's benchmark numbers are self-reported; mozo claims the link it can check.
 
-**MPS and CUDA are outside the exact guarantee**, as for every family: MPS differs from the CPU by
-1.8e-07 on the unit vectors. Nothing here is device-specific; the arithmetic is simply ordered
-differently there.
+**Devices are compared with themselves, not with each other.** mozo on CUDA equals upstream on
+CUDA; it does not equal mozo on the CPU, nor does MPS (1.8e-07 on the unit vectors), because the
+arithmetic is ordered differently there. A padded batch through `transformers` on CUDA is not the
+texts run alone either (up to 3.3e-07 on the unit vector, same kernel): mozo never pads.
 
 ## The reference is pinned, and its version does not move the answer
 
@@ -185,8 +196,9 @@ passages, questions and answers in 122 languages.
 ### 4. The sliding mask is always built
 
 Upstream passes no mask to a sliding layer below 64 tokens, which is the same as one that allows
-everything. mozo always builds it — measured bit-identical at every length from 2 to 8,192 — so
-there is no branch on length for an exported graph to freeze.
+everything. mozo always builds it — measured bit-identical at every length from 2 to 8,192 on the
+CPU, and on CUDA, where the memory-efficient kernel gives the same bits with an all-True mask as
+with none — so there is no branch on length for an exported graph to freeze.
 
 ### 5. No whitespace stripping
 

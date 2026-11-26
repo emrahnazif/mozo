@@ -202,9 +202,13 @@ yourself if your index was built with `sentence-transformers`.
 
 ### Parity
 
-Both variants are bit-identical to `transformers`' `ModernBertModel` on the CPU at every stage:
+Both variants are bit-identical to `transformers`' `ModernBertModel` on CUDA (RTX 3060, torch
+2.13.0, CUDA 12.6) in fp32, the only precision mozo runs on CUDA, and on the CPU, at every stage:
 token ids, the embeddings, all twelve layers, the final norm and the unit vector, compared with
-`torch.equal` and no tolerance, up to the full context. It runs at the reference's speed.
+`torch.equal` and no tolerance. On the CPU that holds up to the full context; on the GPU up to
+16,384 tokens, the longest the reference itself fits in 12 GB (mozo runs the full 32,768 there,
+in 5.8 GiB). A call with many texts of mixed length returns exactly what each text alone does.
+It runs at the reference's speed.
 
 Two traps that would pass a code review:
 

@@ -381,6 +381,19 @@ Reproduce them, and record them:
   greyscale with libjpeg directly — 27 and 7 grey levels apart. Hand both sides the same array.
 - **Mutable module globals** (`imgH`) become spec fields when vendored.
 
+### GPU gate traps
+
+- **Upstream may not fit where mozo does.** Granite's multilingual model at its 32,768-token
+  context: `transformers` builds the sliding mask from an int64 `abs(q - k)` (8 GiB) and runs out
+  of memory on a 12 GB RTX 3060, while mozo's two comparisons peak at 5.8 GiB. Gate at the longest
+  length the reference holds (16,384 there) and say so; don't shrink mozo to match.
+- **A mask that allows everything is not always a different kernel.** SDPA's memory-efficient
+  kernel gives the same bits with an all-True mask as with none, so a falsifier "mask instead of
+  no mask" is uncatchable on CUDA (Granite). Replace it with one that changes the kernel: SDPA
+  held to math, or attention written out.
+- **Falsifiers that materialise the score matrix may not fit the longest fixtures** (12 GiB at
+  16,384 tokens). Run them on the fixtures that fit and print the count.
+
 ---
 
 ## 6. Runtimes and export

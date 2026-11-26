@@ -7,7 +7,7 @@
   `model.encode_image(images)`, or `POST /encode/dinov2/<variant>` with one or more `file` parts.
   There is no `predict`: `/predict` answers `501` and points at `/encode`, and `GET /models` lists
   the new task type, `image_embedding`, with `encodes: ["image"]`. The vectors are bit-identical to
-  Meta's own torch-hub code. They are not the same as the `transformers` port's, whose
+  Meta's own torch-hub code on CUDA (RTX 3060, torch 2.13, CUDA 12.6) in fp32, and also on the CPU. They are not the same as the `transformers` port's, whose
   preprocessing and position embedding differ (cosine about 0.99 for the same photograph), so do
   not mix the two in one index. Each image runs on its own, so a vector does not depend on what
   it was encoded beside. Code and weights are Apache-2.0.

@@ -183,7 +183,34 @@ costs 1.26x (giant) to 1.71x (small-reg) of a batch of 32's throughput on the ne
 
 ## Verification
 
-`tools/verify/dinov2.py`, against a checkout of the commit above with `XFORMERS_DISABLED=1` set
+**On CUDA (the primary gate, 2026-11-26).** `tools/verify/dinov2.py --device cuda --mozo`, RTX 3060
+(vision-002), torch 2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2, driver 550.144.03, upstream and mozo in
+one process on one GPU, fp32. Global settings are torch's defaults, which mozo's runtime leaves
+alone (cuDNN TF32 allowed, matmul TF32 off, every SDPA backend enabled, `cudnn.benchmark` and
+deterministic algorithms off), checked unchanged at the end. Upstream runs as its k-NN evaluation
+does on CUDA: the transform on the host, the batch moved to the GPU, the network and
+`F.normalize` there, as the encoder does. Upstream runs first and its stages are kept on the host,
+then it is freed and the vendor runs, then mozo, so the giant never needs two copies on the 12 GB
+card. No xFormers (as a plain `pip install` gives) and `XFORMERS_DISABLED=1`: both sides run
+`aten::_scaled_dot_product_efficient_attention`, the CUTLASS kernel
+`fmha_cutlassF_f32_aligned_64x64_rf_sm80`, read off `torch.profiler` and compared.
+**13,750 of 13,750 comparisons exact** over the six variants (small 1,618, base 1,618, large 2,830,
+giant 4,446, small-reg 1,619, base-reg 1,619), the stages below plus mozo's adapter on the
+`torch-fp32` runtime. 7,822 of them are a side against itself: every image twice, the 518x518 and
+224x336 backbone five times, the encoder's and mozo's calls twice, all bit-identical, so neither
+side is non-deterministic under the production settings. Two separate full runs, each with a fresh
+reference, gave the same result.
+
+On CUDA the gate was made to fail seventeen ways on `base`, each caught first at its stage: the
+eleven CPU falsifiers below, and six only a GPU shows -- matmul TF32 on (block 0), SDPA pinned to
+the math backend (block 0), the pixels channels-last into the patch embedding (tokens), the uint8
+crop moved to the GPU before `/255` and the normalisation (pixels), the class token moved to the
+CPU before `F.normalize` (vector: 10 of 29 vectors differ, so the normalisation must stay on the
+device, where it is), and every image in one batched forward (vector). cuDNN TF32 off around the
+patch embedding was tried and is not a falsifier: the 14x14 stride-14 convolution gives the same
+bytes either way on this card, so it was replaced by the preprocessing-on-the-GPU one.
+
+**On the CPU (secondary).** `tools/verify/dinov2.py`, against a checkout of the commit above with `XFORMERS_DISABLED=1` set
 before import, both sides on the CPU, `MKL_CBWR=AVX2,STRICT`. Per variant: every checkpoint tensor
 against the authors' `.pth`; then per image the pixels, the tokens after the position embedding,
 every block's output, the final norm, the class token and the normalised vector (read off

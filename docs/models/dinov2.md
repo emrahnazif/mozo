@@ -151,10 +151,14 @@ k-NN protocol) did not move on any variant or runtime: 99.2% (`small`), 99.6% (`
 
 ### Parity
 
-Bit-identical to the authors' torch-hub code (`facebookresearch/dinov2`, commit `7764ea0`) on the
-CPU at every stage: the checkpoint against the authors' file, the pixels, the tokens, every block,
-the final norm, the class token and the unit vector, compared with `torch.equal` and no tolerance.
-5,742 comparisons across the six variants on 29 images, every one identical.
+Bit-identical to the authors' torch-hub code (`facebookresearch/dinov2`, commit `7764ea0`) on CUDA
+(RTX 3060, torch 2.13, CUDA 12.6) in fp32, the only precision mozo runs through torch, and also on
+the CPU, at every stage: the checkpoint against the authors' file, the pixels, the tokens, every
+block, the final norm, the class token and the unit vector, compared with `torch.equal` and no
+tolerance. On CUDA that is 13,750 comparisons across the six variants on 29 images, giant included,
+every one identical, with torch's default CUDA settings and both sides running the same attention
+kernel. The `tensorrt` runtimes are a different engine and are measured by closeness instead
+(above).
 
 Upstream switches to xFormers' attention kernel whenever the `xformers` package happens to be
 installed, which is different arithmetic. Mozo's copy has no such path, so its vectors do not

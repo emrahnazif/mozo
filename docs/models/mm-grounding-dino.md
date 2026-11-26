@@ -143,9 +143,13 @@ which runs and gives different boxes (fixed upstream after 5.12). Mozo's extract
 
 Mozo's extraction is checked against `transformers` 4.57.3 on preprocessing, the tokenizer, the BERT
 tower, every Swin level, the encoder, each decoder layer, the final logits and boxes and the
-detections after post-processing, with no tolerance: 1,520 comparisons across the three
-variants, every one bit-identical. The tokenizer is also run on 20,020 prompts in every script
-Unicode has, and agrees on every codepoint.
+detections after post-processing, with no tolerance, **on CUDA in fp32 and in the fp16 that
+`auto` runs there** (RTX 3060, torch 2.13, CUDA 12.6, cuDNN 9.10), both run in one process on
+the same GPU: 3,280 comparisons across the three variants, every one bit-identical, each side
+repeating itself to the byte. Upstream runs under the same fp16 autocast mozo uses; the authors
+publish no half-precision path of their own. On the CPU too: 1,520 comparisons, every one
+bit-identical. The tokenizer is also run on 20,020 prompts in every script Unicode has, and
+agrees on every codepoint.
 
 ## Weights and licence
 

@@ -160,3 +160,23 @@ Swin LayerNorm eps (Swin level 0, 1.2e-03), image position temperature 20 -> 21 
 layer on layer 0's box head as `transformers` 5 loads it (decoder layer 2, 4.1), the contrastive
 scale dropped (logits only -- query selection ranks by a monotone map of the same score), and
 Grounding DINO's resize rounding (pixels, on the panorama crop only).
+
+**On CUDA**, the same comparisons with both sides in one process on one GPU (RTX 3060, torch
+2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2, driver 550.144), in fp32 and under the CUDA fp16 autocast
+the `torch-fp16` runtime applies (and `auto` picks), with the global settings mozo leaves (cuDNN
+TF32 on, matmul TF32 off, every SDPA backend enabled, cuDNN benchmark and deterministic off),
+checked unchanged after `transformers` is imported: every one `torch.equal`, 3,280 comparisons
+across the three variants and both precisions, including each side run twice per case and
+repeating itself to the byte. Upstream has no official half-precision path for these checkpoints,
+so it runs under mozo's autocast, with its post-processing outside it as mozo's decode is.
+Deformable attention runs `grid_sample` on both sides: `transformers` swaps in its hub kernel
+(`kernels-community/deformable-detr`) only with the `kernels` package installed and
+`use_kernels=True`, and the gate refuses a reference where that happened. The GPU gate found one
+difference the CPU gate cannot see: the score sigmoid ran on the host, and CUDA's sigmoid differs
+from the CPU's in the last bit (5.96e-08), as upstream's post-processing runs it on the model's
+outputs. It now runs where the logits are. Besides the six perturbations above, all caught on CUDA
+too, six change only CUDA arithmetic on mozo's side and each is caught, the profiler confirming
+the kernel each one replaces: matmul TF32 on (BERT), cuDNN TF32 off (encoder memory: the neck's
+convolutions are the ones that pick TF32), SDPA forced to its math backend (BERT; production runs
+the memory-efficient kernel), convolution inputs channels-last (Swin level 0), fp16 GEMMs without
+reduced-precision reduction (Swin level 0), and the BERT tower outside the fp16 autocast (BERT).

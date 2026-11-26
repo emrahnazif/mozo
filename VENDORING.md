@@ -358,6 +358,11 @@ found traps it had not predicted, and the predicted ones were mostly real.
   not include it.
 - **Second passes are part of the model.** EasyOCR re-runs low-contrast crops and keeps the better
   read.
+- **A transcendental in the decode runs where upstream runs it.** CUDA's `sigmoid` and the CPU's
+  differ in the last bit (5.96e-08 on MM-Grounding-DINO's scores, RTX 3060), so a vendor that
+  copies the logits to the host before the sigmoid passes the CPU gate and fails the GPU one,
+  while every model stage still matches. Max, comparisons, and a single IEEE add or multiply
+  give the same bits on either device; `exp`, `sigmoid`, `log` and friends do not.
 
 ### Things that are upstream's behaviour, not bugs to fix
 

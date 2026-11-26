@@ -128,6 +128,7 @@ in 244 ms in torch fp32, and a prompt then costs 7-8 ms. On a CPU only `tiny` is
 Code and weights are Apache-2.0. The checkpoints are the authors' files from
 `huggingface.co/lkeab/hq-sam`, unmodified; they hold Meta's SAM weights (Apache-2.0) or, for `tiny`,
 MobileSAM's TinyViT (Apache-2.0), with HQ-SAM's trained parameters on top. Mozo's code is an
-extraction of `SysCV/sam-hq`, checked bit for bit against it on CPU; the TinyViT code in it is MIT
+extraction of `SysCV/sam-hq`, bit-identical to it on CUDA (RTX 3060, torch 2.13.0, CUDA 12.6) in
+fp32, mozo's only torch precision for HQ-SAM, and also on CPU; the TinyViT code in it is MIT
 (Microsoft), reproduced in the package NOTICE. `mozo/vendors/sam_hq_deploy/PROVENANCE.md` records
 the upstream commit, what was left out (including HQ-SAM 2), and the measurements.

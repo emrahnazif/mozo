@@ -315,6 +315,12 @@ found traps it had not predicted, and the predicted ones were mostly real.
 - **Batched and unbatched forwards are not bit-identical.** 2.5e-07 for OWLv2; **1.4e-05** for
   EasyOCR's recogniser, enough to flip a character. Batch exactly as upstream does — which may mean
   *not* batching.
+- **`requires_grad` changes the arithmetic, even under `no_grad`.** `torch.matmul` of a batched,
+  strided `(B, N, C)` input by a 2-D weight either folds it into one matrix multiply or runs it
+  batched, and it decides by whether the weight requires grad. On CUDA those are different sums.
+  HQ-SAM's builder freezes every SAM weight and leaves its own additions trainable; a vendor that
+  left all of them trainable matched on the CPU and drifted 1.8e-02 in the logits for batched box
+  prompts on an RTX 3060. Copy upstream's `requires_grad` pattern exactly, and gate on CUDA.
 
 ### Checkpoint and geometry
 

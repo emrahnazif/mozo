@@ -6,7 +6,8 @@
   bicycles, insects, chairs, plants), `base` outlines objects better than SAM 2 `large`: 86.5 mean
   IoU against 83.6, and 78.7 boundary IoU against 76.5; `large` is the best of the four (88.0 and
   80.9). `tiny` matches SAM 2 `tiny` in quality in less CPU time. A click returns three candidates, best first, like every promptable model in
-  mozo; the first is exactly what HQ-SAM's own code returns. A new workflow node, `sam_hq_boxes`,
+  mozo; the first is exactly what HQ-SAM's own code returns, bit for bit on CUDA (RTX 3060, torch
+  2.13.0, CUDA 12.6, fp32) and on CPU. A new workflow node, `sam_hq_boxes`,
   adds a mask to each box a detector found. Code and weights are Apache-2.0; the weights are the
   authors' files, unmodified.
 

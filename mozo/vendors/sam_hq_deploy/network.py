@@ -28,6 +28,16 @@ from .transformer import TwoWayTransformer
 
 __all__ = ["SamHq"]
 
+#: The parameters upstream's builders leave trainable: HQ-SAM's own additions. Every other
+#: parameter -- the SAM (or MobileSAM) weights HQ-SAM froze -- gets ``requires_grad=False``, as
+#: ``build_sam.py`` sets it. Not cosmetic: ``torch.matmul`` decides whether to fold a batched,
+#: strided ``(B, N, C) @ W.T`` into one matrix multiply or run it batched by whether ``W``
+#: requires grad, and on CUDA the two are different sums. With every weight trainable the
+#: decoder's batched box prompts drifted 1.8e-02 in the logits from upstream's on an RTX 3060,
+#: under ``torch.no_grad`` and ``inference_mode`` alike; on the CPU the two paths happen to agree.
+TRAINABLE = ("hf_token", "hf_mlp", "compress_vit_feat", "embedding_encoder",
+             "embedding_maskfeature")
+
 
 def _image_encoder(spec: VitSpec | TinySpec) -> tuple[nn.Module, int]:
     """Build the trunk a variant names, and say how wide its early feature is."""
@@ -95,6 +105,8 @@ class SamHq(nn.Module):
         # arguments, which are the same for every variant.
         self.register_buffer("pixel_mean", torch.Tensor(SHARED["pixel_mean"]).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor(SHARED["pixel_std"]).view(-1, 1, 1), False)
+        for name, parameter in self.named_parameters():
+            parameter.requires_grad_(any(part in name for part in TRAINABLE))
 
     def encode(self, image: torch.Tensor) -> dict[str, torch.Tensor]:
         """Run the image half.

@@ -16,7 +16,7 @@ annotated masks.
 | Upstream commit | `e696978d60352dc9a26b12631cd91781502c6546` (2025-09-11) |
 | Checkpoints | `https://huggingface.co/lkeab/hq-sam`, Hub commit `09b02a333b37772133eff3997bdba997867374b7` |
 | Extracted | 2026-11-25 |
-| Verified against | `torch` 2.13.0, `torchvision` 0.28.0, Pillow 12.3.0, numpy 2.3.5, on CPU (also torch 2.6.0 / Pillow 12.1.1 for `tiny`) |
+| Verified against | On CUDA: `torch` 2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2, RTX 3060 (driver 550.144.03), `torchvision` 0.28.0, Pillow 13.0.0, numpy 2.5.4, fp32. On CPU: `torch` 2.13.0, `torchvision` 0.28.0, Pillow 12.3.0, numpy 2.3.5 (also torch 2.6.0 / Pillow 12.1.1 for `tiny`) |
 
 ## Why this reference
 
@@ -129,6 +129,15 @@ the final mask.
   `head`); upstream loads with `strict=False`. Here they are dropped by name and the load is
   strict. The ViT checkpoints load strictly with nothing dropped. `num_batches_tracked` counters
   (int64) in the tiny checkpoint load into the BatchNorms and are never read in eval.
+- **Which parameters require grad is part of the arithmetic.** Upstream's builders set
+  `requires_grad=False` on every SAM weight and leave HQ-SAM's additions (`hf_token`, `hf_mlp`,
+  `compress_vit_feat`, `embedding_encoder`, `embedding_maskfeature`) trainable. `torch.matmul`
+  decides whether to fold a batched, strided `(B, N, C) @ W.T` into one matrix multiply by whether
+  `W` requires grad, under `no_grad` too, and on CUDA the two paths are different sums. With every
+  weight trainable the decoder matched upstream for one prompt and drifted 1.8e-02 in the logits
+  for a batch of boxes on an RTX 3060 (first in the two-way transformer's `k_proj`); on the CPU the
+  two paths agree, so the CPU gate could not see it. `network.TRAINABLE` copies upstream's pattern
+  (falsifier `all-trainable`). Found by the GPU gate, 2026-11-26.
 
 ## Verification
 
@@ -141,7 +150,16 @@ against upstream's raw decoder output through upstream's own `postprocess_masks`
 refinement, a batch of two boxes through upstream's `predict_torch`, and a repeated prompt through
 the cache. Five images: the fixture landscape, its transpose (padding on the right), an odd crop,
 a small upscale, and the 2048x1025 half-pixel case. Then mozo end to end through the adapter.
-`--falsify` runs the gate under each of eight perturbations and passes only if each is caught.
+`--falsify` runs the gate under each perturbation and passes only if each is caught.
+
+`--device cuda` is the primary gate: upstream and mozo run in one process on one GPU, in fp32, with
+the global switches as mozo leaves them (torch's defaults: TF32 off for matmuls and on for cuDNN,
+`cudnn.benchmark` off). Each side first records every stage twice and must repeat itself byte for
+byte. It also checks the `sam_hq_boxes` workflow node: each row's mask against upstream's
+`predict_torch` on the same boxes, and every other field of the row against what went in. fp32 is
+the only torch precision to gate: mozo publishes `torch-fp32` alone and derives no half-precision
+torch runtime (`--dtype fp16`/`bf16` refuse, saying so). `--reference-cache` keeps the reference's
+digests so the falsifiers reuse one reference run.
 
 ## Results (2026-11-25)
 
@@ -151,6 +169,25 @@ reference itself was measured to move by up to 0.34 on the tiny image embedding 
 the second `eval()` (trap above).
 
 **Falsification.** All 27 applicable (perturbation, variant) pairs caught, each first at the stage it should be: resize filter and rounding at the resized image; ViT LayerNorm eps and TinyViT's zero attention biases at the image embedding; fusing the last global block at the HQ features; HQ token alone at the final logits; float32 coordinates at the sparse prompt embedding; skipping the crop at the final masks (66-320 of 395 stages fail per run). Run on CPU on the RTX 3060 test server (torch 2.13.0+cu126, Pillow 13.0.0), which also makes it a second machine on which the unperturbed stages agree.
+
+**GPU gate (2026-11-26), the primary one.** On CUDA, RTX 3060 (vision-003, driver 550.144.03),
+torch 2.13.0+cu126, CUDA 12.6, cuDNN 9.10.2, fp32, global switches at torch's defaults: 4,988
+comparisons over the four variants, every one `torch.equal` -- 1,760 against upstream (440 per
+variant: the CPU gate's stages, upstream's requires-grad pattern, and the `sam_hq_boxes` node on
+all five images) and 3,228 determinism checks (each side recorded twice: 411 upstream stages and
+396 vendor stages per variant, byte-identical). `huge` fits on the 12 GB card beside upstream and
+the adapter; no swapping needed. One vendor fix was needed first: every weight was trainable where
+upstream freezes SAM's (trap above), which moved batched box prompts on CUDA only.
+
+**GPU falsification.** 47 of 47 (perturbation, variant) pairs caught on CUDA, each first at its
+expected stage: the CPU set, plus `all-trainable` (first at the batched boxes' logits; on the CPU
+only the requires-grad stage catches it), TF32 matmuls on and TF32 cuDNN off for the vendor alone,
+a channels-last encoder input (all three first at the image embedding), and the prompt half run
+on the host while the encoder stays on the GPU (first at the final logits). A host-side mask
+resize was tried and dropped: CUDA's and the CPU's bilinear `F.interpolate` agreed bit for bit on
+every mask (0 of 396 stages moved), so it is not a difference. The reference was recorded once per
+variant (`--reference-cache`, digests) and reused by every falsifier. On the CPU the gate still
+passes (1,760 comparisons, vision-003's CPU, torch 2.13.0) and the CPU falsifiers are caught.
 
 **Quality on fine structure** (box prompts, single mask, HQSeg-44K's four validation sets, mean of
 the four; CUDA fp32, TF32 off): tiny 82.0 mIoU / 73.4 boundary IoU, base 86.5 / 78.7, large

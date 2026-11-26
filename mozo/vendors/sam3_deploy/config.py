@@ -36,7 +36,11 @@ __all__ = [
     "Spec",
     "TEXT",
     "TextSpec",
+    "TRACKER",
+    "TrackerSpec",
     "TrunkSpec",
+    "VIDEO",
+    "VideoSpec",
 ]
 
 
@@ -251,6 +255,102 @@ class ClickSpec(BlockSpec):
         return self.image_size // self.patch
 
 
+@dataclass(frozen=True)
+class TrackerSpec:
+    """The video tracker's geometry: memory attention, the memory encoder, object pointers.
+
+    Every value is ``transformers/models/sam3_tracker_video``'s own config default and is
+    confirmed by loading the published checkpoint strict, except where a note says otherwise.
+
+    Args:
+        hidden: Width of the current frame's features and of the memory attention.
+        memory_dim: Width of a stored memory (the memory encoder projects down to it).
+        num_maskmem: Memory slots: the conditioning frames' plus six previous frames'.
+        max_obj_ptrs: Object pointers a frame reads, its own included.
+        max_cond_frames: Conditioning frames a frame attends to, the temporally closest.
+        attention_layers: Memory-attention blocks.
+        attention_intermediate: Their feed-forward width.
+        rope_theta: Rotary frequency base.
+        mask_input_size: Side a mask is resized to before it is encoded: four times the decoder's
+            288 logits, i.e. 1152 -- larger than the 1008 image, by design.
+        downsampler_layers: Stride-2 convolutions taking 1152 to 72.
+        fuser_layers: ConvNeXt blocks fusing a mask into the image features.
+        fuser_kernel: Their depthwise kernel.
+        sigmoid_scale: Scale applied to a mask probability before it is encoded.
+        sigmoid_bias: Bias applied after the scale.
+        memory_selection_threshold: A past frame is a memory candidate only above this score.
+        no_object_score: The logit an absent object's mask is set to.
+    """
+
+    hidden: int = 256
+    memory_dim: int = 64
+    num_maskmem: int = 7
+    max_obj_ptrs: int = 16
+    max_cond_frames: int = 4
+    attention_layers: int = 4
+    attention_intermediate: int = 2048
+    rope_theta: float = 10000.0
+    mask_input_size: int = 1152
+    downsampler_layers: int = 4
+    fuser_layers: int = 2
+    fuser_kernel: int = 7
+    sigmoid_scale: float = 20.0
+    sigmoid_bias: float = -10.0
+    memory_selection_threshold: float = 0.01
+    no_object_score: float = -1024.0
+
+
+@dataclass(frozen=True)
+class VideoSpec:
+    """The concept tracker's decision thresholds: Meta's video defaults, temporal disambiguation on.
+
+    These are ``build_sam3_video_model``'s arguments in ``facebookresearch/sam3`` @ ``5eb25fb``
+    (read from the run, not the source: the reference is run as a black box), and they are part of
+    the gated function -- changing one gives a tracker Meta never ran.
+
+    Args:
+        detection_threshold: A detection below this is not considered at all.
+        nms_iou: Mask IoU above which the weaker of two detections is dropped.
+        association_iou: Mask IoU at which a detection is "the same object" as a track.
+        track_match_iou: Mask IoU at which a track counts as matched by some detection.
+        new_object_threshold: An unmatched detection starts an object only above this.
+        hotstart_delay: Frames a new object is on probation.
+        hotstart_unmatched: Unmatched frames within probation that remove it.
+        hotstart_duplicate: Frames overlapping an older object within probation that remove it.
+        keep_alive_init: Initial keep-alive count of a new object.
+        keep_alive_max: Ceiling of the keep-alive count.
+        keep_alive_min: Floor of the keep-alive count.
+        occlusion_suppression_iou: Mask IoU at which the more recently occluded of two overlapping
+            objects is suppressed.
+        hole_area: Largest hole filled, and largest speck removed, in the 288-pixel logits.
+        recondition_every: Every this many frames, confident matches re-seed their track.
+        high_confidence: Score a detection and a track need to re-seed (both).
+        high_iou: Mask IoU a detection needs with its track to re-seed it.
+        shrink_ratio: A mask keeping less than this share of its area after overlaps are resolved
+            is suppressed before its memory is encoded.
+        occluded_logit: The logit a suppressed mask is set to.
+    """
+
+    detection_threshold: float = 0.5
+    nms_iou: float = 0.1
+    association_iou: float = 0.1
+    track_match_iou: float = 0.5
+    new_object_threshold: float = 0.7
+    hotstart_delay: int = 15
+    hotstart_unmatched: int = 8
+    hotstart_duplicate: int = 8
+    keep_alive_init: int = 30
+    keep_alive_max: int = 30
+    keep_alive_min: int = -1
+    occlusion_suppression_iou: float = 0.7
+    hole_area: int = 16
+    recondition_every: int = 16
+    high_confidence: float = 0.8
+    high_iou: float = 0.8
+    shrink_ratio: float = 0.3
+    occluded_logit: float = -10.0
+
+
 #: The published model. Meta ships one.
 SPEC = Spec()
 
@@ -274,3 +374,9 @@ MASK = MaskSpec()
 
 #: The click head's geometry.
 CLICK = ClickSpec()
+
+#: The video tracker's geometry.
+TRACKER = TrackerSpec()
+
+#: The concept tracker's thresholds.
+VIDEO = VideoSpec()

@@ -25,10 +25,11 @@ import torch
 from torch import nn
 
 from .checkpoint import (
+    click_state_dict,
     concept_state_dict,
     load_state_dict,
     text_state_dict,
-    click_state_dict,
+    tracker_state_dict,
     vision_state_dict,
 )
 from .click import ClickHead
@@ -37,6 +38,7 @@ from .grounding import ConceptHead
 from .grounding.boxes import box_cxcywh_to_xyxy
 from .image import fill_holes, preprocess, to_model_coords, to_original
 from .text import TextEncoder, Tokenizer
+from .tracker.network import TrackerNet
 from .vision import VisionEncoder
 
 __all__ = ["Segmenter", "instances"]
@@ -152,16 +154,21 @@ class Segmenter:
         # one: always for the torch encoder, and for a graph that carries that half of the neck.
         # 4.2 M parameters against the trunk's 300 M, and 16 ms to build.
         self.click = None
+        self.tracker_net = None
         if "click" in getattr(self.vision, "stacks", ("concept",)):
             self.click = ClickHead()
             self.click.load_state_dict(click_state_dict(state), strict=True)
+            # The video tracker's own weights (memory attention, memory encoder, pointers):
+            # 7.5 M parameters, loaded always so the checkpoint loads with nothing left over.
+            self.tracker_net = TrackerNet(self.click)
+            self.tracker_net.load_state_dict(tracker_state_dict(state), strict=True)
         self.text = TextEncoder()
         self.text.load_state_dict(text_state_dict(state), strict=True)
         self.concept = ConceptHead()
         self.concept.load_state_dict(concept_state_dict(state), strict=True)
         del state
 
-        for module in (self.vision, self.text, self.concept, self.click):
+        for module in (self.vision, self.text, self.concept, self.click, self.tracker_net):
             if isinstance(module, nn.Module):
                 module.eval().to(device)
 
@@ -384,3 +391,14 @@ class Segmenter:
             "scores": iou,
             "logits": low_res.clamp(-LOGIT_LIMIT, LOGIT_LIMIT),
         }
+
+    def tracker(self, num_frames: int | None = None, trace=None):
+        """Start a video tracking session. See :class:`~.tracker.session.VideoTracker`.
+
+        Args:
+            num_frames: The video's length, if known. The gate passes it; mozo does not.
+            trace: ``trace(stage, frame, value)`` callback, for the gate.
+        """
+        from .tracker.session import VideoTracker
+
+        return VideoTracker(self, num_frames=num_frames, trace=trace)

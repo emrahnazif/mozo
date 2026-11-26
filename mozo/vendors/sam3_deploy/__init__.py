@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Deployment-only SAM 3: concept segmentation and clicks, off one checkpoint.
+"""Deployment-only SAM 3: concept segmentation, clicks and video tracking, off one checkpoint.
 
     >>> from mozo.vendors.sam3_deploy import Segmenter   # doctest: +SKIP
     >>> segmenter = Segmenter("torch-fp32.pth")
     >>> found = segmenter.predict(image, "cow")                    # name it
     >>> one = segmenter.segment(image, points, labels)             # or point at it
+    >>> session = segmenter.tracker()                              # or follow it
+    >>> frame = session.update(first_frame, texts=["cow"])
 
 Derived from ``transformers/models/sam3`` (Apache-2.0), not from ``facebookresearch/sam3``, whose
 code ships under the SAM License. The **weights** carry that licence regardless; mozo does not

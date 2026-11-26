@@ -127,9 +127,8 @@ class MaskDecoder(nn.Module):
         self.iou_prediction_head = Mlp(
             (spec.hidden,) * spec.iou_head_depth + (self.num_mask_tokens,)
         )
-        # Built and loaded but never run: the object-score token rides through attention and is
-        # read as a token, while this head that turns it into a logit has no caller here. Kept so
-        # a strict load has somewhere to put it, as ``MaskSpec.upsampling_stages`` is.
+        # Turns the object-score token into a logit: is the object in this frame at all. The
+        # video tracker reads it; a click on a still image does not.
         self.pred_obj_score_head = Mlp((spec.hidden, spec.hidden, spec.hidden, 1))
 
         # The two finest click levels arrive at the FPN's width and are narrowed to what the
@@ -152,6 +151,39 @@ class MaskDecoder(nn.Module):
         Returns:
             ``(B, P, C, 4*grid, 4*grid)`` mask logits and their ``(B, P, C)`` predicted IoU,
             where ``C`` is three candidates when ``multimask_output`` is set and one otherwise.
+        """
+        masks, iou, _, _ = self.decode(image, image_pe, sparse, dense, fine, middle)
+        if multimask_output:
+            return masks[:, :, 1:], iou[:, :, 1:]
+        # Never a bare ``masks[:, :, :1]``: asking for one mask does not mean taking token 0
+        # whatever it looks like. ``transformers`` makes that a config flag and SAM 3's tracker
+        # sets it; it is spelled out here because it is always on and a flag with one setting
+        # reads as a choice. It survived 23 of 24 parity prompts before one image caught it.
+        return self._stable(masks, iou)
+
+    def decode(
+        self,
+        image: Tensor,
+        image_pe: Tensor,
+        sparse: Tensor,
+        dense: Tensor,
+        fine: Tensor,
+        middle: Tensor,
+        projected: bool = False,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Run the decoder and return everything it computes, before any selection.
+
+        The click path reads the masks and their IoU; the video tracker also reads the mask
+        tokens (an object pointer is built from one) and the object score (is the object there at
+        all).
+
+        Args:
+            projected: The two finest levels have already been through ``conv_s0``/``conv_s1``,
+                as the video tracker's are (Meta projects them once per frame, beside the cache).
+
+        Returns:
+            ``(B, P, 4, h, w)`` mask logits for all four mask tokens, their ``(B, P, 4)`` IoU,
+            the ``(B, P, 4, C)`` mask tokens and the ``(B, P, 1)`` object-score logit.
         """
         batch, channels, height, width = image.shape
         prompts = sparse.shape[1]
@@ -181,7 +213,8 @@ class MaskDecoder(nn.Module):
         # only on the image, so caching them would work and would shrink a click cache entry from
         # 111 MB to 21 MB -- measured at 0.6 ms of a 6 ms MPS decode, so nothing waits on it,
         # and the boundary is worth more than the millisecond.
-        fine, middle = self.conv_s0(fine), self.conv_s1(middle)
+        if not projected:
+            fine, middle = self.conv_s0(fine), self.conv_s1(middle)
         if prompts > 1:
             fine = fine.repeat_interleave(prompts, dim=0)
             middle = middle.repeat_interleave(prompts, dim=0)
@@ -199,14 +232,8 @@ class MaskDecoder(nn.Module):
         # Sigmoid here rather than inside the block: it is the only one of the four that
         # squashes, and a flag on a shared class to say so would be a knob with one setting.
         iou = torch.sigmoid(self.iou_prediction_head(iou_token_out))
-
-        if multimask_output:
-            return masks[:, :, 1:], iou[:, :, 1:]
-        # Never a bare ``masks[:, :, :1]``: asking for one mask does not mean taking token 0
-        # whatever it looks like. ``transformers`` makes that a config flag and SAM 3's tracker
-        # sets it; it is spelled out here because it is always on and a flag with one setting
-        # reads as a choice. It survived 23 of 24 parity prompts before one image caught it.
-        return self._stable(masks, iou)
+        object_score = self.pred_obj_score_head(tokens[:, :, 0, :])
+        return masks, iou, mask_tokens_out, object_score
 
     def _steadiness(self, logits: Tensor) -> Tensor:
         """How much of the mask survives moving the threshold either way.

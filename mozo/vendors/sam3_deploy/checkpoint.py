@@ -31,6 +31,7 @@ __all__ = [
     "load_state_dict",
     "text_state_dict",
     "click_state_dict",
+    "tracker_state_dict",
     "vision_state_dict",
 ]
 
@@ -145,24 +146,43 @@ CLICK_RULES: tuple[tuple[str, str], ...] = (
 #: - the ``points_*`` projections encode point exemplars, which the geometry encoder supports but
 #:   no public API reaches, and for which there is no Apache-licensed implementation to derive
 #:   the behaviour from.
-#: - everything under ``tracker.`` that is not the prompt encoder or the mask decoder is memory
-#:   attention and mask-memory fusion. Those carry a segmentation from one video frame to the
-#:   next and have nothing to attend to on a still image -- 160 tensors and 7.5 M parameters,
-#:   against the 4.2 M the click path actually runs.
 UNUSED: tuple[str, ...] = (
     "backbone.language_backbone.encoder.text_projection",
     "geometry_encoder.points_direct_project",
     "geometry_encoder.points_pool_project",
     "geometry_encoder.points_pos_enc_project",
-    "tracker.transformer.",
-    "tracker.maskmem_backbone.",
-    "tracker.maskmem_tpos_enc",
-    "tracker.mask_downsample.",
-    "tracker.no_mem_pos_enc",
-    "tracker.no_obj_ptr",
-    "tracker.no_obj_embed_spatial",
-    "tracker.obj_ptr_proj.",
-    "tracker.obj_ptr_tpos_proj.",
+)
+
+#: The part of ``tracker.`` the click head runs: prompt encoder, mask decoder, and the "no
+#: memory" embedding a still image is decoded with. The rest is the video tracker's.
+CLICK_KEYS: tuple[str, ...] = ("sam_prompt_encoder.", "sam_mask_decoder.", "no_mem_embed")
+
+#: Meta's key -> this package's key for the video tracker (memory attention, memory encoder,
+#: object pointers), applied in order. Names follow ``transformers/models/sam3_tracker_video``;
+#: no rule changes a number.
+TRACKER_RULES: tuple[tuple[str, str], ...] = (
+    (r"^transformer\.encoder\.layers\.(\d+)\.(self_attn|cross_attn_image)\.out_proj\.",
+     r"memory_attention.layers.\1.\2.o_proj."),
+    (r"^transformer\.encoder\.layers\.(\d+)\.norm(\d)\.",
+     r"memory_attention.layers.\1.layer_norm\2."),
+    (r"^transformer\.encoder\.layers\.", r"memory_attention.layers."),
+    (r"^transformer\.encoder\.norm\.", r"memory_attention.layer_norm."),
+    # The downsampler's Sequential: conv, LayerNorm, GELU per stage, then a 1x1 conv at index 12.
+    (r"^maskmem_backbone\.mask_downsampler\.encoder\.12\.",
+     r"memory_encoder.mask_downsampler.final_conv."),
+    (r"^maskmem_backbone\.mask_downsampler\.encoder\.(0|3|6|9)\.",
+     lambda m: f"memory_encoder.mask_downsampler.layers.{int(m.group(1)) // 3}.conv."),
+    (r"^maskmem_backbone\.mask_downsampler\.encoder\.(1|4|7|10)\.",
+     lambda m: f"memory_encoder.mask_downsampler.layers.{int(m.group(1)) // 3}.layer_norm."),
+    (r"^maskmem_backbone\.pix_feat_proj\.", r"memory_encoder.feature_projection."),
+    (r"^maskmem_backbone\.fuser\.layers\.(\d+)\.dwconv\.",
+     r"memory_encoder.memory_fuser.\1.depthwise_conv."),
+    (r"^maskmem_backbone\.fuser\.layers\.(\d+)\.norm\.",
+     r"memory_encoder.memory_fuser.\1.layer_norm."),
+    (r"^maskmem_backbone\.fuser\.layers\.(\d+)\.pwconv(\d)\.",
+     r"memory_encoder.memory_fuser.\1.pointwise_conv\2."),
+    (r"^maskmem_backbone\.fuser\.layers\.(\d+)\.gamma$", r"memory_encoder.memory_fuser.\1.scale"),
+    (r"^maskmem_backbone\.out_proj\.", r"memory_encoder.projection."),
 )
 
 
@@ -332,7 +352,7 @@ def click_state_dict(checkpoint: dict[str, torch.Tensor]) -> dict[str, torch.Ten
     out: dict[str, torch.Tensor] = {}
     corners: dict[int, torch.Tensor] = {}
     for key, tensor in source.items():
-        if _skipped(f"{TRACKER_PREFIX}{key}"):
+        if not key.startswith(CLICK_KEYS):
             continue
         # The one structural difference. Upstream keeps four separate one-row embeddings, one
         # per label; ``transformers`` keeps a single table indexed by the label, which is what
@@ -349,3 +369,17 @@ def click_state_dict(checkpoint: dict[str, torch.Tensor]) -> dict[str, torch.Ten
             [corners[i] for i in sorted(corners)], dim=0
         )
     return out
+
+
+def tracker_state_dict(checkpoint: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Extract and translate the weights :class:`~.tracker.network.TrackerNet` needs.
+
+    Everything under ``tracker.`` that the click head does not run: memory attention, the memory
+    encoder, the object-pointer projections and the learned "no memory"/"no object" embeddings.
+
+    Raises:
+        KeyError: If the checkpoint carries no tracker section.
+    """
+    source = _section(checkpoint, TRACKER_PREFIX, "tracker")
+    return {rename(key, TRACKER_RULES): tensor for key, tensor in source.items()
+            if not key.startswith(CLICK_KEYS)}

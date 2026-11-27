@@ -373,6 +373,15 @@ Found vendoring Qwen3-VL, the first such family.
   reproduce.
 - **bfloat16 on a CPU can be both slower and different** (2.7x fp32's time, a different answer
   from the second token). Offer reduced precision per device, measured.
+- **A sampling falsifier is tuned to one device's draws.** Qwen3-VL's top-p-before-top-k
+  falsifier (t=1.5, top_k=3, top_p=0.6) parted within a token on the CPU and in CUDA fp32, and
+  never in 12 tokens in CUDA bf16: the samples differ per device, and so does whether a step's kept
+  set matters. Use a hot distribution cut by both warpers (t=2.0, top_k=10, top_p=0.8), and check
+  each device and precision catches it.
+- **Rounding to bfloat16 hides where a table was computed.** CUDA's `cos`/`sin` differ from the
+  CPU's in the last float32 bit; text rotary tables cast to bfloat16 (as upstream casts them) lose
+  that bit, so "computed on the host" is only falsifiable in fp32 there. Tables that stay float32
+  and multiply float32 values (Qwen3-VL's vision rotary) show it in both precisions.
 
 ### Things that are upstream's behaviour, not bugs to fix
 
@@ -391,6 +400,9 @@ Reproduce them, and record them:
 - **Two entry points that disagree.** EasyOCR's array path documents BGR and its path entry decodes
   greyscale with libjpeg directly — 27 and 7 grey levels apart. Hand both sides the same array.
 - **Mutable module globals** (`imgH`) become spec fields when vendored.
+- **`device_map` needs `accelerate`.** transformers 5's `from_pretrained(device_map=...)`, the model
+  card's way onto a GPU, refuses without it. Install it in the reference env; it places weights and
+  computes nothing.
 
 ---
 

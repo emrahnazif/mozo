@@ -18,8 +18,9 @@ carry no LICENSE file; mozo publishes the Apache-2.0 text beside each checkpoint
 
 ## What mozo guarantees, exactly
 
-**On the CPU in float32, with SDPA attention, mozo's answer is `generate`'s, token for token, and
-every logit on the way is bit-identical.** `tools/verify/qwen3_vl.py` compares, with `torch.equal`
+**On CUDA in float32 and in bfloat16 (the `torch-bf16` runtime `auto` picks there), and on the CPU
+in float32, with SDPA attention, mozo's answer is `generate`'s run the same way, token for token,
+and every logit on the way is bit-identical.** `tools/verify/qwen3_vl.py` compares, with `torch.equal`
 and no tolerance: the pixels, the prompt ids, the patch embedding with its interpolated position
 table, each of the 24 vision blocks, the three DeepStack features and the merger, the input
 embeddings with the image scattered in, each decoder layer at prefill, the final norm, and then
@@ -37,6 +38,46 @@ JPEG through `load_image`; CJK + emoji + a combining mark + a newline; a 630-tok
 mozo path (registry, `file://` weights, adapter, `auto` → `torch-fp32` on CPU) agreed on the
 photograph and both sampled cases. **`4b`: 271 comparisons on 3 fixtures (the photograph at 2.6 MP, the sampled case, the stopping case), all `torch.equal`, mozo path included.**
 
+**On CUDA (2026-11-27)**, `--device cuda`: vision-002, NVIDIA GeForce RTX 3060 12 GB, driver
+550.144.03, torch 2.13.0+cu126, CUDA 12.6, cuDNN 91002, transformers 5.24.1 (accelerate 1.16.0 for
+`device_map`). The reference is loaded as the model card loads it: `from_pretrained(dtype=...,
+device_map="cuda")`, the processor on the host, its output moved to the GPU; bfloat16 is the whole
+model in bfloat16 on both sides, which is upstream's own path (`dtype="auto"`) and mozo's
+`torch-bf16`. Global settings as mozo leaves them (TF32 on for cuDNN, off for matmul; every SDPA
+backend; cuDNN benchmark and deterministic off), checked unchanged after each side ran. Also
+compared on CUDA: each parameter's `requires_grad`, the two rotary frequency tables and where they
+live, the prefill's M-RoPE position ids, `rope_deltas`, and every decoding step's positions.
+
+| | fp32 | bf16 |
+|---|---|---|
+| `2b`, 12 fixtures | 1,081 | 1,081 |
+| `4b`, 3 fixtures | not gated: 17.8 GB of fp32 weights do not fit a 12 GB card | 369 |
+
+All 2,531 equal, mozo's served path included (`auto` checked to pick `torch-bf16`). Each side ran
+every case twice and repeated itself to the byte (5,032 more comparisons); a second run with three
+runs per case was equal too. Both sides launch the same attention kernels (`torch.profiler`): in
+fp32 the vision tower runs the memory-efficient kernel and the text decoder SDPA's math kernel (GQA
+with `enable_gqa`); in bf16 flash attention throughout, split-KV while decoding. The only kernels
+one side launches and the other does not are upstream's position bookkeeping, which it computes on
+the GPU (the interpolation taps and weights, the vision position ids, `cu_seqlens`) and this package
+on the host: integer arithmetic, and float32 taps and weights from a divide, `floor`, `abs` and a
+clamp, each correctly rounded on both, so the patch embedding agrees on every fixture. No vendor
+change and no production setting had to change.
+
+**Falsified on CUDA, `2b`, 20 in fp32 and 19 in bf16, all caught**: the 13 above at the same stages
+(the warpers' order now on a hotter sampled fixture, t=2.0/p=0.8/k=10, seed 2: the CPU's
+t=1.5/p=0.6/k=3 never parted in 12 bf16 tokens), plus every parameter frozen (`requires_grad`
+only: no later stage moved), SDPA forced to the math backend at `vision_block_0`, the vision
+rotary tables computed on the host at `vision_block_0` (CUDA's cos/sin differ from the CPU's in the
+last bit), sampling drawn on the host at `step_2`; in fp32, matmul TF32 on at `vision_block_0`,
+cuDNN TF32 off at `patch_embed`, the text rotary tables on the host at `text_layer_0`; in bf16, the
+RMSNorm in bfloat16 at `text_layer_0` and the vision rotary applied in bfloat16 at
+`vision_block_0`. Not falsifiable here, so not kept: the text rotary tables on the host in bf16
+(rounded to bfloat16 as upstream does, the last-bit difference vanishes), the resize and
+normalisation on the GPU (torchvision's CUDA antialiased bicubic gave the host's bits), and the
+patch embedding's input in `channels_last_3d` (a non-overlapping 3-D convolution gave the same
+bits).
+
 Falsified on 13 perturbations (`--falsify all`), each caught at the first stage it reaches: the
 resize's antialias, `round` in `smart_resize`, the position table's corner alignment, the vision
 GELU, the mergers' LayerNorm epsilon, the vision rotary positions (×(1+1e-7), 2.1e-06), M-RoPE's
@@ -50,8 +91,9 @@ differently. The gate prints the versions it ran under (torch 2.13.0, torchvisio
 transformers 5.24.1, tokenizers 0.23.3).
 
 **Not claimed:** any benchmark score. Qwen's published numbers were measured with sampling and
-their own settings; mozo does not re-run them. bfloat16, and any GPU, are outside the bit-exact
-guarantee (see *Runtimes*).
+their own settings; mozo does not re-run them. Nor is any run identical across devices or
+precisions: CUDA is not the CPU, and bfloat16 is not float32 (see *Runtimes*). Each is identical
+to `transformers` run the same way.
 
 ## What was taken
 
@@ -127,8 +169,8 @@ torch only. Published: one artifact per variant, `torch-bf16` (the checkpoint as
 photograph and 32 new tokens: `2b` 1.74 s against fp32's 6.71 s (4.7 GB against 10.2 GB), `4b`
 2.77 s (9.5 GB; fp32 does not fit 12 GB). mozo and `transformers` take the same time on both
 (6.71 s / 1.74 s for `2b`). On 300 VQAv2 questions, `2b` bf16 gave 295 of fp32's 300 answers
-unchanged (VQA accuracy 76.9% against 77.3%). bf16 is not bit-identical to anything, and on the
-CPU it is refused: 2.7x slower than fp32 there, and a different answer from the second token.
+unchanged (VQA accuracy 76.9% against 77.3%). bf16 is not bit-identical to fp32; it is to
+`transformers`' own bf16 on the same GPU (above). On the CPU it is refused: 2.7x slower than fp32 there, and a different answer from the second token.
 
 **ONNX and TensorRT, vision tower only, not published.** The tower exports (fixed grid, the
 grid-dependent tables as inputs): ONNX Runtime matches torch fp32 to 3.7e-04 at 1,040 patches and

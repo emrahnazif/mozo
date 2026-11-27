@@ -118,12 +118,14 @@ and accuracy went from 76.6% to 77.0%.
 
 ## Exactness
 
-On the CPU in fp32, mozo's answer is the answer `transformers` 5.24.1 gives with `generate`, for the
+mozo's answer is the answer `transformers` 5.24.1 gives with `generate`, run the same way, for the
 same image, question and settings: the same pixels and prompt tokens, every intermediate stage, and
-the same logits at every decoding step, compared with `torch.equal`. That holds for sampling too:
-with `transformers` seeded by `torch.manual_seed(seed)`, the sampled tokens are identical.
-`tools/verify/qwen3_vl.py` is the check. In bf16, and on a GPU, the numbers differ, and the words
-can.
+the same logits at every decoding step, compared with `torch.equal`. On CUDA (an RTX 3060, torch
+2.13, CUDA 12.6) that holds in bf16, the precision `auto` uses there, for both variants, and in fp32
+for the 2B (the 4B's fp32 weights do not fit a 12 GB card); on the CPU, in fp32. It holds for
+sampling too: with `transformers` seeded by `torch.manual_seed(seed)`, the sampled tokens are
+identical. `tools/verify/qwen3_vl.py` is the check. Across devices and precisions the numbers
+differ, and the words can: bf16 is not fp32, and CUDA is not the CPU.
 
 Comparing against `transformers` yourself: pass the same pixel budget
 (`processor(..., size={"longest_edge": 2621440, "shortest_edge": 65536})`), use the default image

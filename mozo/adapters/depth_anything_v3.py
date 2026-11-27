@@ -124,12 +124,12 @@ class DepthAnythingV3Predictor:
             return self._predictor.predict(rgb)
         pixels = preprocess(rgb, self._spec.process_res)[:, 0]
         height, width = pixels.shape[-2:]
-        if min(height, width) < MIN_PATCHES * PATCH_SIZE:
+        short, floor = min(height, width), MIN_PATCHES * PATCH_SIZE
+        if short < floor:
             raise ValueError(
                 f"a {rgb.shape[1]}x{rgb.shape[0]} image is too elongated for the {self.runtime} "
-                f"graph: its short side would be {min(height, width)} px, and the graph takes "
-                f"{MIN_PATCHES * PATCH_SIZE} or more (an aspect ratio up to 12:1). The torch-fp32 "
-                "runtime takes it.")
+                f"graph: its short side would be {short} px, and the graph takes {floor} or more "
+                "(an aspect ratio up to 12:1). The torch-fp32 runtime takes it.")
         shape = self._shape_inputs(height, width)
         if isinstance(self._runner, TensorRTRunner):
             outputs = self._runner(pixels.to(self._graph_device), *shape)

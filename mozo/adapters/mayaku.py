@@ -81,7 +81,7 @@ class MayakuPredictor:
         self.spec = get_spec(variant)
         self.runtime = select_runtime(
             self.device, artifacts(FAMILY, variant, revision=revision), runtime,
-            derives=registry.DERIVES.get(FAMILY))
+            derives=registry.DERIVES.get(FAMILY), prefers=registry.PREFERS.get(FAMILY))
 
         self._detector = None
         self._runner = None

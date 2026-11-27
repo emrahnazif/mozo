@@ -93,14 +93,15 @@ checkpoint's order (`person` is 0, `face` is 14, `license plate` is 8).
 
 ### Runtimes
 
-`runtime="auto"` picks a TensorRT engine on CUDA when TensorRT 11 or later is installed, and torch
-otherwise. On the CPU it picks torch, but **`runtime="onnx-fp32"` is about twice as fast
-there** (`pip install 'mozo[onnx]'`) and gives the same detections:
+`runtime="auto"` picks the fastest runtime that measured as accurate as torch: the **fp16
+TensorRT engine** on CUDA when TensorRT 11 or later is installed, and on the CPU **ONNX Runtime**
+when it is installed (`pip install 'mozo[onnx]'`), about twice as fast as torch with the same
+detections. Without them it runs torch. Name a runtime to choose another:
 
 ```python
 from mozo import ModelManager
 
-model = ModelManager().get_model("mayaku", "street-nano", runtime="onnx-fp32")
+model = ModelManager().get_model("mayaku", "street-nano", runtime="tensorrt-fp32")
 ```
 
 Measured on an RTX 3090 and an i9-10900X (10 threads) with torch 2.13, ONNX Runtime 1.21 (CPU)
@@ -113,7 +114,7 @@ threshold 0.05 with mozo's prediction decode, so it is lower than Mayaku's publi
 only for comparing runtimes. A detection "changes" when, against torch fp32 on the CPU, it scores
 above 0.52 on one side with no same-class partner (IoU above 0.5) above 0.5 on the other.
 
-| Variant | torch CPU | `onnx-fp32` CPU | torch CUDA | `tensorrt-fp32` (`auto`) | `tensorrt-fp16` |
+| Variant | torch CPU | `onnx-fp32` CPU (`auto`) | torch CUDA | `tensorrt-fp32` | `tensorrt-fp16` (`auto`) |
 |---|---|---|---|---|---|
 | `street-nano` | 66 ms, AP 38.88 | 29 ms, 2.3×, 0 changes | 7.9 ms | 4.2 ms, 1.9×, AP 38.88, 0 changes | 2.8 ms, 2.8×, AP 38.84, 0 changes |
 | `street-medium` | 199 ms, AP 49.87 | 104 ms, 1.9×, 0 | 14.2 ms | 10.0 ms, 1.4×, AP 49.87, 0 | 4.2 ms, 3.4×, AP 49.83, 0 |
@@ -122,10 +123,10 @@ above 0.52 on one side with no same-class partner (IoU above 0.5) above 0.5 on t
 
 Speed-ups on CUDA are against torch CUDA. With TensorRT 11 or later installed
 (`pip install tensorrt-cu12` or `-cu13`; see [Runtimes](/docs/deployment/runtimes.md#tensorrt)),
-`auto` builds the fp32 engine from the published ONNX graph on first load and keeps it; it finds
-what torch finds, AP identical. `runtime="tensorrt-fp16"` is faster again, changed no confident
-detection on these 500 images and moved AP by at most 0.1; it builds from a published fp16 graph
-(10–65 MB) and has to be asked for. Without TensorRT, `auto` stays on torch.
+`auto` builds the fp16 engine from the published fp16 graph (10–65 MB) on first load and keeps it:
+it changed no confident detection on these 500 images and moved AP by at most 0.1, at 1.5–2.4× the
+fp32 engine. `runtime="tensorrt-fp32"` builds from the fp32 graph and finds exactly what torch
+finds, AP identical. Without TensorRT, `auto` stays on torch.
 
 The graph is the five op types and nothing else: Conv, Relu, Add, nearest Resize and MaxPool.
 

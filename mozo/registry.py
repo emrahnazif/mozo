@@ -129,8 +129,8 @@ DERIVES: dict[str, dict[str, str]] = {
     "rfdetr": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
     # The same shape as RF-DETR's, measured the same way (RTX 3090, 500 street-validation images
     # per variant): the fp32 engine changed no detection and left box and mask AP identical, at
-    # 1.4-1.9x torch's forward pass; fp16 changed none either, moving AP by at most 0.1, and is
-    # offered on request only. See docs/models/mayaku.md.
+    # 1.4-1.9x torch's forward pass; fp16 changed none either, moving AP by at most 0.1, so
+    # ``auto`` takes fp16 (:data:`PREFERS`). See docs/models/mayaku.md.
     "mayaku": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
@@ -138,7 +138,12 @@ DERIVES: dict[str, dict[str, str]] = {
 #: by device type. The shared order is fp32-first because fp16 measured badly on some families
 #: (OWLv2, Grounding DINO); a family where the faster runtime measured as accurate says so here,
 #: so its users get the fast path without asking. Each entry records its measurement.
-PREFERS: dict[str, dict[str, tuple[str, ...]]] = {}
+PREFERS: dict[str, dict[str, tuple[str, ...]]] = {
+    # RTX 3090, 500 street-validation images per variant: the fp16 engine changed no confident
+    # detection and moved box/mask AP by at most 0.1, at 1.5-2.4x the fp32 engine. On the CPU,
+    # ONNX Runtime runs the same exact graph 1.9-2.3x faster than torch (i9-10900X).
+    "mayaku": {"cuda": ("tensorrt-fp16",), "cpu": ("onnx-fp32",)},
+}
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
 #: for every runtime. A key a revision does not publish is skipped, as the adapter skips it.

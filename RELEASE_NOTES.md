@@ -8,11 +8,12 @@
   mask each. It is the first detector in mozo that finds faces and plates by name, so footage can be blurred before it is kept. Code and
   weights are Apache-2.0; the weights are the publisher's own files, and mozo's results are
   identical to `mayaku` 3.1.1's at every stage, bit for bit on CUDA (RTX 3060, torch 2.13.0,
-  CUDA 12.6) in fp32 and on the CPU. Default threshold 0.4, the checkpoints' own. On
-  CUDA with TensorRT 11 or later, `auto` runs an fp32 engine with the same detections, 1.4 to 1.9
-  times faster than torch; `runtime="tensorrt-fp16"` is 2.5 to 3.4 times faster and changed no
-  confident detection in 500 street images. On the CPU, `runtime="onnx-fp32"` is about twice as
-  fast as torch with the same detections. A `mayaku` workflow node comes with it.
+  CUDA 12.6) in fp32 and on the CPU. Default threshold 0.4, the checkpoints' own. `auto` runs
+  the fastest runtime that measured as accurate: on CUDA with TensorRT 11 or later an fp16 engine,
+  2.5 to 3.4 times faster than torch, which changed no confident detection in 500 street images
+  and moved AP by at most 0.1 (`runtime="tensorrt-fp32"` gives torch's detections exactly, 1.4 to
+  1.9 times faster); on the CPU, with `mozo[onnx]` installed, ONNX Runtime, about twice as fast
+  as torch with the same detections. A `mayaku` workflow node comes with it.
   Later Mayaku models will join the same family as further variants.
 - **`mozo.runtimes.select_runtime` takes `prefers=`**: runtimes to try first for `auto`, by device
   type (`{"cuda": ("tensorrt-fp16",)}`). Families whose faster runtime measured as accurate list it

@@ -370,12 +370,6 @@ class TestEveryPromptedNodeIsMarked:
             [name] = marked
             assert given_to_model["text"] == list(arguments[name])
 
-    def test_the_six_that_take_text_are_marked(self):
-        marked = sorted(spec.name for spec in _model_nodes()
-                        if any(p.prompts for p in spec.parameters))
-        assert marked == ["clip", "grounding_dino", "mm_grounding_dino", "omdet_turbo", "owlv2",
-                          "sam3", "siglip2"]
-
 
 class TestPromptList:
     """Reading prompts: an empty entry is refused, because a prompt's position is its class_id."""

@@ -168,18 +168,6 @@ def grounding_dino(image: Image, models: Models, text: Prompts = ["person", "car
 
 
 @node(category="Detect", exclusive=True)
-def omdet_turbo(image: Image, models: Models, text: Prompts = ["person", "car", "dog"],
-                variant: variants("omdet_turbo") = "tiny", threshold: float = 0.3) -> Detections:
-    """OmDet-Turbo by Om AI Lab -- real-time open-vocabulary detection.
-
-    One prompt per entry, taken as given; each result's ``class_id`` is its prompt's index and its
-    ``class_name`` that prompt. The prompts are encoded once and reused for every frame.
-    """
-    return models("omdet_turbo", variant).predict(
-        image, text=prompt_list(text), threshold=threshold)
-
-
-@node(category="Detect", exclusive=True)
 def mm_grounding_dino(image: Image, models: Models, text: Prompts = ["person", "car", "dog"],
                       variant: variants("mm_grounding_dino") = "llmdet-tiny",
                       threshold: float = 0.4) -> Detections:
@@ -189,6 +177,18 @@ def mm_grounding_dino(image: Image, models: Models, text: Prompts = ["person", "
     ``class_name`` that prompt.
     """
     return models("mm_grounding_dino", variant).predict(
+        image, text=prompt_list(text), threshold=threshold)
+
+
+@node(category="Detect", exclusive=True)
+def omdet_turbo(image: Image, models: Models, text: Prompts = ["person", "car", "dog"],
+                variant: variants("omdet_turbo") = "tiny", threshold: float = 0.3) -> Detections:
+    """OmDet-Turbo by Om AI Lab -- real-time open-vocabulary detection.
+
+    One prompt per entry, taken as given; each result's ``class_id`` is its prompt's index and its
+    ``class_name`` that prompt. The prompts are encoded once and reused for every frame.
+    """
+    return models("omdet_turbo", variant).predict(
         image, text=prompt_list(text), threshold=threshold)
 
 

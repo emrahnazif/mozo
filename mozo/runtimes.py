@@ -122,7 +122,8 @@ def get_default_device() -> str:
 #: This table's whole claim is that its entries were measured, so an unmeasured one does not join
 #: it. ``tensorrt-fp16`` was measured and is deliberately absent: 2.3-4.8% of OWLv2's confident
 #: detections change (TensorRT's fp16 kernels are less exact than torch's on it), and Grounding
-#: DINO's runs every image at one square size, so a user has to ask for it.
+#: DINO's runs every image at one square size, so a user has to ask for it. A family where fp16
+#: measured as accurate puts it ahead of this order in :data:`mozo.registry.PREFERS`.
 #:
 #: What that absence buys is narrower than it looks. Entries are matched by exact membership
 #: (``if key in usable``), so leaving a runtime out means ``auto`` will not *prefer* it -- but
@@ -142,7 +143,8 @@ def get_default_device() -> str:
 #: the entry is not read as a promise. SAM 3's vision encoder runs 840 ms through CoreML against
 #: 1098 ms on torch MPS -- 1.3x, not 5x -- and 4488 ms on torch CPU. Both models prefer CoreML
 #: here; only one of them dramatically. A family whose margin came out under 1.0 would belong in
-#: ``EXECUTES`` or unpublished, not in a third preference table.
+#: ``EXECUTES`` or unpublished. The one per-family table, :data:`mozo.registry.PREFERS`, only
+#: puts a measured-faster runtime first; it never demotes one.
 _PREFERENCE: dict[str, tuple[str, ...]] = {
     "cuda": ("tensorrt-fp32", "torch-fp16", "torch-fp32", "onnx-fp32"),
     "cpu": ("torch-fp32", "onnx-fp32"),
@@ -257,6 +259,7 @@ def select_runtime(
     requested: str = "auto",
     executes: tuple[str, ...] | None = None,
     derives: dict[str, str] | None = None,
+    prefers: dict[str, tuple[str, ...]] | None = None,
 ) -> str:
     """Choose which published artifact to run on *device*.
 
@@ -273,6 +276,8 @@ def select_runtime(
             function has already answered. ``None`` means the caller can run anything published.
         derives: Runtimes the family builds at load time from another published artifact, from
             :data:`mozo.registry.DERIVES`. Offered where their source is published.
+        prefers: Runtimes to try before the shared order for ``auto``, by device type (``cuda``,
+            ``cpu``, ``mps``), from :data:`mozo.registry.PREFERS`. Ignored for a named runtime.
 
     Returns:
         A runtime name, which is an artifact key for a family that publishes its runtime as one
@@ -319,7 +324,8 @@ def select_runtime(
         return requested
 
     usable = [key for key in executable(published, derives, device) if key in supported]
-    for key in _PREFERENCE.get(device.split(":")[0], _PREFERENCE["cpu"]):
+    kind = device.split(":")[0]
+    for key in (*(prefers or {}).get(kind, ()), *_PREFERENCE.get(kind, _PREFERENCE["cpu"])):
         if key in usable:
             return key
 

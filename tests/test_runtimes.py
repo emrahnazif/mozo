@@ -67,6 +67,20 @@ class TestSelectRuntime:
         monkeypatch.setitem(module._REQUIRES, "coreml", "a_module_that_does_not_exist")
         assert select_runtime("mps", ["coreml-fp32", "torch-fp32"]) == "torch-fp32"
 
+    def test_a_family_preference_goes_ahead_of_the_shared_order(self):
+        """``prefers`` puts a family's measured-faster runtime first, on its device only."""
+        prefers = {"cpu": ("onnx-fp32",)}
+        assert select_runtime("cpu", BOTH, prefers=prefers) == "onnx-fp32"
+        assert select_runtime("mps", BOTH, prefers=prefers) == "torch-fp32"
+
+    def test_a_family_preference_that_cannot_run_falls_back_to_the_shared_order(self, monkeypatch):
+        import mozo.runtimes as module
+        monkeypatch.setitem(module._REQUIRES, "onnx", "a_module_that_does_not_exist")
+        assert select_runtime("cpu", BOTH, prefers={"cpu": ("onnx-fp32",)}) == "torch-fp32"
+
+    def test_a_family_preference_never_overrides_a_named_runtime(self):
+        assert select_runtime("cpu", BOTH, "torch-fp32", prefers={"cpu": ("onnx-fp32",)}) == "torch-fp32"
+
     def test_asking_by_name_for_a_missing_library_still_returns_the_key(self, monkeypatch):
         """An explicit request is honoured up to the point the runner explains what is missing."""
         import mozo.runtimes as module

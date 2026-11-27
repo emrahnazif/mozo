@@ -14,6 +14,9 @@
   confident detection in 500 street images. On the CPU, `runtime="onnx-fp32"` is about twice as
   fast as torch with the same detections. A `mayaku` workflow node comes with it.
   Later Mayaku models will join the same family as further variants.
+- **`mozo.runtimes.select_runtime` takes `prefers=`**: runtimes to try first for `auto`, by device
+  type (`{"cuda": ("tensorrt-fp16",)}`). Families whose faster runtime measured as accurate list it
+  in `mozo.registry.PREFERS`; the shared order, fp32 first, is unchanged for everyone else.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a

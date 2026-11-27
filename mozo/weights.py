@@ -683,7 +683,7 @@ def _planned(
         WeightsError: If the model or revision is not published.
         mozo.runtimes.RuntimeError_: If *runtime* is not published, or not one this family runs.
     """
-    from .registry import DERIVES, EXECUTES, NEEDS
+    from .registry import DERIVES, EXECUTES, NEEDS, PREFERS
     from .runtimes import get_default_device, select_runtime
 
     name, entry = _lookup(family, variant, revision)
@@ -693,7 +693,8 @@ def _planned(
     # A runtime named outright with no device is planned without one: which files it is made of
     # does not depend on where it would run.
     chosen = select_runtime(device, sorted(published), runtime,
-                            executes=EXECUTES.get(family), derives=DERIVES.get(family))
+                            executes=EXECUTES.get(family), derives=DERIVES.get(family),
+                            prefers=PREFERS.get(family))
 
     brings = NEEDS.get(family, {})
     keys = [*_composing(entry, chosen, family),

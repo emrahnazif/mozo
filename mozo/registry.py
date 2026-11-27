@@ -134,6 +134,12 @@ DERIVES: dict[str, dict[str, str]] = {
     "mayaku": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
+#: Runtimes a family's ``auto`` tries before the shared order (:data:`mozo.runtimes._PREFERENCE`),
+#: by device type. The shared order is fp32-first because fp16 measured badly on some families
+#: (OWLv2, Grounding DINO); a family where the faster runtime measured as accurate says so here,
+#: so its users get the fast path without asking. Each entry records its measurement.
+PREFERS: dict[str, dict[str, tuple[str, ...]]] = {}
+
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
 #: for every runtime. A key a revision does not publish is skipped, as the adapter skips it.
 #:

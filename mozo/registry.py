@@ -98,9 +98,6 @@ EXECUTES: dict[str, tuple[str, ...]] = {
     # A TensorRT engine exported from the checkpoint at the input size the user picks.
     "grounding_dino": ("torch", "tensorrt"),
     "granite_embedding_r2": ("torch", "coreml"),
-    # The same arrangement as Grounding DINO's: an engine exported from the checkpoint at the
-    # input size the user picks.
-    "mm_grounding_dino": ("torch", "tensorrt"),
     # The graph is the image path; the text tower always runs in torch, once per vocabulary.
     "omdet_turbo": ("torch", "onnx", "tensorrt"),
     # Not "onnx": the vision graph is published to build TensorRT engines from, and ONNX Runtime
@@ -131,7 +128,6 @@ DERIVES: dict[str, dict[str, str]] = {
     # -- fp32 as much as fp16 -- moved 3-6% of detections and up to 2.5 AP, where ONNX Runtime
     # on the same graph moved none. See the family's page.
     "mm_grounding_dino": {"torch-fp16": "torch-fp32"},
-    "mm_grounding_dino": {"torch-fp16": "torch-fp32", "tensorrt-fp16": "torch-fp32"},
     # ``tensorrt-fp32`` from the published graph, for every variant that publishes one, and
     # ``auto`` takes it on CUDA where TensorRT is installed: on an RTX 3090, 500 COCO images per
     # variant, not one detection changed and AP was identical, at 1.65x (``large``) to 2.55x

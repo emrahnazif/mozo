@@ -1,7 +1,7 @@
 # Every built-in workflow node
 
 <!--
-summary: All 51 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
+summary: All 52 nodes mozo's workflows are built from, by category, with their inputs, outputs, parameters and defaults.
 label: Nodes
 keywords: mozo, workflow nodes, node catalogue, workflow editor, pipeline
 -->

@@ -27,7 +27,7 @@ then found where it goes wrong, not inferred from a final number that happens to
 | Mayaku | `mayaku` 3.1.1 | every stage on the four street variants, 22 images at two thresholds: canvas, input tensor, each raw map, the decoded detections, boxes, scores, classes and masks |
 | Granite Embedding R2 | `transformers` | 1,153,207: every stage of the model on 20 texts, and the tokenizer on 1.15 million texts, on Python 3.10 to 3.14 |
 
-Sixteen of the nineteen families ship a gate in `tools/verify/` in mozo's repository. RF-DETR,
+Seventeen of the twenty families ship a gate in `tools/verify/` in mozo's repository. RF-DETR,
 SAM 2 and ViTPose have their parity measured and recorded the same way, in the files below.
 
 ## The stated exceptions

@@ -258,6 +258,10 @@ def test_the_readme_states_how_many_workflow_nodes_there_are():
     stated = re.search(r"^(\d+) nodes: every model family", readme, re.M)
     assert stated, "the README no longer states the node count -- update this test"
     assert int(stated.group(1)) == len(shipped)
+    # The docs repeat it ("All 52 nodes", "all 52 nodes"); a stale copy there contradicts it.
+    for page in (ROOT / "docs").rglob("*.md"):
+        for number in re.findall(r"[Aa]ll (\d+) nodes", page.read_text()):
+            assert int(number) == len(shipped), f"{page.relative_to(ROOT)} says {number} nodes"
 
 
 def test_the_readme_states_how_many_families_ship_a_verification_gate():
@@ -270,6 +274,9 @@ def test_the_readme_states_how_many_families_ship_a_verification_gate():
     assert f"{spell(len(gates)).capitalize()} of the {spell(families)} families ship one" in readme, (
         f"{len(gates)} of {families} families have a gate; the README says otherwise"
     )
+    verification = (ROOT / "docs" / "deployment" / "verification.md").read_text()
+    assert f"{spell(len(gates)).capitalize()} of the {spell(families)} families ship a gate" in (
+        verification), "docs/deployment/verification.md states another gate count"
 
 
 def non_permissive() -> dict[tuple[str, str], str]:

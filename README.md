@@ -258,7 +258,7 @@ results = Workflow.load("blur_faces.json").run(source="street.jpg")
 mozo run blur_faces.json --file street.jpg
 ```
 
-51 nodes: every model family that answers about an image, SAM 2, EdgeTAM and SAM 3 segmenting the boxes another node found, RF-DETR
+52 nodes: every model family that answers about an image, SAM 2, EdgeTAM and SAM 3 segmenting the boxes another node found, RF-DETR
 from a checkpoint of your own, tracking objects across a video's frames, the image transforms and
 annotations PixelFlow provides, and the ends that read images and annotations and write results. A
 node is an ordinary Python function — its signature *is* its
@@ -282,7 +282,7 @@ tolerance.** Exact equality, because a tolerance hides precisely the drift a che
 
 The gates in `tools/verify/` compare every intermediate stage against the original implementation,
 not just the final answer: 1,275 comparisons for EasyOCR, 226 for OWLv2, 138 for Grounding DINO,
-every one identical. Sixteen of the nineteen families ship one; all nineteen have their parity measured
+every one identical. Seventeen of the twenty families ship one; all twenty have their parity measured
 and recorded in
 `mozo/vendors/<family>_deploy/PROVENANCE.md`, with the upstream commit it was built from.
 

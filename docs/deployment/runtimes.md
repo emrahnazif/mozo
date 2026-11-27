@@ -86,7 +86,7 @@ of its own to download: each is built on your machine from the weights a variant
 |---|---|---|
 | `tensorrt-fp32` | a TensorRT engine built on your machine, in full fp32 | yes, where offered and TensorRT is installed |
 | `torch-fp16` | the torch checkpoint, with the heavy layers run in half precision | yes, where offered |
-| `tensorrt-fp16` | a TensorRT engine built on your machine, in half precision | no, ask for it |
+| `tensorrt-fp16` | a TensorRT engine built on your machine, in half precision | where the family measured it as accurate (see its page); elsewhere ask for it |
 
 [RF-DETR](/docs/models/rfdetr.md#on-cuda-tensorrt) offers `tensorrt-fp32` on every variant that
 publishes a graph and `tensorrt-fp16` on its four detection variants. Its fp32 engine changed no
@@ -94,8 +94,8 @@ detection on 500 COCO images and runs 1.7 to 2.6 times faster than torch, becaus
 limited by kernel launches at one image at a time; its fp16 engine is about 6 times faster and
 changes 0.2–0.5% of detections.
 [OmDet-Turbo](/docs/models/omdet-turbo.md#on-cuda-tensorrt) offers both: its fp32 engine changed no
-detection on 500 COCO images at 1.6 times torch's speed, and its fp16 engine is 2.8 times faster
-and changes 0.1% of them.
+detection on 500 COCO images at 1.6 times torch's speed, and its fp16 engine, which `auto` takes,
+is 2.8 times faster and changes 0.1% of them with AP unchanged.
 
 [OWLv2](/docs/models/owlv2.md#on-cuda-half-precision-and-tensorrt) and
 [Grounding DINO](/docs/models/grounding-dino.md#on-cuda-half-precision-and-tensorrt) offer both;

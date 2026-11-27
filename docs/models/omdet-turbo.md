@@ -107,9 +107,10 @@ images. Pick it when speed over many images matters more than the last points of
 
 With TensorRT 11 or later installed (`pip install tensorrt-cu12` or `-cu13`, matching your torch's
 CUDA; see [Runtimes](/docs/deployment/runtimes.md#tensorrt)), `auto` runs OmDet-Turbo on CUDA as
-`tensorrt-fp32`: an engine built from the published graph, in full IEEE fp32, which finds what
-torch finds. Without TensorRT, `auto` stays on torch. `runtime="tensorrt-fp16"` is faster again
-and has to be asked for. The first load builds the engine (about 40 s for fp32 and 90 s for fp16
+`tensorrt-fp16`: an engine built from the published fp16 graph, 2.8× torch, which changed 5 of
+4,843 detections on 500 COCO images and left AP where it was. `runtime="tensorrt-fp32"` builds the
+engine in full IEEE fp32 instead and finds what torch finds. Without TensorRT, `auto` stays on
+torch. The first load builds the engine (about 40 s for fp32 and 90 s for fp16
 on the RTX 3090) and keeps it in mozo's cache; later loads reuse it.
 
 Measured on an RTX 3090 with torch 2.13 and TensorRT 11.5, on 500 random COCO val2017 images with
@@ -121,8 +122,8 @@ above 0.3 on the other; the count is out of the 4,843 detections torch fp32 make
 |---|---|---|---|---|
 | torch fp32 | 22.0 ms | 1.0× | 43.75 | |
 | input rounded to fp16 | | | 43.74 | 0 |
-| `tensorrt-fp32` (`auto`) | 13.9 ms | 1.6× | 43.74 | 0 |
-| `tensorrt-fp16` | 7.8 ms | 2.8× | 43.76 | 5 (0.1%) |
+| `tensorrt-fp32` | 13.9 ms | 1.6× | 43.74 | 0 |
+| `tensorrt-fp16` (`auto`) | 7.8 ms | 2.8× | 43.76 | 5 (0.1%) |
 
 Torch's own fp16 (autocast) is slower than fp32 here, so mozo does not offer it. ONNX Runtime on
 CUDA (32 ms) is slower than torch.
@@ -130,9 +131,13 @@ CUDA (32 ms) is slower than torch.
 ### On the CPU
 
 `auto` runs torch. `runtime="onnx-fp32"` runs the same graph through ONNX Runtime: on 100 COCO
-images it found exactly what torch found, and its image path was 5–18% faster than torch's (eight
-threads each, on a shared and heavily loaded 20-thread CPU, so indicative: 671–775 ms against
-814–834 ms). The text tower stays on torch either way.
+images it found exactly what torch found, and its image path was 5–18% faster than torch's on an
+Intel i9 (eight threads each, on a shared and heavily loaded 20-thread CPU, so indicative: 671–775
+ms against 814–834 ms) but 32% slower on an Apple M1 Max (563 against 425 ms, eight threads, 80
+class names). The text tower stays on torch either way.
+
+There is no Core ML package: the decoder's deformable attention reshapes its sampling offsets to a
+rank-6 tensor, and Core ML runs tensors of rank 5 at most.
 
 ### No `transformers` at run time
 

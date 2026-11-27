@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import as_pixelflow_reports, published, require_weights
-from mozo.registry import DERIVES, EXECUTES, MODEL_REGISTRY, NEEDS
+from mozo.registry import DERIVES, EXECUTES, MODEL_REGISTRY, NEEDS, PREFERS
 from mozo.runtimes import select_runtime
 from mozo.vendors.omdet_turbo_deploy import SPECS, VARIANTS
 from mozo.vendors.omdet_turbo_deploy.predictor import task_sentence
@@ -91,17 +91,17 @@ def test_what_is_published_is_what_the_registry_derives_from():
 
 
 def _choose(device, runtime="auto"):
-    return select_runtime(device, artifacts(FAMILY, "tiny"), runtime,
-                          executes=EXECUTES[FAMILY], derives=DERIVES[FAMILY])
+    return select_runtime(device, artifacts(FAMILY, "tiny"), runtime, executes=EXECUTES[FAMILY],
+                          derives=DERIVES[FAMILY], prefers=PREFERS[FAMILY])
 
 
-def test_auto_takes_the_exact_engine_on_cuda_when_tensorrt_is_usable(monkeypatch):
+def test_auto_takes_the_fp16_engine_on_cuda_when_tensorrt_is_usable(monkeypatch):
     import mozo.runtimes as runtimes
 
-    require_weights(FAMILY, "tiny", "onnx-fp32")
+    require_weights(FAMILY, "tiny", "onnx-fp16")
     monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: True)
-    assert _choose("cuda") == "tensorrt-fp32"
-    assert _choose("cuda", "tensorrt-fp16") == "tensorrt-fp16"
+    assert _choose("cuda") == "tensorrt-fp16"
+    assert _choose("cuda", "tensorrt-fp32") == "tensorrt-fp32"
     monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: False)
     assert _choose("cuda") == "torch-fp32"
 

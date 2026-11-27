@@ -134,6 +134,7 @@ DERIVES: dict[str, dict[str, str]] = {
     # 1.4-1.9x torch's forward pass; fp16 changed none either, moving AP by at most 0.1, so
     # ``auto`` takes fp16 (:data:`PREFERS`). See docs/models/mayaku.md.
     "mayaku": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
+    # The fp32 engine is exact, at 1.6x torch.
     "omdet_turbo": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
@@ -148,6 +149,11 @@ PREFERS: dict[str, dict[str, tuple[str, ...]]] = {
     # silicon (M1 Max, 301 photographs), the Core ML fp16 package changed at most 1 of ~1,500
     # confident detections, at 1.9-4.7x torch MPS (5.1 against 23.8 ms for street-nano).
     "mayaku": {"cuda": ("tensorrt-fp16",), "cpu": ("onnx-fp32",), "mps": ("coreml-fp16",)},
+    # RTX 3090, 500 COCO images, 80 names: the fp16 engine changed 5 of 4,843 detections above 0.3
+    # and left AP at 43.76 (fp32 43.74), at 1.8x the fp32 engine (7.8 against 13.9 ms). The CPU
+    # stays on torch: ONNX Runtime measured 5-18% faster on a loaded i9 but 32% slower on an
+    # M1 Max (563 against 425 ms), so neither wins everywhere.
+    "omdet_turbo": {"cuda": ("tensorrt-fp16",)},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``

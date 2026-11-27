@@ -85,6 +85,7 @@ class OmDetTurboPredictor:
     #: Frameworks this adapter executes, and runtimes it builds at load time. See the registry.
     EXECUTES = registry.EXECUTES[FAMILY]
     DERIVES = registry.DERIVES[FAMILY]
+    PREFERS = registry.PREFERS[FAMILY]
 
     #: The vocabulary size a TensorRT engine is tuned for. It accepts 1 to 1,024.
     TENSORRT_CLASSES = 80
@@ -104,7 +105,7 @@ class OmDetTurboPredictor:
         self.device = device or get_default_device()
         self.runtime = select_runtime(
             self.device, artifacts(FAMILY, variant, revision=revision), runtime,
-            executes=self.EXECUTES, derives=self.DERIVES)
+            executes=self.EXECUTES, derives=self.DERIVES, prefers=self.PREFERS)
         spec = SPECS[variant]
 
         # A graph replaces the image path only; the text tower always comes from the checkpoint,

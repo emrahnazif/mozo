@@ -48,6 +48,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
+from common import confident_changes as common_changes  # noqa: E402
 from common import fixtures, require_one_file, variant_parser  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import OnnxRunner  # noqa: E402
@@ -80,17 +81,9 @@ def _detect(forward, image, size):
     return labels[0][keep], boxes[0][keep], scores[0][keep]
 
 
-def confident_changes(want, got, high=0.52, low=0.5) -> int:
-    """Confident detections one side has and the other lacks: a detection above *high* with no
-    same-class partner above *low* at IoU over 0.5. The margin keeps a score moving across a
-    single threshold from counting as a change."""
-    n = 0
-    for (lx, bx, sx), (ly, by, sy) in ((want, got), (got, want)):
-        for k in torch.nonzero(sx > high).flatten().tolist():
-            partners = (sy > low) & (ly == lx[k])
-            if not bool(partners.any()) or float(box_iou(bx[k:k + 1], by[partners]).max()) <= 0.5:
-                n += 1
-    return n
+def confident_changes(want, got) -> int:
+    """:func:`common.confident_changes` on two ``(labels, boxes, scores)`` decodes."""
+    return common_changes(want[1:] + want[:1], got[1:] + got[:1])
 
 
 def _matched(want, got, floor=0.3):

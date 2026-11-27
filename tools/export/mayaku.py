@@ -21,7 +21,7 @@ typed builder then honours. It is published for TensorRT only.
 Each graph is run through ONNX Runtime on the CPU and compared, through the vendor's own decode,
 against the torch module it came from, on real photographs. fp32 must give the same detections:
 same count, boxes within 0.01 px, scores within 0.001, masks overlapping at least 0.999. fp16 must
-keep every confident detection (see :func:`_changes`).
+keep every confident detection (see :func:`common.confident_changes`).
 
 ``coreml-fp32`` and ``coreml-fp16`` (``--coreml``) are ML Program packages traced from the same
 fused network, zipped, with a float tensor input named ``images`` -- the batch the vendor already
@@ -44,13 +44,12 @@ from pathlib import Path
 import numpy as np
 import onnx
 import torch
-from torchvision.ops import box_iou
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
-from common import fixtures, variant_parser  # noqa: E402
+from common import confident_changes, fixtures, variant_parser  # noqa: E402
 from tools.fetch.mayaku import REVISION  # noqa: E402
 from mozo.image import load_image  # noqa: E402
 from mozo.runtimes import OnnxRunner  # noqa: E402
@@ -119,19 +118,6 @@ def _iou(a: np.ndarray, b: np.ndarray) -> float:
     return 1.0 if union == 0 else float(np.logical_and(a, b).sum() / union)
 
 
-def _changes(want, got, high=0.52, low=0.5) -> int:
-    """Confident detections one side has and the other lacks: a detection above *high* with no
-    same-class partner above *low* at IoU over 0.5. The margin keeps a score moving across a
-    single threshold from counting as a change."""
-    n = 0
-    for (bx, sx, cx), (by, sy, cy) in ((want[:3], got[:3]), (got[:3], want[:3])):
-        for k in torch.nonzero(sx > high).flatten().tolist():
-            partners = (sy > low) & (cy == cx[k])
-            if not bool(partners.any()) or float(box_iou(bx[k:k + 1], by[partners]).max()) <= 0.5:
-                n += 1
-    return n
-
-
 def _references(detector: Detector) -> list[tuple[str, np.ndarray, tuple]]:
     """Each fixture photograph with the torch module's own answer, computed once per variant."""
     found = []
@@ -151,7 +137,7 @@ def _check(detector: Detector, runner, references: list, fp16: bool,
         with torch.no_grad():
             got = detect(image, forward, detector.spec, CONF)
         if fp16:
-            n = _changes(want, got)
+            n = confident_changes(want, got)
             print(f"    {name:<20} {len(want[1])} / {len(got[1])} detections, {n} confident changes")
             if n:
                 problems.append(f"{name}: {n} confident detections changed in fp16")

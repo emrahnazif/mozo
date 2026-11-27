@@ -276,3 +276,20 @@ def variant_parser(description: str, weights_dir: Path, *, required: bool = Fals
     parser.add_argument("--revision", default=revision, help="revision directory to work in")
     parser.add_argument("--weights-dir", type=Path, default=weights_dir)
     return parser
+
+
+def confident_changes(want, got, high: float = 0.52, low: float = 0.5) -> int:
+    """Confident detections one side has and the other lacks, between two ``(boxes, scores,
+    classes)`` tensors: a detection above *high* with no same-class partner above *low* at IoU over
+    0.5. The margin keeps a score moving across a single threshold from counting as a change. The
+    rule a reduced-precision graph is published under."""
+    import torch
+    from torchvision.ops import box_iou
+
+    n = 0
+    for (bx, sx, cx), (by, sy, cy) in ((want[:3], got[:3]), (got[:3], want[:3])):
+        for k in torch.nonzero(sx > high).flatten().tolist():
+            partners = (sy > low) & (cy == cx[k])
+            if not bool(partners.any()) or float(box_iou(bx[k:k + 1], by[partners]).max()) <= 0.5:
+                n += 1
+    return n

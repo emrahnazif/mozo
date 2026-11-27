@@ -57,7 +57,10 @@ def resize_and_pad(image: np.ndarray, side: int) -> torch.Tensor:
     resized = _resize(image, new_h, new_w)
     # torchvision's ``pad(img, [0, 0, pad_w, pad_h])`` upstream: zeros, right and bottom.
     padded = F.pad(resized, (0, max(0, side - new_w), 0, max(0, side - new_h)))
-    return padded[None]
+    # ``torch.stack`` as upstream, not ``[None]``: when nothing is padded, ``F.pad`` hands back the
+    # HWC-strided view of the PIL buffer, and only the stack makes it contiguous. Same values
+    # either way, but on CUDA the convolution's kernel is chosen by memory layout.
+    return torch.stack([padded])
 
 
 def windows(image: np.ndarray, side: int) -> tuple[torch.Tensor, list[tuple[int, int]]]:

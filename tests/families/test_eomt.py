@@ -130,6 +130,14 @@ def test_panoptic_fits_the_long_side_and_pads_bottom_right():
     assert (pixels[0, :, :320] == 7).all() and (pixels[0, :, 320:] == 0).all()
 
 
+def test_an_unpadded_picture_is_contiguous_as_upstream_stacks_it():
+    """Nothing to pad hands back the PIL buffer's HWC-strided view; upstream's ``torch.stack``
+    makes it contiguous, and on CUDA cuDNN picks its convolution kernel by layout."""
+    from mozo.vendors.eomt_deploy.image import resize_and_pad
+
+    assert resize_and_pad(np.zeros((640, 640, 3), np.uint8), 640).is_contiguous()
+
+
 def test_semantic_fits_the_short_side_and_slides_windows():
     """1000x512 after scaling: two 512 windows, their 24-pixel overlap split evenly."""
     from mozo.vendors.eomt_deploy.image import windows
@@ -200,6 +208,16 @@ def test_semantic_refuses_a_threshold(semantic, picture):
 def test_the_answer_serialises(panoptic, picture):
     payload = panoptic.predict(picture).to_dict()
     assert payload and payload[0]["masks"][0]["format"] == "png"
+
+
+def test_the_network_is_built_outside_inference_mode(picture):
+    """The first ``predict`` builds the network inside ``torch.inference_mode``. Parameters loaded
+    there would be inference tensors that do not require grad, which on CUDA changes the bits of a
+    linear layer on a non-contiguous batch (the GPU gate caught it on ADE20K's windows)."""
+    model = _model("coco-panoptic-small")
+    model.predict(picture)
+    assert all(p.requires_grad and not p.is_inference()
+               for p in model._segmenter.network().parameters())
 
 
 def test_the_same_picture_gives_the_same_answer(panoptic, picture):

@@ -114,8 +114,34 @@ BSD-3-Clause, images for non-commercial research and educational use under MIT C
 
 ## Verification
 
-`tools/verify/eomt.py`, CPU, `MKL_CBWR=AVX2,STRICT`, in an environment pinned to upstream's
-`requirements.txt`: **5,576 of 5,576 comparisons exact** across the five variants on 28 pictures each
+**On CUDA (the primary gate).** `tools/verify/eomt.py --device cuda`, upstream and this package in
+one process on one RTX 3060 (12 GB, driver 550.144.03), torch 2.7.0+cu126 (upstream's pin), CUDA
+12.6, cuDNN 9.5.1, under torch's default global settings (matmul TF32 off, cuDNN TF32 on, cuDNN
+benchmark off), which mozo leaves alone: **41,566 of 41,566 comparisons exact** across the five variants
+on the same 28 pictures, in fp32 and in fp16 autocast, each side run three times per picture and
+byte-identical every time (30,240 of the comparisons are that determinism check). fp16 is gated against upstream's own half path, the notebook's
+`autocast(dtype=torch.float16)` (and Lightning's `16-mixed`), which covers the network *and* the
+post-processing, the same span `torch-fp16` covers. The CUDA stages add the strides of the
+network's input (cuDNN chooses kernels by layout), each parameter's `requires_grad` and
+inference-tensor flag (they choose torch's matmul path on CUDA), and the logits and arrays the
+adapter's own network produces. Rerun on torch 2.13.0+cu126 (cuDNN 9.10.2), two runs per side: 26,446 of 26,446 exact.
+Nineteen falsifiers in fp32 and eighteen in fp16 (37 runs), each caught first at its stage; the GPU-only
+ones flip a production setting (channels-last input, SDPA's math backend, matmul TF32 on, cuDNN
+TF32 off), build the network inside inference mode, or post-process outside autocast (on the
+semantic variant: on the panoptic pictures that change moves nothing, so it cannot be caught there).
+
+The GPU gate found three things the CPU gate cannot see, each fixed here to match upstream:
+`torch-fp16` cast the logits to float32 before post-processing, where upstream's autocast keeps
+them float16 through the upsample and the merge (it moved semantic pixels; on panoptic pictures it
+never changed an answer); a picture needing no padding reached the network with the HWC strides of
+the PIL buffer, where upstream's `torch.stack` makes it contiguous; and the network built on the
+first `segment` call, inside `torch.inference_mode()`, got inference-tensor parameters that do not
+require grad, which on CUDA changes a linear layer's bits on a semantic picture's batched,
+non-contiguous queries (class logits 1.8e-05 apart in fp32). The network is now built outside
+inference mode.
+
+**On the CPU.** `tools/verify/eomt.py`, CPU, `MKL_CBWR=AVX2,STRICT`, in an environment pinned to upstream's
+`requirements.txt`: **6,422 of 6,422 comparisons exact** across the five variants on 28 pictures each
 (8 awkward fixtures -- portrait, exactly 640x640, a size where `round` and `floor` differ, 37x50
 upsampled, 2000x120, black, grey -- and 20 random COCO val2017 photographs). Stages: every tensor of
 the published checkpoint against the authors' `pytorch_model.bin`; the network's `uint8` input;
@@ -123,7 +149,9 @@ the patch embedding; the input of every block; the final norm's input; class and
 post-processed partition (panoptic segment ids and classes, semantic classes) from this package's
 memory-bounded post-processing against upstream's own functions; each panoptic score against the
 `transformers` slow pipeline; and mozo's adapter (masks, classes, confidences) through the registry
-and the weights tree. Thirteen falsifiers (`--falsify all`) are each caught first at their stage.
+and the weights tree. Fifteen falsifiers (`--falsify all`) are each caught first at their stage.
+(Rerun after the GPU gate's fixes on vision-003's CPU, torch 2.7.0+cu126 with the GPU hidden; the
+first run, before the `layout` and `requires_grad` stages existed, counted 5,576 on vision-002.)
 
 ## Runtimes
 

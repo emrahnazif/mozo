@@ -10,7 +10,8 @@
   without splitting instances; its detections have `confidence=None`, and a `threshold` is refused
   (`400` over HTTP). A new task type, `semantic_segmentation`, served by `POST /predict/eomt/<variant>`
   as JSON, and a workflow node, `eomt`, on the existing Detections port. Bit-identical to the
-  authors' own code. Code and weights are MIT; ADE20K's *images* are licensed for non-commercial
+  authors' own code on CUDA, in full precision and in the fp16 autocast `auto` uses (RTX 3060,
+  torch 2.7 and 2.13, CUDA 12.6), and on the CPU. Code and weights are MIT; ADE20K's *images* are licensed for non-commercial
   research and education, which the NOTICE and the docs state for that variant.
 - **EoMT runs in half precision on CUDA by default**, 1.25 times (`coco-panoptic-small`) to 4 times
   (`coco-panoptic-large-1280`) faster for a whole `predict` on an RTX 3060, with PQ and mIoU within

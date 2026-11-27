@@ -61,19 +61,22 @@ ADE20K's 150 are scene classes: wall, floor, ceiling, tree, building, road, sky,
 
 ### On CUDA: half precision, and TensorRT
 
-On CUDA, `auto` runs EoMT as `torch-fp16`: the same checkpoint with the network under fp16
-autocast. Nothing extra is downloaded, and PQ and mIoU do not move. `runtime="tensorrt-fp16"` is
+On CUDA, `auto` runs EoMT as `torch-fp16`: the same checkpoint with the network and its
+post-processing under fp16 autocast, the way the authors' own half-precision evaluation runs, and
+bit-identical to it. Nothing extra is downloaded, and PQ and mIoU do not move. `runtime="tensorrt-fp16"` is
 faster again for every variant but `coco-panoptic-large-1280`: a TensorRT 11 engine built from a
 published fp16 ONNX graph (50–640 MB), which needs
 TensorRT installed (`pip install tensorrt-cu12` or `-cu13`; see
 [Runtimes](/docs/deployment/runtimes.md#tensorrt)) and is only used when asked for.
-`runtime="torch-fp32"` gives exactly the authors' numbers.
+`runtime="torch-fp32"` is bit-identical to the authors' code in full precision.
 
 Measured on an RTX 3060 (12 GB) with torch 2.13 and TensorRT 11.5. PQ on the first 500 COCO
 val2017 panoptic images, mIoU on all 2,000 ADE20K validation images, computed the way the COCO
 panoptic API and upstream do. Time is a whole `predict` on the 1920x1281 example photograph, which
 includes resizing it and bringing every mask back to full size (about 60 ms whatever the runtime).
-*Moved* is the mean share of pixels whose class differs from torch fp32's.
+*Moved* is the mean share of pixels whose class differs from torch fp32's. The `torch-fp16` accuracy
+was measured again once its post-processing moved under autocast (RTX 3060, vision-003): the same
+PQ, mIoU and moved pixels, except ADE20K's moved share (0.02% to 0.05%).
 
 | Variant | torch fp32 | `torch-fp16` (`auto`) | `tensorrt-fp16` |
 |---|---|---|---|
@@ -81,7 +84,7 @@ includes resizing it and bringing every mask back to full size (about 60 ms what
 | `coco-panoptic-base` | 158 ms, PQ 52.12 | 97 ms, 1.6×, PQ 52.14, moved 0.03% | 84 ms, 1.9×, PQ 52.15, moved 0.55% |
 | `coco-panoptic-large` | 341 ms, PQ 56.61 | 160 ms, 2.1×, PQ 56.61, moved 0.04% | 114 ms, 3.0×, PQ 56.67, moved 0.15% |
 | `coco-panoptic-large-1280` | 2,028 ms, PQ 58.78 | 500 ms, 4.1×, PQ 58.78, moved 0.02% | not offered: 575 ms, slower than `torch-fp16` (PQ 58.79) |
-| `ade20k-semantic-large` | 346 ms, mIoU 58.40 | 171 ms, 2.0×, mIoU 58.39, moved 0.02% | 111 ms, 3.1×, mIoU 58.39, moved 0.11% |
+| `ade20k-semantic-large` | 346 ms, mIoU 58.40 | 171 ms, 2.0×, mIoU 58.39, moved 0.05% | 111 ms, 3.1×, mIoU 58.39, moved 0.11% |
 
 `tensorrt-fp16` changes more pixels than `torch-fp16` and is not the default for that reason: on an
 occasional picture a large segment whose confidence sits right at the 0.8 threshold drops to void
@@ -168,10 +171,12 @@ class on `coco-panoptic-large`, and drops a segment on `coco-panoptic-small`. Wi
 ### Parity
 
 The torch path is bit-identical to `tue-mps/eomt` at commit `aa017c3`, the authors' own code, on
-the CPU: the checkpoint against the authors' file, the pixels, every block, the logits, and the
-final partition, on 28 pictures per variant. The memory-saving post-processing (only the confident
-segments are scaled to full size; the semantic classes are scaled a few at a time) is in that
-comparison. See `mozo/vendors/eomt_deploy/PROVENANCE.md`.
+CUDA (RTX 3060, torch 2.7.0 and 2.13.0, CUDA 12.6) in fp32 and in fp16 autocast, and on the CPU:
+the checkpoint against the authors' file, the pixels and their memory layout, every block, the
+logits, the final partition, and what `predict` returns, on 28 pictures per variant. The
+memory-saving post-processing (only the confident segments are scaled to full size; the semantic
+classes are scaled a few at a time) is in that comparison. See
+`mozo/vendors/eomt_deploy/PROVENANCE.md`.
 
 ## Weights and licence
 

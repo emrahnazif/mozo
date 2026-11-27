@@ -73,8 +73,10 @@ class Segmenter:
         device: Where the network runs and where its output is post-processed.
         network: A callable that replaces the torch network, for a graph runtime. *weights* is
             then unused.
-        half: Run the torch network under CUDA fp16 autocast (matrix products in half precision,
-            norms and softmax in fp32); the logits come back as fp32 for the post-processing.
+        half: Run under CUDA fp16 autocast (matrix products in half precision, norms and softmax
+            in fp32), the network *and* the post-processing, as the authors' notebook and their
+            Lightning ``16-mixed`` evaluation do: the logits stay in the dtype the network gives
+            and are upsampled, sigmoided and merged under the same autocast.
     """
 
     def __init__(self, weights: str | Path | None, spec: Spec, device: str = "cpu",
@@ -91,22 +93,33 @@ class Segmenter:
         if self._network is None:
             with self._lock:
                 if self._network is None:
-                    self._network = load_network(self.spec, self._weights, self.device)
+                    # Outside inference mode even when the first call is inside it (``segment``):
+                    # parameters loaded there become inference tensors that do not require grad,
+                    # and on CUDA that changes how torch runs a linear layer on a non-contiguous
+                    # batch (the queries of a semantic picture's windows) -- other bits than
+                    # upstream's, whose parameters all require grad.
+                    with torch.inference_mode(False):
+                        self._network = load_network(self.spec, self._weights, self.device)
         return self._network
+
+    def precision(self):
+        """The context the network and the post-processing run in: CUDA fp16 autocast for
+        ``half``, otherwise nothing."""
+        return torch.autocast("cuda", torch.float16) if self._half else nullcontext()
 
     def raw(self, image: np.ndarray) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list]:
         """The network's ``uint8`` input and its output for *image*:
         ``(pixels, mask_logits, class_logits, origins)``, where *origins* are a semantic picture's
-        windows (``[]`` for panoptic)."""
+        windows (``[]`` for panoptic). Under ``half`` the logits are the network's float16."""
         side = self.spec.image_size
         if self.spec.task == "semantic":
             pixels, origins = windows(image, side)
         else:
             pixels, origins = resize_and_pad(image, side), []
         pixels = pixels.to(self.device)
-        with torch.autocast("cuda", torch.float16) if self._half else nullcontext():
+        with self.precision():
             mask_logits, class_logits = self.network()(pixels / 255.0)
-        return pixels, mask_logits.float(), class_logits.float(), origins
+        return pixels, mask_logits, class_logits, origins
 
     def segment(self, image: np.ndarray, threshold: float = postprocess.MASK_THRESHOLD) -> Segments:
         """Segment one ``HxWx3`` RGB ``uint8`` picture.
@@ -116,7 +129,7 @@ class Segmenter:
             threshold: Panoptic only: the class probability a query needs to become a segment.
         """
         size = tuple(image.shape[:2])
-        with torch.inference_mode():
+        with torch.inference_mode(), self.precision():
             _, mask_logits, class_logits, origins = self.raw(image)
             if self.spec.task == "semantic":
                 labels = postprocess.semantic(mask_logits, class_logits, origins, size,

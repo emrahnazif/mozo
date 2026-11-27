@@ -277,6 +277,11 @@ found traps it had not predicted, and the predicted ones were mostly real.
   167×1336 on a 500×4000 image, because the short side rounds first. Clamping looks like a fix and
   moves every box.
 - **Padding may replicate rather than zero-fill.** EasyOCR copies the last column.
+- **A pad of nothing returns a view.** `F.pad(x, (0, 0, 0, 0))` hands back its input, so a picture
+  that needs no padding keeps the HWC strides of the PIL buffer it came from; EoMT's upstream ends
+  with `torch.stack`, which makes it contiguous. Same values, so a CPU gate cannot see it, but on
+  CUDA cuDNN picks its convolution kernel by memory layout. Gate the strides of the first
+  convolution's input, and stack (or copy) where upstream does.
 - **Normalisation constants are usually not ImageNet's.** CLIP has its own; SigLIP 2 is 0.5/0.5.
 
 ### Tokenisation
@@ -361,6 +366,12 @@ found traps it had not predicted, and the predicted ones were mostly real.
   "attend everywhere". Measured `torch.equal` with and without it before dropping it; the buffer
   stays for the strict load.
 
+- **Upstream's half precision may cover the post-processing too.** EoMT's notebook and its
+  Lightning `16-mixed` evaluation wrap the network *and* the upsample, sigmoid and merge in one
+  `autocast`, so the mask logits are upsampled as float16. mozo's first `torch-fp16` ran autocast
+  around the network only and cast the logits to float32 first; only a GPU gate against upstream's
+  own half path can see that. Read where upstream's autocast ends, not just where it starts.
+
 ### Things that are upstream's behaviour, not bugs to fix
 
 Reproduce them, and record them:
@@ -382,6 +393,15 @@ Reproduce them, and record them:
 - **Two entry points that disagree.** EasyOCR's array path documents BGR and its path entry decodes
   greyscale with libjpeg directly — 27 and 7 grey levels apart. Hand both sides the same array.
 - **Mutable module globals** (`imgH`) become spec fields when vendored.
+- **A network built lazily inside `torch.inference_mode()` is a different network on CUDA.** EoMT's
+  segmenter loaded its weights on the first `segment` call, inside inference mode, so every
+  parameter became an inference tensor that does not require grad. On CUDA, torch runs a linear
+  layer on a non-contiguous batched input (EoMT's queries, `x[:, :100]`, over a semantic picture's
+  two or more windows) as one folded GEMM or as a batched one depending on that flag, and the two
+  give different float32 bits (class logits 1.8e-05 apart, a few pixels changed class). The CPU
+  agrees either way, and so does a contiguous input. Build outside inference mode
+  (`torch.inference_mode(False)`), and gate each parameter's `requires_grad` and `is_inference()`
+  on the network the adapter itself built, after its first call.
 
 ---
 

@@ -21,5 +21,5 @@ found.scores     # (N,) float32 class probabilities; None for a semantic variant
 | `coco-panoptic-large-1280` | panoptic, 133 classes | 1280 | 200 | ViT-L/16 + 4 registers |
 | `ade20k-semantic-large` | semantic, 150 classes | 512 windows | 100 | ViT-L/16 + 4 registers |
 
-Bit-identical to `tue-mps/eomt` at `aa017c3` on CPU: `tools/verify/eomt.py`. What was taken, what
+Bit-identical to `tue-mps/eomt` at `aa017c3` on CUDA, in fp32 and fp16 autocast, and on the CPU: `tools/verify/eomt.py`. What was taken, what
 was left and where it diverges: `PROVENANCE.md`.

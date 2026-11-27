@@ -57,8 +57,8 @@ at the same cost. **small** or **medium** for most uses; **nano** for CPUs and m
 
 ## Runtimes
 
-`runtime="auto"` picks a TensorRT fp32 engine on CUDA when TensorRT 11 or later is installed, and
-torch otherwise. On the CPU it picks torch, but **`runtime="onnx-fp32"` is faster there**
+`runtime="auto"` picks a TensorRT engine on CUDA when TensorRT 11 or later is installed, and
+torch otherwise: fp16 for every variant but `nano`, whose fp16 engine was slower than its fp32 one. On the CPU it picks torch, but **`runtime="onnx-fp32"` is faster there**
 (`pip install 'mozo[onnx]'`) and gives the same detections:
 
 ```python
@@ -74,7 +74,7 @@ all 300 detections, so it only compares runtimes with each other. A detection "c
 against torch fp32 on the CPU, it scores above 0.52 on one side with no same-class partner (IoU
 above 0.5) above 0.5 on the other; each variant has 2,200–3,000 detections above 0.5.
 
-| Variant | torch CUDA | `tensorrt-fp32` (`auto`) | `tensorrt-fp16` | AP fp32 / fp16 | fp16 changes |
+| Variant | torch CUDA | `tensorrt-fp32` | `tensorrt-fp16` (`auto`) | AP fp32 / fp16 | fp16 changes |
 |---|---|---|---|---|---|
 | `nano` | 10.6 ms | 1.9 ms, 5.4× | not published (slower than fp32) | 45.68 / – | – |
 | `small` | 11.4 ms | 3.6 ms, 3.2× | 3.1 ms, 3.7× | 51.86 / 51.80 | 3 |
@@ -85,10 +85,11 @@ above 0.5) above 0.5 on the other; each variant has 2,200–3,000 detections abo
 
 The fp32 engine changed no detection on any variant and its AP is torch's to the second decimal.
 With TensorRT 11 or later installed (`pip install tensorrt-cu12` or `-cu13`; see
-[Runtimes](/docs/deployment/runtimes.md#tensorrt)), `auto` builds it from the published ONNX graph
-on first load (10 s to 2 min) and keeps it. `runtime="tensorrt-fp16"` is faster again, changed at
-most 4 confident detections in about 3,000 and moved AP by at most 0.12; it builds from a published
-fp16 graph (22–125 MB) and has to be asked for. Without TensorRT, `auto` stays on torch.
+[Runtimes](/docs/deployment/runtimes.md#tensorrt)), `auto` builds the fp16 engine from the published
+fp16 graph (22–125 MB) on first load (10 s to 2 min) and keeps it: it changed at most 4 confident
+detections in about 3,000 and moved AP by at most 0.12. `nano` gets the fp32 engine, and
+`runtime="tensorrt-fp32"` gives any variant torch's exact detections. Without TensorRT, `auto`
+stays on torch.
 
 On the CPU, torch took 67 ms (`nano`) to 570 ms (`xlarge-obj365`) and `onnx-fp32` 1.2–1.8× less
 for nano to large, with no detection changed; those CPU timings were taken while other jobs loaded

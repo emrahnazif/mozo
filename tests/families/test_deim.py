@@ -229,24 +229,24 @@ class TestRuntimes:
 
 
 class TestTensorRT:
-    """On CUDA: the exact fp32 engine chosen by ``auto``, fp16 on request."""
+    """On CUDA: the fp16 engine chosen by ``auto`` where its graph is published, else fp32."""
 
     @staticmethod
     def _choose(device, variant, runtime="auto"):
-        from mozo.registry import DERIVES
+        from mozo.registry import DERIVES, PREFERS
 
         return select_runtime(device, artifacts(FAMILY, variant), runtime,
-                              derives=DERIVES[FAMILY])
+                              derives=DERIVES[FAMILY], prefers=PREFERS[FAMILY])
 
-    def test_auto_picks_the_fp32_engine_on_cuda_when_tensorrt_is_usable(self, monkeypatch):
+    def test_auto_picks_the_fp16_engine_on_cuda_where_published(self, monkeypatch):
         import mozo.runtimes as runtimes
 
         require_weights(FAMILY, "nano", "onnx-fp32")
         monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: True)
         for variant in ALL:
-            assert self._choose("cuda", variant) == "tensorrt-fp32", variant
-        for variant in FP16:
-            assert self._choose("cuda", variant, "tensorrt-fp16") == "tensorrt-fp16", variant
+            want = "tensorrt-fp16" if variant in FP16 else "tensorrt-fp32"
+            assert self._choose("cuda", variant) == want, variant
+            assert self._choose("cuda", variant, "tensorrt-fp32") == "tensorrt-fp32", variant
         with pytest.raises(Exception, match="not published"):
             self._choose("cuda", "nano", "tensorrt-fp16")
         assert self._choose("cpu", "nano") == "torch-fp32"
@@ -288,3 +288,4 @@ class TestTensorRT:
                                     for i, g in enumerate(got))
             assert got[nearest].class_name == found.class_name
             assert distance < 5.0
+

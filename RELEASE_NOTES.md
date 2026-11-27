@@ -37,11 +37,11 @@
   `/predict/deim/small`, and a `deim` workflow node. Results are bit-identical to the authors' code
   on CUDA (RTX 3060, torch 2.13.0, CUDA 12.6) in fp32 and on the CPU, checked module by module. Code Apache-2.0; the weights come with no terms of their
   own, and mozo reads them as the repository's Apache-2.0 (the NOTICE says so).
-- **DEIM runs 1.9 to 5.4 times faster on CUDA by default, with the same detections**, when
-  TensorRT 11 or later is installed: `auto` builds an fp32 engine from the published ONNX graph
-  (500 COCO images per variant: no detection changed, AP identical). `runtime="tensorrt-fp16"` is faster again (3.4 to 5.6 times torch) for every variant but
-  `nano`, from a published fp16 graph; at most 4 of about 3,000 confident detections change and AP
-  moves by at most 0.12. `auto` never picks it. On the CPU,
+- **DEIM runs 3.4 to 5.6 times faster on CUDA by default** when TensorRT 11 or later is
+  installed: `auto` builds an fp16 engine from a published fp16 graph, which changed at most 4 of
+  about 3,000 confident detections on 500 COCO images per variant and moved AP by at most 0.12.
+  `nano`, whose fp16 engine was slower, gets the fp32 engine (5.4 times torch). The fp32 engine
+  (`runtime="tensorrt-fp32"`) changed no detection on any variant. On the CPU,
   `runtime="onnx-fp32"` is faster than torch for most variants and gives the same detections.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when

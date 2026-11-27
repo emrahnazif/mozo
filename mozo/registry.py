@@ -138,7 +138,7 @@ DERIVES: dict[str, dict[str, str]] = {
     "omdet_turbo": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
     # RF-DETR's shape, measured the same way (RTX 3090, 500 COCO images per variant): the fp32
     # engine changed no detection and left AP identical, at 1.9x (``xlarge``) to 5.4x (``nano``)
-    # torch CUDA's forward pass. fp16 on request only, where its graph is published. See
+    # torch CUDA's forward pass. fp16 where its graph is published (not nano). See
     # docs/models/deim.md.
     "deim": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
@@ -159,6 +159,10 @@ PREFERS: dict[str, dict[str, tuple[str, ...]]] = {
     # stays on torch: ONNX Runtime measured 5-18% faster on a loaded i9 but 32% slower on an
     # M1 Max (563 against 425 ms), so neither wins everywhere.
     "omdet_turbo": {"cuda": ("tensorrt-fp16",)},
+    # RTX 3090, 500 COCO images per variant: the fp16 engine changed at most 4 of ~3,000 confident
+    # detections and moved AP by at most 0.12, at 1.2-2.1x the fp32 engine. nano publishes no
+    # fp16 graph (its fp16 engine was slower), so it falls through to the fp32 engine.
+    "deim": {"cuda": ("tensorrt-fp16",)},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``

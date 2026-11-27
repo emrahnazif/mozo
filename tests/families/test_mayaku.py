@@ -20,10 +20,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from conftest import COORD_STEP, published, require_weights
-from mozo.runtimes import select_runtime
+from conftest import assert_keeps_confident, choose, COORD_STEP, published, require_weights
 from mozo.vendors.mayaku_deploy import SPECS
-from mozo.weights import WeightsError, artifacts
+from mozo.weights import WeightsError
 
 FAMILY = "mayaku"
 # The street models, read from the vendor's own table. Every assertion below about the scene and
@@ -48,13 +47,6 @@ def _mask_iou(a: np.ndarray, b: np.ndarray) -> float:
     return 1.0 if union == 0 else float(np.logical_and(a, b).sum() / union)
 
 
-def _choose(device, variant, runtime="auto"):
-    """What ``auto`` (or *runtime*) resolves to for *variant* with the family's own tables."""
-    from mozo.registry import DERIVES, PREFERS
-
-    return select_runtime(device, artifacts(FAMILY, variant), runtime,
-                          derives=DERIVES[FAMILY], prefers=PREFERS[FAMILY])
-
 
 def _assert_matches(want, got, box_tolerance: float, mask_iou: float) -> None:
     """The same detections from another runtime: classes in order, boxes and masks close."""
@@ -65,16 +57,6 @@ def _assert_matches(want, got, box_tolerance: float, mask_iou: float) -> None:
     for x, y in zip(want, got):
         if x.masks is not None:
             assert _mask_iou(x.masks[0], y.masks[0]) >= mask_iou
-
-
-def _assert_keeps_confident(want, got) -> None:
-    """Every detection torch is sure of (*want*, at 0.7) has a same-class partner within 5 px in
-    a reduced-precision runtime's answer (*got*, at 0.4)."""
-    assert len(want) > 0
-    for found in want:
-        nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))
-        assert nearest.class_name == found.class_name
-        assert float(np.abs(np.subtract(nearest.bbox, found.bbox)).max()) < 5.0
 
 
 @pytest.fixture(scope="module")
@@ -277,7 +259,7 @@ class TestRuntimes:
 
         require_weights(FAMILY, "street-nano")
         monkeypatch.setitem(runtimes._REQUIRES, "onnx", "no_such_module_for_this_test")
-        assert _choose("cpu", "street-nano") == "torch-fp32"
+        assert choose(FAMILY, "cpu", "street-nano") == "torch-fp32"
 
     @pytest.mark.parametrize("variant", ALL)
     def test_onnx_gives_the_torch_answer(self, predictor_for, image, variant):
@@ -297,15 +279,15 @@ class TestTensorRT:
         require_weights(FAMILY, "street-nano", "onnx-fp16")
         monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: True)
         for variant in ALL:
-            assert _choose("cuda", variant) == "tensorrt-fp16", variant
-            assert _choose("cuda", variant, "tensorrt-fp32") == "tensorrt-fp32", variant
+            assert choose(FAMILY, "cuda", variant) == "tensorrt-fp16", variant
+            assert choose(FAMILY, "cuda", variant, "tensorrt-fp32") == "tensorrt-fp32", variant
 
     def test_without_tensorrt_cuda_stays_on_torch(self, monkeypatch):
         import mozo.runtimes as runtimes
 
         require_weights(FAMILY, "street-nano", "onnx-fp32")
         monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: False)
-        assert _choose("cuda", "street-nano") == "torch-fp32"
+        assert choose(FAMILY, "cuda", "street-nano") == "torch-fp32"
 
     @staticmethod
     def _on_cuda(predictor_for, variant, runtime):
@@ -330,7 +312,7 @@ class TestTensorRT:
     def test_the_fp16_engine_keeps_the_confident_detections(self, predictor_for, image):
         engine = self._on_cuda(predictor_for, "street-nano", "tensorrt-fp16")
         got = engine.predict(image, threshold=0.4)
-        _assert_keeps_confident(predictor_for("street-nano").predict(image, threshold=0.7), got)
+        assert_keeps_confident(predictor_for("street-nano").predict(image, threshold=0.7), got)
 
 
 class TestCoreML:
@@ -341,8 +323,8 @@ class TestCoreML:
         pytest.importorskip("coremltools")
         require_weights(FAMILY, "street-nano", "coreml-fp16")
         for variant in ALL:
-            assert _choose("mps", variant) == "coreml-fp16", variant
-            assert _choose("mps", variant, "coreml-fp32") == "coreml-fp32", variant
+            assert choose(FAMILY, "mps", variant) == "coreml-fp16", variant
+            assert choose(FAMILY, "mps", variant, "coreml-fp32") == "coreml-fp32", variant
 
     @staticmethod
     def _on_mps(predictor_for, variant, runtime):
@@ -358,7 +340,7 @@ class TestCoreML:
     def test_the_fp16_package_keeps_the_confident_detections(self, predictor_for, image):
         package = self._on_mps(predictor_for, "street-nano", "coreml-fp16")
         got = package.predict(image, threshold=0.4)
-        _assert_keeps_confident(predictor_for("street-nano").predict(image, threshold=0.7), got)
+        assert_keeps_confident(predictor_for("street-nano").predict(image, threshold=0.7), got)
 
     @pytest.mark.parametrize("variant", ["street-nano", "street-seg-nano"])
     def test_the_fp32_package_matches_torch(self, predictor_for, image, variant):

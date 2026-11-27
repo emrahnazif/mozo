@@ -17,13 +17,11 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import as_pixelflow_reports, published, require_weights
-from mozo.registry import DERIVES, EXECUTES, MODEL_REGISTRY, NEEDS, PREFERS
-from mozo.runtimes import select_runtime
+from conftest import assert_keeps_confident, choose, as_pixelflow_reports, published, require_weights
+from mozo.registry import DERIVES, MODEL_REGISTRY, NEEDS
 from mozo.vendors.omdet_turbo_deploy import SPECS, VARIANTS
 from mozo.vendors.omdet_turbo_deploy.predictor import task_sentence
 from mozo.vendors.omdet_turbo_deploy.text.tokenizer import Tokenizer
-from mozo.weights import artifacts
 
 FAMILY = "omdet_turbo"
 
@@ -90,25 +88,21 @@ def test_what_is_published_is_what_the_registry_derives_from():
 # --- runtimes, as measured ---
 
 
-def _choose(device, runtime="auto"):
-    return select_runtime(device, artifacts(FAMILY, "tiny"), runtime, executes=EXECUTES[FAMILY],
-                          derives=DERIVES[FAMILY], prefers=PREFERS[FAMILY])
-
 
 def test_auto_takes_the_fp16_engine_on_cuda_when_tensorrt_is_usable(monkeypatch):
     import mozo.runtimes as runtimes
 
     require_weights(FAMILY, "tiny", "onnx-fp16")
     monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: True)
-    assert _choose("cuda") == "tensorrt-fp16"
-    assert _choose("cuda", "tensorrt-fp32") == "tensorrt-fp32"
+    assert choose(FAMILY, "cuda", "tiny") == "tensorrt-fp16"
+    assert choose(FAMILY, "cuda", "tiny", "tensorrt-fp32") == "tensorrt-fp32"
     monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: False)
-    assert _choose("cuda") == "torch-fp32"
+    assert choose(FAMILY, "cuda", "tiny") == "torch-fp32"
 
 
 def test_auto_stays_on_torch_on_the_cpu():
     require_weights(FAMILY, "tiny", "onnx-fp32")
-    assert _choose("cpu") == "torch-fp32"
+    assert choose(FAMILY, "cpu", "tiny") == "torch-fp32"
 
 
 # --- the prompt contract ---
@@ -261,12 +255,6 @@ def test_the_fp32_engine_finds_what_torch_finds(image):
 
 
 def test_the_fp16_engine_keeps_the_confident_detections(image):
-    import numpy as np
-
     want = _on_cuda("torch-fp32").predict(image, PROMPTS, threshold=0.5)
     got = _on_cuda("tensorrt-fp16").predict(image, PROMPTS, threshold=0.3)
-    assert len(want) > 0
-    for found in want:
-        nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))
-        assert nearest.class_name == found.class_name
-        assert float(np.abs(np.subtract(nearest.bbox, found.bbox)).max()) < 5.0
+    assert_keeps_confident(want, got)

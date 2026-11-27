@@ -67,6 +67,30 @@ def published(family: str, variant: str) -> list[str]:
         return []
 
 
+def choose(family: str, device: str, variant: str, runtime: str = "auto") -> str:
+    """What ``auto`` (or *runtime*) resolves to for *variant*, with the family's own registry
+    tables -- what its adapter passes ``select_runtime`` -- read from the manifest alone."""
+    from mozo.registry import DERIVES, EXECUTES, PREFERS
+    from mozo.runtimes import select_runtime
+    from mozo.weights import artifacts
+
+    return select_runtime(device, artifacts(family, variant), runtime,
+                          executes=EXECUTES.get(family), derives=DERIVES.get(family),
+                          prefers=PREFERS.get(family))
+
+
+def assert_keeps_confident(want, got) -> None:
+    """Every detection the reference is sure of (*want*, at a high threshold) has a same-class
+    partner within 5 px in a reduced-precision runtime's answer (*got*, at a lower one)."""
+    import numpy as np
+
+    assert len(want) > 0
+    for found in want:
+        nearest = min(got, key=lambda g: float(np.abs(np.subtract(g.bbox, found.bbox)).max()))
+        assert nearest.class_name == found.class_name
+        assert float(np.abs(np.subtract(nearest.bbox, found.bbox)).max()) < 5.0
+
+
 def require_weights(family: str, variant: str, runtime: str = "torch-fp32") -> None:
     """Skip unless *variant* publishes *runtime*."""
     if runtime not in published(family, variant):

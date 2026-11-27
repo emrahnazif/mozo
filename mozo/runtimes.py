@@ -420,10 +420,11 @@ class CoreMLRunner:
     That the default is safe is a property of what mozo publishes, not of CoreML. The ANE is not
     always neutral: SAM 3's vision encoder at fp16 runs 750 ms on CPU_AND_GPU, 1826 ms on ALL,
     and did not finish a single pass in two minutes on CPU_AND_NE -- offered the ANE, it takes
-    segments and loses badly. Every CoreML artifact published here is fp32, which the ANE cannot
-    execute at all, so every one of them is scheduled the same way however this is set. A family
-    that wanted fp16 would need this class to grow a compute-units argument first; see
-    ``tools/export/sam3.py`` for why none does.
+    segments and loses badly. Most CoreML artifacts published here are fp32, which the ANE cannot
+    execute at all, so they are scheduled the same way however this is set. Mayaku's fp16 packages
+    were measured under this default and gain from the ANE: street-nano runs 5.1 ms on ALL against
+    8.6 ms on CPU_AND_GPU (M1 Max). A family whose fp16 lost on the ANE, as SAM 3's encoder does,
+    would need a compute-units argument here first; see ``tools/export/sam3.py``.
 
     Args:
         path: The package, or the zip it travels as.

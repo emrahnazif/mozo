@@ -616,6 +616,16 @@
               "sha256": "4dc258788f39fb9829e5904dcc2107b6a2a4e4bbfcf983c7c6d2e1da6e327102",
               "size": 1342
             },
+            "coreml-fp16": {
+              "path": "mayaku/street-medium/2026-11-24/coreml-fp16.zip",
+              "sha256": "f1f90425d7b4810cab4f22838120c6f37adcdeb41ae2f6cd888a84964dfff8ad",
+              "size": 60287516
+            },
+            "coreml-fp32": {
+              "path": "mayaku/street-medium/2026-11-24/coreml-fp32.zip",
+              "sha256": "0f58b0af5bbd1ef3c445e1045fec791ca0e7b1e5696af4041aad6d08b4df44d9",
+              "size": 120543934
+            },
             "labels": {
               "path": "mayaku/street-medium/2026-11-24/labels.json",
               "sha256": "5cb3284cc107cf8640d3cb16ea821f355ada3e8d87d31a4fbc64ed1d09c82b3b",
@@ -655,6 +665,16 @@
               "path": "mayaku/street-nano/2026-11-24/NOTICE",
               "sha256": "8661611958a80c848b031a8d73bee06b996015b6145f2ed33ac4ae76d2694b5b",
               "size": 1340
+            },
+            "coreml-fp16": {
+              "path": "mayaku/street-nano/2026-11-24/coreml-fp16.zip",
+              "sha256": "ad1650e6643e330c1bc216706fb6ad41ce6ab0f4c19fe5bf8686be670db75339",
+              "size": 9657699
+            },
+            "coreml-fp32": {
+              "path": "mayaku/street-nano/2026-11-24/coreml-fp32.zip",
+              "sha256": "2d9f03a3a5860dcdb0971409391489d5bcd4b09b2e31072b0d26ce63b0d9531d",
+              "size": 19293357
             },
             "labels": {
               "path": "mayaku/street-nano/2026-11-24/labels.json",
@@ -696,6 +716,16 @@
               "sha256": "82f3be0a38a9df4db84604a714fb5b0e574b28e939b78c1dd9997fef58c19544",
               "size": 1346
             },
+            "coreml-fp16": {
+              "path": "mayaku/street-seg-medium/2026-11-24/coreml-fp16.zip",
+              "sha256": "e2a9933dfd1b11c6c0dc154c3e2b0715bef789879281f33d38b46d8256155e2a",
+              "size": 60793798
+            },
+            "coreml-fp32": {
+              "path": "mayaku/street-seg-medium/2026-11-24/coreml-fp32.zip",
+              "sha256": "be003e69e161c26322a03fcb5d4ef0b737e47b6080fdc1eb5769644c6a549695",
+              "size": 121551791
+            },
             "labels": {
               "path": "mayaku/street-seg-medium/2026-11-24/labels.json",
               "sha256": "5cb3284cc107cf8640d3cb16ea821f355ada3e8d87d31a4fbc64ed1d09c82b3b",
@@ -735,6 +765,16 @@
               "path": "mayaku/street-seg-nano/2026-11-24/NOTICE",
               "sha256": "71f50e8eec370675774afade456dd73ff685cb2796e40ad4a150d90d0899031b",
               "size": 1344
+            },
+            "coreml-fp16": {
+              "path": "mayaku/street-seg-nano/2026-11-24/coreml-fp16.zip",
+              "sha256": "ca4ebe5e00b6b5c16263135a4de741b88082bed9cf15047060753a7019e24f19",
+              "size": 9857432
+            },
+            "coreml-fp32": {
+              "path": "mayaku/street-seg-nano/2026-11-24/coreml-fp32.zip",
+              "sha256": "93573706f216fbba5da5a8d75349e19109a1e375ba40c1648a33b26958339e04",
+              "size": 19689541
             },
             "labels": {
               "path": "mayaku/street-seg-nano/2026-11-24/labels.json",

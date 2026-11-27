@@ -12,8 +12,10 @@
   the fastest runtime that measured as accurate: on CUDA with TensorRT 11 or later an fp16 engine,
   2.5 to 3.4 times faster than torch, which changed no confident detection in 500 street images
   and moved AP by at most 0.1 (`runtime="tensorrt-fp32"` gives torch's detections exactly, 1.4 to
-  1.9 times faster); on the CPU, with `mozo[onnx]` installed, ONNX Runtime, about twice as fast
-  as torch with the same detections. A `mayaku` workflow node comes with it.
+  1.9 times faster); on Apple silicon, with `mozo[coreml]` installed, an fp16 Core ML package on the
+  Neural Engine, 2 to 4.7 times faster than torch MPS, changing at most 1 of about 1,500 confident
+  detections (`coreml-fp32` matches torch); on the CPU, with `mozo[onnx]` installed, ONNX Runtime,
+  about twice as fast as torch with the same detections. A `mayaku` workflow node comes with it.
   Later Mayaku models will join the same family as further variants.
 - **`mozo.runtimes.select_runtime` takes `prefers=`**: runtimes to try first for `auto`, by device
   type (`{"cuda": ("tensorrt-fp16",)}`). Families whose faster runtime measured as accurate list it

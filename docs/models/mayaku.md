@@ -94,9 +94,10 @@ checkpoint's order (`person` is 0, `face` is 14, `license plate` is 8).
 ### Runtimes
 
 `runtime="auto"` picks the fastest runtime that measured as accurate as torch: the **fp16
-TensorRT engine** on CUDA when TensorRT 11 or later is installed, and on the CPU **ONNX Runtime**
-when it is installed (`pip install 'mozo[onnx]'`), about twice as fast as torch with the same
-detections. Without them it runs torch. Name a runtime to choose another:
+TensorRT engine** on CUDA when TensorRT 11 or later is installed, the **fp16 Core ML package** on
+Apple silicon (`pip install 'mozo[coreml]'`), and on the CPU **ONNX Runtime** when it is installed
+(`pip install 'mozo[onnx]'`), about twice as fast as torch with the same detections. Without them
+it runs torch. Name a runtime to choose another:
 
 ```python
 from mozo import ModelManager
@@ -127,6 +128,20 @@ Speed-ups on CUDA are against torch CUDA. With TensorRT 11 or later installed
 it changed no confident detection on these 500 images and moved AP by at most 0.1, at 1.5–2.4× the
 fp32 engine. `runtime="tensorrt-fp32"` builds from the fp32 graph and finds exactly what torch
 finds, AP identical. Without TensorRT, `auto` stays on torch.
+
+On Apple silicon (M1 Max, coremltools 9), against torch fp32 on the CPU over 301 photographs (the
+fixtures and 300 COCO val2017 images; street-val AP was not measured on the Mac), graph-only median:
+
+| Variant | torch CPU | torch MPS | `coreml-fp32` | `coreml-fp16` (`auto`) |
+|---|---|---|---|---|
+| `street-nano` | 71 ms | 23.8 ms | 8.8 ms, 0 changes | 5.1 ms, 4.7×, 1 change of 1,455 |
+| `street-medium` | 180 ms | 45.0 ms | 26.9 ms, 0 | 22.5 ms, 2.0×, 0 of 1,741 |
+| `street-seg-nano` | 77 ms | 26.1 ms | 8.9 ms, 0 | 6.1 ms, 4.3×, 1 of 1,455 |
+| `street-seg-medium` | 208 ms | 48.6 ms | 28.3 ms, 0 | 24.3 ms, 2.0×, 0 of 1,741 |
+
+Speed-ups are against torch MPS. The fp16 packages (10–61 MB) run on the Neural Engine; the fp32
+ones (19–122 MB) on the GPU, with boxes within 0.002 px of torch and masks overlapping at least
+0.998.
 
 The graph is the five op types and nothing else: Conv, Relu, Add, nearest Resize and MaxPool.
 

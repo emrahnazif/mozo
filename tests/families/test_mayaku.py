@@ -332,3 +332,36 @@ class TestTensorRT:
         got = engine.predict(image, threshold=0.4)
         _assert_keeps_confident(predictor_for("street-nano").predict(image, threshold=0.7), got)
 
+
+class TestCoreML:
+    """On Apple silicon: the fp16 package chosen by ``auto`` (``registry.PREFERS``), fp32 exact
+    to the export tool's tolerances. CoreML runs on ``mps`` only."""
+
+    def test_auto_picks_the_fp16_package_on_apple_silicon(self):
+        pytest.importorskip("coremltools")
+        require_weights(FAMILY, "street-nano", "coreml-fp16")
+        for variant in ALL:
+            assert _choose("mps", variant) == "coreml-fp16", variant
+            assert _choose("mps", variant, "coreml-fp32") == "coreml-fp32", variant
+
+    @staticmethod
+    def _on_mps(predictor_for, variant, runtime):
+        pytest.importorskip("coremltools")
+        torch = pytest.importorskip("torch")
+        if not torch.backends.mps.is_available():
+            pytest.skip("needs Apple silicon")
+        require_weights(FAMILY, variant, runtime)
+        return predictor_for(variant, runtime, "mps")
+
+    # Before the fp32 tests, so street-nano's predictors are built once (the fixture keeps one
+    # variant at a time).
+    def test_the_fp16_package_keeps_the_confident_detections(self, predictor_for, image):
+        package = self._on_mps(predictor_for, "street-nano", "coreml-fp16")
+        got = package.predict(image, threshold=0.4)
+        _assert_keeps_confident(predictor_for("street-nano").predict(image, threshold=0.7), got)
+
+    @pytest.mark.parametrize("variant", ["street-nano", "street-seg-nano"])
+    def test_the_fp32_package_matches_torch(self, predictor_for, image, variant):
+        got = self._on_mps(predictor_for, variant, "coreml-fp32").predict(image, threshold=0.05)
+        want = predictor_for(variant).predict(image, threshold=0.05)
+        _assert_matches(want, got, BOX_TOLERANCE, 0.998)

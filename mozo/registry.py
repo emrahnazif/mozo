@@ -141,8 +141,10 @@ DERIVES: dict[str, dict[str, str]] = {
 PREFERS: dict[str, dict[str, tuple[str, ...]]] = {
     # RTX 3090, 500 street-validation images per variant: the fp16 engine changed no confident
     # detection and moved box/mask AP by at most 0.1, at 1.5-2.4x the fp32 engine. On the CPU,
-    # ONNX Runtime runs the same exact graph 1.9-2.3x faster than torch (i9-10900X).
-    "mayaku": {"cuda": ("tensorrt-fp16",), "cpu": ("onnx-fp32",)},
+    # ONNX Runtime runs the same exact graph 1.9-2.3x faster than torch (i9-10900X). On Apple
+    # silicon (M1 Max, 301 photographs), the Core ML fp16 package changed at most 1 of ~1,500
+    # confident detections, at 1.9-4.7x torch MPS (5.1 against 23.8 ms for street-nano).
+    "mayaku": {"cuda": ("tensorrt-fp16",), "cpu": ("onnx-fp32",), "mps": ("coreml-fp16",)},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``
@@ -161,7 +163,7 @@ NEEDS: dict[str, dict[str, tuple[str, ...]]] = {
     **{family: {"onnx": ("labels",), "coreml": ("labels",)}
        for family in ("yolov8", "yolov11", "yolov12", "yolov26")},
     "rfdetr": {"*": ("labels",)},
-    "mayaku": {"onnx": ("labels",), "tensorrt": ("labels",)},
+    "mayaku": {"onnx": ("labels",), "tensorrt": ("labels",), "coreml": ("labels",)},
     "vitpose": {"*": ("labels",)},
     "sam3": {"onnx": ("torch-fp32",), "coreml": ("torch-fp32",)},
     "owlv2": {"onnx": ("torch-fp32",), "tensorrt": ("torch-fp32",)},

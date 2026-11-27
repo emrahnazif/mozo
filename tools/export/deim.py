@@ -168,14 +168,23 @@ def _check(model, runner, size, fp16: bool) -> None:
         raise SystemExit("not published, the graph disagrees with torch:\n  " + "\n  ".join(problems))
 
 
-def export_variant(variant: str, revision: str, weights_dir: Path, fp16: bool) -> None:
+def _model(variant: str, revision: str, weights_dir: Path):
+    """The variant's deploy-form network, its input size, and the revision directory to write to."""
     directory = weights_dir / FAMILY / variant / revision
     checkpoint = directory / "torch-fp32.pth"
     if not checkpoint.is_file():
         raise SystemExit(f"{checkpoint} is missing. Run tools/fetch/{FAMILY}.py {variant} first.")
+    return load(variant, checkpoint), get_spec(variant).size, directory
+
+
+def _wrote(path: Path) -> None:
+    print(f"  wrote {path.name}, {path.stat().st_size / 1e6:.1f} MB")
+
+
+def export_variant(variant: str, revision: str, weights_dir: Path, fp16: bool) -> None:
     if fp16 and not torch.cuda.is_available():
         raise SystemExit("the fp16 graph is exported on CUDA, under fp16 autocast")
-    model, size = load(variant, checkpoint), get_spec(variant).size
+    model, size, directory = _model(variant, revision, weights_dir)
     key = "onnx-fp16" if fp16 else "onnx-fp32"
     print(f"{FAMILY}/{variant} -> {key}")
     with tempfile.TemporaryDirectory(dir=directory) as staging:
@@ -184,17 +193,13 @@ def export_variant(variant: str, revision: str, weights_dir: Path, fp16: bool) -
         require_one_file(staged)
         _check(model, OnnxRunner(staged, device="cpu"), size, fp16)
         staged.replace(directory / f"{key}.onnx")
-    print(f"  wrote {key}.onnx, {(directory / f'{key}.onnx').stat().st_size / 1e6:.1f} MB")
+    _wrote(directory / f"{key}.onnx")
 
 
 def export_coreml(variant: str, revision: str, weights_dir: Path) -> None:
     from mozo.runtimes import CoreMLRunner
 
-    directory = weights_dir / FAMILY / variant / revision
-    checkpoint = directory / "torch-fp32.pth"
-    if not checkpoint.is_file():
-        raise SystemExit(f"{checkpoint} is missing. Run tools/fetch/{FAMILY}.py {variant} first.")
-    model, size = load(variant, checkpoint), get_spec(variant).size
+    model, size, directory = _model(variant, revision, weights_dir)
     print(f"{FAMILY}/{variant} -> coreml-fp32")
     with tempfile.TemporaryDirectory(dir=directory) as staging:
         package = Path(staging) / "coreml-fp32.mlpackage"
@@ -202,7 +207,7 @@ def export_coreml(variant: str, revision: str, weights_dir: Path) -> None:
         _check(model, CoreMLRunner(package), size, fp16=False)
         archive = shutil.make_archive(str(Path(staging) / "coreml-fp32"), "zip", root_dir=package)
         Path(archive).replace(directory / "coreml-fp32.zip")
-    print(f"  wrote coreml-fp32.zip, {(directory / 'coreml-fp32.zip').stat().st_size / 1e6:.1f} MB")
+    _wrote(directory / "coreml-fp32.zip")
 
 
 def main() -> int:

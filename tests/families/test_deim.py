@@ -47,6 +47,21 @@ def _worst(want, got) -> float:
                default=0.0)
 
 
+def _assert_matches(want, got, tolerance: float) -> None:
+    """The same detections from another runtime: as many, the same classes in order, boxes close."""
+    assert len(want) == len(got) > 0
+    assert [d.class_id for d in want] == [d.class_id for d in got]
+    assert _worst(want, got) <= tolerance
+
+
+def _choose(device, variant, runtime="auto"):
+    """What ``auto`` (or *runtime*) resolves to for *variant* with the family's own tables."""
+    from mozo.registry import DERIVES, PREFERS
+
+    return select_runtime(device, artifacts(FAMILY, variant), runtime,
+                          derives=DERIVES[FAMILY], prefers=PREFERS[FAMILY])
+
+
 @pytest.fixture(scope="module")
 def predictor_for():
     """Predictors built once per (variant, runtime), dropped when the variant changes."""
@@ -223,7 +238,7 @@ class TestRuntimes:
 
         require_weights(FAMILY, "nano")
         monkeypatch.setitem(runtimes._REQUIRES, "onnx", "no_such_module_for_this_test")
-        assert TestTensorRT._choose("cpu", "nano") == "torch-fp32"
+        assert _choose("cpu", "nano") == "torch-fp32"
 
     @pytest.mark.parametrize("variant", ALL)
     def test_onnx_gives_the_torch_answer(self, predictor_for, image, variant):
@@ -231,19 +246,11 @@ class TestRuntimes:
         pytest.importorskip("onnxruntime")
         want = predictor_for(variant).predict(image)
         got = predictor_for(variant, "onnx-fp32").predict(image)
-        assert [d.class_id for d in want] == [d.class_id for d in got]
-        assert _worst(want, got) <= BOX_TOLERANCE
+        _assert_matches(want, got, BOX_TOLERANCE)
 
 
 class TestTensorRT:
     """On CUDA: the fp16 engine chosen by ``auto`` where its graph is published, else fp32."""
-
-    @staticmethod
-    def _choose(device, variant, runtime="auto"):
-        from mozo.registry import DERIVES, PREFERS
-
-        return select_runtime(device, artifacts(FAMILY, variant), runtime,
-                              derives=DERIVES[FAMILY], prefers=PREFERS[FAMILY])
 
     def test_auto_picks_the_fp16_engine_on_cuda_where_published(self, monkeypatch):
         import mozo.runtimes as runtimes
@@ -252,18 +259,18 @@ class TestTensorRT:
         monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: True)
         for variant in ALL:
             want = "tensorrt-fp16" if variant in FP16 else "tensorrt-fp32"
-            assert self._choose("cuda", variant) == want, variant
-            assert self._choose("cuda", variant, "tensorrt-fp32") == "tensorrt-fp32", variant
+            assert _choose("cuda", variant) == want, variant
+            assert _choose("cuda", variant, "tensorrt-fp32") == "tensorrt-fp32", variant
         with pytest.raises(Exception, match="not published"):
-            self._choose("cuda", "nano", "tensorrt-fp16")
-        assert self._choose("cpu", "nano") == "onnx-fp32"
+            _choose("cuda", "nano", "tensorrt-fp16")
+        assert _choose("cpu", "nano") == "onnx-fp32"
 
     def test_without_tensorrt_cuda_stays_on_torch(self, monkeypatch):
         import mozo.runtimes as runtimes
 
         require_weights(FAMILY, "nano", "onnx-fp32")
         monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: False)
-        assert self._choose("cuda", "nano") == "torch-fp32"
+        assert _choose("cuda", "nano") == "torch-fp32"
 
     @staticmethod
     def _on_cuda(predictor_for, variant, runtime):
@@ -282,9 +289,7 @@ class TestTensorRT:
         """Against torch on the CPU: the engine is built with TF32 off, so it is IEEE fp32."""
         want = predictor_for("nano").predict(image)
         got = self._on_cuda(predictor_for, "nano", "tensorrt-fp32").predict(image)
-        assert len(want) == len(got) > 0
-        assert [d.class_id for d in want] == [d.class_id for d in got]
-        assert _worst(want, got) <= 0.1
+        _assert_matches(want, got, 0.1)
 
     def test_the_fp16_engine_keeps_the_confident_detections(self, predictor_for, image):
         want = predictor_for("small").predict(image, threshold=0.7)
@@ -305,7 +310,7 @@ class TestCoreML:
         pytest.importorskip("coremltools")
         require_weights(FAMILY, "nano", "coreml-fp32")
         for variant in ALL:
-            assert TestTensorRT._choose("mps", variant) == "coreml-fp32", variant
+            assert _choose("mps", variant) == "coreml-fp32", variant
 
     @pytest.mark.parametrize("variant", ["nano", "small"])
     def test_the_package_matches_torch(self, predictor_for, image, variant):
@@ -315,7 +320,4 @@ class TestCoreML:
             pytest.skip("needs Apple silicon")
         require_weights(FAMILY, variant, "coreml-fp32")
         got = predictor_for(variant, "coreml-fp32", "mps").predict(image)
-        want = predictor_for(variant).predict(image)
-        assert len(want) == len(got) > 0
-        assert [d.class_id for d in want] == [d.class_id for d in got]
-        assert _worst(want, got) <= BOX_TOLERANCE
+        _assert_matches(predictor_for(variant).predict(image), got, BOX_TOLERANCE)

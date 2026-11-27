@@ -376,12 +376,14 @@ found traps it had not predicted, and the predicted ones were mostly real.
 - **Second passes are part of the model.** EasyOCR re-runs low-contrast crops and keeps the better
   read.
 - **The decode runs where upstream's runs, and PixelFlow's rounding hides it when it doesn't.**
-  DEIM's upstream decodes (sigmoid, top-k) on the device its network ran on; mozo's adapter copied
-  the raw outputs to the host first. CUDA's `sigmoid` is not the CPU's in the last bit (about a
-  quarter of the 24,000 logits per image, up to 6e-08), so the 300 scores differed on every image
-  and on one the top-k order changed too -- yet the gate's mozo check, which compared PixelFlow's
-  rows (two or three decimals), passed every one. Compare the arrays the adapter hands to
-  `pf.detections.from_arrays` exactly (spy on it), not only the rows it gives back.
+  CUDA's `sigmoid` is not the CPU's in the last bit, so a vendor that copies logits to the host
+  before the decode passes the CPU gate and fails the GPU one while every model stage matches.
+  DEIM: about a quarter of the 24,000 logits per image moved (up to 6e-08), the 300 scores
+  differed on every image and on one the top-k order changed. MM-Grounding-DINO: 5.96e-08 on its
+  scores (RTX 3060). Max, comparisons and a single IEEE add or multiply give the same bits on
+  either device; `exp`, `sigmoid`, `log` and friends do not. DEIM's gate check compared
+  PixelFlow's rows (two or three decimals) and passed every one: compare the arrays the adapter
+  hands to `pf.detections.from_arrays` exactly (spy on it), not only the rows it gives back.
 
 - **`torchvision.ops.batched_nms` separates classes by `max + 1`.** For up to 1,000 boxes on the
   CPU it offsets each class by the largest coordinate plus one, which stops separating once boxes
@@ -391,11 +393,6 @@ found traps it had not predicted, and the predicted ones were mostly real.
 - **Stale `.pyc` on the CIFS share.** An edit to `mozo/__init__.py` kept serving the old
   docstring until `__pycache__` was deleted. When a test reads text you just changed and disagrees,
   clear the cache before believing it.
-- **A transcendental in the decode runs where upstream runs it.** CUDA's `sigmoid` and the CPU's
-  differ in the last bit (5.96e-08 on MM-Grounding-DINO's scores, RTX 3060), so a vendor that
-  copies the logits to the host before the sigmoid passes the CPU gate and fails the GPU one,
-  while every model stage still matches. Max, comparisons, and a single IEEE add or multiply
-  give the same bits on either device; `exp`, `sigmoid`, `log` and friends do not.
 
 ### Things that are upstream's behaviour, not bugs to fix
 

@@ -64,7 +64,7 @@
   endpoint and result, and much stronger on uncommon objects: 44.7, 48.3 and 51.1 AP on LVIS
   minival zero-shot by the authors' numbers, where Grounding DINO `tiny` scores 28.8. Code and
   weights are Apache-2.0. Bit-identical to `transformers` 4.57 on every stage, on CUDA in fp32
-  and in the fp16 that `auto` runs there (RTX 3060, torch 2.13, CUDA 12.6), and on the CPU; `transformers` 5
+  and fp16 (RTX 3060, torch 2.13, CUDA 12.6) and on the CPU; `transformers` 5
   loads these checkpoints wrongly (every decoder layer runs the first layer's box head), and mozo
   does not. On CUDA `auto` runs it in fp16, 1.5–1.6 times faster with the same COCO AP. No TensorRT runtime:
   measured, its engines moved 3–6% of detections where torch fp16 moves almost none. A workflow node, `mm_grounding_dino`, comes with it.

@@ -141,6 +141,11 @@
               "sha256": "c94c754515e59eba0267c8535724723f453f46f4a11bff93b747746ea5242fad",
               "size": 1190
             },
+            "coreml-fp32": {
+              "path": "deim/large/2026-11-25/coreml-fp32.zip",
+              "sha256": "fa05d15e809370e44f560de8362b45e62d6c5f7a10f07fb59588e9bcd027fc6c",
+              "size": 114419965
+            },
             "labels": {
               "path": "deim/large/2026-11-25/labels.json",
               "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
@@ -180,6 +185,11 @@
               "path": "deim/medium/2026-11-25/NOTICE",
               "sha256": "df36e0a3ce88a259420bdf3e1de16c06d07e68f345b5e4aee82c158b0c7d5c13",
               "size": 1191
+            },
+            "coreml-fp32": {
+              "path": "deim/medium/2026-11-25/coreml-fp32.zip",
+              "sha256": "51bac4f9b0f1900181af51a82fd6a43bb8a4200109ab37924c05172636e29295",
+              "size": 71614329
             },
             "labels": {
               "path": "deim/medium/2026-11-25/labels.json",
@@ -221,6 +231,11 @@
               "sha256": "cc4ef4f4b302a9a3ac7c624cc3d7342964bd801759eb504ba5410405c404d30f",
               "size": 1190
             },
+            "coreml-fp32": {
+              "path": "deim/nano/2026-11-25/coreml-fp32.zip",
+              "sha256": "4ea9a41e6a643c3fce569a19695a632a69df054bad6ce8e3ecb4caad2000c7e2",
+              "size": 13976968
+            },
             "labels": {
               "path": "deim/nano/2026-11-25/labels.json",
               "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
@@ -255,6 +270,11 @@
               "path": "deim/small/2026-11-25/NOTICE",
               "sha256": "640f907ff08fe0f3f158db189b26e9ce1205f528c954d5f177e71885468ffc75",
               "size": 1191
+            },
+            "coreml-fp32": {
+              "path": "deim/small/2026-11-25/coreml-fp32.zip",
+              "sha256": "a3ca460952f7512790341541a740c683475b092c356da7888231f00a237eee19",
+              "size": 38091823
             },
             "labels": {
               "path": "deim/small/2026-11-25/labels.json",
@@ -296,6 +316,11 @@
               "sha256": "807b93c266da460b50ee2e54a60d157d870a7f9fe8a39035b57571f99c396774",
               "size": 1191
             },
+            "coreml-fp32": {
+              "path": "deim/xlarge/2026-11-25/coreml-fp32.zip",
+              "sha256": "bf26cf2d0c56d612ac89037f10534e22e9ed090dc126deacd1d55310ba9ecdd3",
+              "size": 229558975
+            },
             "labels": {
               "path": "deim/xlarge/2026-11-25/labels.json",
               "sha256": "94a69cf9b9ba18709862419234bfc9eeabee53bbe79f5b7718c3a32fbe861173",
@@ -335,6 +360,11 @@
               "path": "deim/xlarge-obj365/2026-11-25/NOTICE",
               "sha256": "f56ea6ffdb64090fe0015c0c67e66fc3e24bb5c32b75123e6da31f72c4c7be0a",
               "size": 1250
+            },
+            "coreml-fp32": {
+              "path": "deim/xlarge-obj365/2026-11-25/coreml-fp32.zip",
+              "sha256": "1da14a981c659601fc7197c89333cf837fa259e49770d0bff41ec9a709fece5d",
+              "size": 229620051
             },
             "labels": {
               "path": "deim/xlarge-obj365/2026-11-25/labels.json",

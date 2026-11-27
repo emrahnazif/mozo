@@ -42,7 +42,9 @@
   about 3,000 confident detections on 500 COCO images per variant and moved AP by at most 0.12.
   `nano`, whose fp16 engine was slower, gets the fp32 engine (5.4 times torch). The fp32 engine
   (`runtime="tensorrt-fp32"`) changed no detection on any variant. On the CPU, with `mozo[onnx]`
-  installed, `auto` runs ONNX Runtime: the same detections, 1.8 to 3.3 times faster than torch. On the CPU,
+  installed, `auto` runs ONNX Runtime: the same detections, 1.8 to 3.3 times faster than torch.
+  On Apple silicon, with `mozo[coreml]` installed, `auto` runs a Core ML package that changed no
+  detection on 301 images, 2.5 to 4.7 times faster than torch MPS. On the CPU,
   `runtime="onnx-fp32"` is faster than torch for most variants and gives the same detections.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when

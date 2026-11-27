@@ -296,3 +296,26 @@ class TestTensorRT:
             assert got[nearest].class_name == found.class_name
             assert distance < 5.0
 
+
+class TestCoreML:
+    """On Apple silicon: ``auto`` takes the Core ML fp32 package (the shared order puts it first
+    on ``mps``), held to the export tool's fp32 tolerances. No fp16 package is published."""
+
+    def test_auto_picks_the_fp32_package_on_apple_silicon(self):
+        pytest.importorskip("coremltools")
+        require_weights(FAMILY, "nano", "coreml-fp32")
+        for variant in ALL:
+            assert TestTensorRT._choose("mps", variant) == "coreml-fp32", variant
+
+    @pytest.mark.parametrize("variant", ["nano", "small"])
+    def test_the_package_matches_torch(self, predictor_for, image, variant):
+        pytest.importorskip("coremltools")
+        torch = pytest.importorskip("torch")
+        if not torch.backends.mps.is_available():
+            pytest.skip("needs Apple silicon")
+        require_weights(FAMILY, variant, "coreml-fp32")
+        got = predictor_for(variant, "coreml-fp32", "mps").predict(image)
+        want = predictor_for(variant).predict(image)
+        assert len(want) == len(got) > 0
+        assert [d.class_id for d in want] == [d.class_id for d in got]
+        assert _worst(want, got) <= BOX_TOLERANCE

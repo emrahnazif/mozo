@@ -20,8 +20,8 @@ A box, a class and a confidence for each object.
 | Family | Variants | Licence | Runtimes | Size |
 |---|---|---|---|---|
 | [RF-DETR](/docs/models/rfdetr.md) | `nano` `small` `medium` `large` | Apache-2.0 | torch, onnx, coreml | 136–405 MB |
-| [Mayaku](/docs/models/mayaku.md) | `street-nano` `street-medium` | Apache-2.0 | torch, onnx, tensorrt | 22–138 MB |
-| [DEIM](/docs/models/deim.md) | `nano` `small` `medium` `large` `xlarge` `xlarge-obj365` | Apache-2.0 | torch, onnx, tensorrt | 16–252 MB |
+| [Mayaku](/docs/models/mayaku.md) | `street-nano` `street-medium` | Apache-2.0 | torch, onnx, coreml, tensorrt | 22–138 MB |
+| [DEIM](/docs/models/deim.md) | `nano` `small` `medium` `large` `xlarge` `xlarge-obj365` | Apache-2.0 | torch, onnx, coreml, tensorrt | 16–252 MB |
 | [YOLOv8](/docs/models/yolov8.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx, coreml | 7–137 MB |
 | [YOLO11](/docs/models/yolov11.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx | 6–115 MB |
 | [YOLO12](/docs/models/yolov12.md) | `nano` `small` `medium` `large` `xlarge` | AGPL-3.0 | torch, onnx, coreml | 6–119 MB |
@@ -35,7 +35,7 @@ masks come back.
 | Family | Variants | Licence | Runtimes | Size |
 |---|---|---|---|---|
 | [RF-DETR](/docs/models/rfdetr.md) | `seg-nano` `seg-small` `seg-medium` `seg-large` | Apache-2.0 | torch, onnx, coreml | 135–145 MB |
-| [Mayaku](/docs/models/mayaku.md) | `street-seg-nano` `street-seg-medium` | Apache-2.0 | torch, onnx, tensorrt | 23–139 MB |
+| [Mayaku](/docs/models/mayaku.md) | `street-seg-nano` `street-seg-medium` | Apache-2.0 | torch, onnx, coreml, tensorrt | 23–139 MB |
 | [YOLO11](/docs/models/yolov11.md) | `seg-nano` `seg-small` `seg-medium` `seg-large` `seg-xlarge` | AGPL-3.0 | torch, onnx | 6–125 MB |
 | [YOLO26](/docs/models/yolov26.md) | `seg-nano` `seg-small` `seg-medium` `seg-large` `seg-xlarge` | AGPL-3.0 | torch, onnx | 7–142 MB |
 

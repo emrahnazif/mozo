@@ -46,7 +46,7 @@ A box, a class and a confidence for each object.
 |---|---|---|---|
 | [RF-DETR](docs/models/rfdetr.md) | nano → large | Apache-2.0 | torch, onnx, coreml; tensorrt on CUDA |
 | [Mayaku](docs/models/mayaku.md) | street-nano, street-medium | Apache-2.0 | torch, onnx, coreml; tensorrt on CUDA |
-| [DEIM](docs/models/deim.md) | nano → xlarge | Apache-2.0 | torch, onnx; tensorrt on CUDA |
+| [DEIM](docs/models/deim.md) | nano → xlarge | Apache-2.0 | torch, onnx, coreml; tensorrt on CUDA |
 | [YOLOv8](docs/models/yolov8.md) | nano → xlarge | AGPL-3.0 | torch, onnx, coreml |
 | [YOLO11](docs/models/yolov11.md) | nano → xlarge | AGPL-3.0 | torch, onnx |
 | [YOLO12](docs/models/yolov12.md) | nano → xlarge | AGPL-3.0 | torch, onnx, coreml |

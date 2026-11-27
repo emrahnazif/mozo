@@ -3,6 +3,7 @@
 
     python tools/export/deim.py nano small medium large xlarge xlarge-obj365
     python tools/export/deim.py nano --fp16          # the fp16 graph, on CUDA
+    python tools/export/deim.py nano --coreml        # the Core ML fp32 package, on a Mac
 
 Bootstrap tooling; never ships. ``onnx-fp32`` is the deploy-form network (``deim_deploy.load``:
 encoder conv+BN fused, deploy-form weighting function) at its one input size, ``1x3x640x640``,
@@ -25,10 +26,17 @@ against the torch module it came from, on the fixture photographs. fp32 must giv
 detections above 0.3, each matched to the graph's same-class detection of highest IoU: boxes within
 0.01 px, scores within 0.001, none unmatched. fp16 must keep every
 confident detection (see :func:`confident_changes`).
+
+``coreml-fp32`` (``--coreml``) is an ML Program package traced from the same network, zipped, input
+``images`` and outputs named as the graph's, checked through Core ML (compute units ALL, as
+:class:`mozo.runtimes.CoreMLRunner` runs it) to the fp32 tolerances. No fp16 package: on an M1 Max
+it ran no faster than fp32 on the GPU and up to 2x slower when Core ML split it onto the Neural
+Engine. It needs the converter fixes in ``_coreml.py``.
 """
 
 from __future__ import annotations
 
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -105,9 +113,34 @@ def _matched(want, got, floor=0.3):
     return box, score, missing
 
 
-def _check(model, path: Path, size, fp16: bool) -> None:
-    """Compare the graph against the torch module through the vendor's decode, image by image."""
-    runner = OnnxRunner(path, device="cpu")
+def _export_coreml(model, package: Path, size: tuple[int, int]) -> None:
+    """Trace the network and save it as an fp32 ML Program, the directory *package*."""
+    import coremltools as ct
+
+    from export import _coreml  # noqa: F401  (registers the converter fixes)
+
+    class Outputs(torch.nn.Module):
+        """The graph's outputs as a tuple in :data:`OUTPUTS` order, as the ONNX graph has them."""
+
+        def __init__(self, network):
+            super().__init__()
+            self.network = network
+
+        def forward(self, x):
+            found = self.network(x)
+            return tuple(found[name] for name in OUTPUTS)
+
+    x = torch.zeros(1, 3, *size)
+    with torch.no_grad():
+        traced = torch.jit.trace(Outputs(model).eval(), x, check_trace=False)
+    ct.convert(traced, inputs=[ct.TensorType(name="images", shape=tuple(x.shape))],
+               outputs=[ct.TensorType(name=name) for name in OUTPUTS], convert_to="mlprogram",
+               minimum_deployment_target=ct.target.macOS13,
+               compute_precision=ct.precision.FLOAT32).save(str(package))
+
+
+def _check(model, runner, size, fp16: bool) -> None:
+    """Compare a graph runner against the torch module through the vendor's decode, image by image."""
 
     def graph(batch):
         found = dict(zip(runner.outputs, runner(batch.numpy())))
@@ -149,17 +182,40 @@ def export_variant(variant: str, revision: str, weights_dir: Path, fp16: bool) -
         staged = Path(staging) / f"{key}.onnx"
         _export(model, staged, size, fp16)
         require_one_file(staged)
-        _check(model, staged, size, fp16)
+        _check(model, OnnxRunner(staged, device="cpu"), size, fp16)
         staged.replace(directory / f"{key}.onnx")
     print(f"  wrote {key}.onnx, {(directory / f'{key}.onnx').stat().st_size / 1e6:.1f} MB")
+
+
+def export_coreml(variant: str, revision: str, weights_dir: Path) -> None:
+    from mozo.runtimes import CoreMLRunner
+
+    directory = weights_dir / FAMILY / variant / revision
+    checkpoint = directory / "torch-fp32.pth"
+    if not checkpoint.is_file():
+        raise SystemExit(f"{checkpoint} is missing. Run tools/fetch/{FAMILY}.py {variant} first.")
+    model, size = load(variant, checkpoint), get_spec(variant).size
+    print(f"{FAMILY}/{variant} -> coreml-fp32")
+    with tempfile.TemporaryDirectory(dir=directory) as staging:
+        package = Path(staging) / "coreml-fp32.mlpackage"
+        _export_coreml(model, package, size)
+        _check(model, CoreMLRunner(package), size, fp16=False)
+        archive = shutil.make_archive(str(Path(staging) / "coreml-fp32"), "zip", root_dir=package)
+        Path(archive).replace(directory / "coreml-fp32.zip")
+    print(f"  wrote coreml-fp32.zip, {(directory / 'coreml-fp32.zip').stat().st_size / 1e6:.1f} MB")
 
 
 def main() -> int:
     parser = variant_parser(__doc__, ROOT / "weights", required=True, revision=REVISION)
     parser.add_argument("--fp16", action="store_true", help="export the fp16 graph instead")
+    parser.add_argument("--coreml", action="store_true",
+                        help="export the Core ML fp32 package instead (macOS)")
     args = parser.parse_args()
     for variant in args.variants:
-        export_variant(variant, args.revision, args.weights_dir, args.fp16)
+        if args.coreml:
+            export_coreml(variant, args.revision, args.weights_dir)
+        else:
+            export_variant(variant, args.revision, args.weights_dir, args.fp16)
     print("\nRun tools/generate_manifest.py next.")
     return 0
 

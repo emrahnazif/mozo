@@ -59,7 +59,8 @@ at the same cost. **small** or **medium** for most uses; **nano** for CPUs and m
 
 `runtime="auto"` picks a TensorRT engine on CUDA when TensorRT 11 or later is installed, and
 torch otherwise: fp16 for every variant but `nano`, whose fp16 engine was slower than its fp32 one.
-On the CPU it picks **ONNX Runtime** when it is installed (`pip install 'mozo[onnx]'`): the same
+On Apple silicon it picks the **Core ML** package (`pip install 'mozo[coreml]'`), 2.5–4.7× faster
+than torch MPS with the same detections. On the CPU it picks **ONNX Runtime** when it is installed (`pip install 'mozo[onnx]'`): the same
 detections, 1.8–3.3× faster than torch. Name a runtime to choose another:
 
 ```python
@@ -97,6 +98,22 @@ process, idle machine) it took 49 ms (`nano`) to 676 ms (`xlarge-obj365`) agains
 1,228 ms, 1.8–3.3× faster for every variant. On an i9-10900X it was 1.2–1.8× faster for nano to
 large, but those timings were taken while other jobs loaded the machine, and there
 `xlarge-obj365` came out slower (645 against 568 ms); treat them as indicative.
+
+On Apple silicon (M1 Max, coremltools 9), against torch fp32 on the CPU over 301 photographs (the
+fixture and 300 COCO val2017 images), graph-only median; each variant has 1,361–1,872 detections
+above 0.5:
+
+| Variant | torch MPS | `coreml-fp32` (`auto`) | changes |
+|---|---|---|---|
+| `nano` | 33.7 ms | 7.2 ms, 4.7× | 0 |
+| `small` | 40.6 ms | 11.6 ms, 3.5× | 0 |
+| `medium` | 56.5 ms | 18.1 ms, 3.1× | 0 |
+| `large` | 79.9 ms | 24.8 ms, 3.2× | 0 |
+| `xlarge` | 104.2 ms | 42.1 ms, 2.5× | 0 |
+| `xlarge-obj365` | 107.4 ms | 41.7 ms, 2.6× | 0 |
+
+The packages (14–230 MB) run on the GPU. No fp16 package is published: it was no faster than fp32
+on the GPU, and up to twice as slow when Core ML split it onto the Neural Engine.
 
 ## Inputs and outputs
 

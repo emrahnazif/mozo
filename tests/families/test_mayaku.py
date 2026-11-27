@@ -220,15 +220,20 @@ class TestDetections:
     @pytest.mark.parametrize("variant", ["street-nano", "street-seg-nano"])
     def test_matches_the_recorded_answer(self, predictor_for, image, variant):
         """Recorded from this vendor after ``tools/verify/mayaku.py`` held it equal to
-        ``mayaku`` 3.1.1 at every stage. Exact: same weights, same CPU arithmetic."""
+        ``mayaku`` 3.1.1 at every stage, on x86. Another CPU architecture sums in another order,
+        so a box can land one 0.01 px rounding step away (Apple silicon: 1706.74 for 1706.75);
+        exactness against upstream is the verify tool's claim, not this fixture's."""
         require_weights(FAMILY, variant)
         recorded = json.loads(RECORDED.read_text())[variant]
         found = predictor_for(variant).predict(image, threshold=recorded["threshold"])
-        assert [d.bbox for d in found] == recorded["bbox"]
-        assert [d.confidence for d in found] == recorded["confidence"]
+        assert len(found) == len(recorded["bbox"]), "the number of detections changed"
+        for got, want in zip(found, recorded["bbox"]):
+            assert list(got.bbox) == pytest.approx(want, abs=0.011)
+        assert [d.confidence for d in found] == pytest.approx(recorded["confidence"], abs=1e-4)
         assert [d.class_id for d in found] == recorded["class_id"]
         if "mask_pixels" in recorded:
-            assert [int(d.masks[0].sum()) for d in found] == recorded["mask_pixels"]
+            pixels = [int(d.masks[0].sum()) for d in found]  # Apple silicon: one pixel in 187,640
+            assert pixels == pytest.approx(recorded["mask_pixels"], rel=1e-4, abs=1)
 
 
 class TestRuntimes:

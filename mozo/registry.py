@@ -161,8 +161,10 @@ PREFERS: dict[str, dict[str, tuple[str, ...]]] = {
     "omdet_turbo": {"cuda": ("tensorrt-fp16",)},
     # RTX 3090, 500 COCO images per variant: the fp16 engine changed at most 4 of ~3,000 confident
     # detections and moved AP by at most 0.12, at 1.2-2.1x the fp32 engine. nano publishes no
-    # fp16 graph (its fp16 engine was slower), so it falls through to the fp32 engine.
-    "deim": {"cuda": ("tensorrt-fp16",)},
+    # fp16 graph (its fp16 engine was slower), so it falls through to the fp32 engine. On the CPU,
+    # ONNX Runtime runs the same exact graph 1.8-3.3x faster than torch on an M1 Max for every
+    # variant (49 against 161 ms for nano), and 1.2-1.8x on an i9 for nano to large.
+    "deim": {"cuda": ("tensorrt-fp16",), "cpu": ("onnx-fp32",)},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``

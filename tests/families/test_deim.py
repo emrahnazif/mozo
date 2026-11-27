@@ -218,6 +218,13 @@ class TestDetections:
 
 
 class TestRuntimes:
+    def test_without_onnxruntime_the_cpu_stays_on_torch(self, monkeypatch):
+        import mozo.runtimes as runtimes
+
+        require_weights(FAMILY, "nano")
+        monkeypatch.setitem(runtimes._REQUIRES, "onnx", "no_such_module_for_this_test")
+        assert TestTensorRT._choose("cpu", "nano") == "torch-fp32"
+
     @pytest.mark.parametrize("variant", ALL)
     def test_onnx_gives_the_torch_answer(self, predictor_for, image, variant):
         require_weights(FAMILY, variant, "onnx-fp32")
@@ -249,7 +256,7 @@ class TestTensorRT:
             assert self._choose("cuda", variant, "tensorrt-fp32") == "tensorrt-fp32", variant
         with pytest.raises(Exception, match="not published"):
             self._choose("cuda", "nano", "tensorrt-fp16")
-        assert self._choose("cpu", "nano") == "torch-fp32"
+        assert self._choose("cpu", "nano") == "onnx-fp32"
 
     def test_without_tensorrt_cuda_stays_on_torch(self, monkeypatch):
         import mozo.runtimes as runtimes

@@ -58,13 +58,14 @@ at the same cost. **small** or **medium** for most uses; **nano** for CPUs and m
 ## Runtimes
 
 `runtime="auto"` picks a TensorRT engine on CUDA when TensorRT 11 or later is installed, and
-torch otherwise: fp16 for every variant but `nano`, whose fp16 engine was slower than its fp32 one. On the CPU it picks torch, but **`runtime="onnx-fp32"` is faster there**
-(`pip install 'mozo[onnx]'`) and gives the same detections:
+torch otherwise: fp16 for every variant but `nano`, whose fp16 engine was slower than its fp32 one.
+On the CPU it picks **ONNX Runtime** when it is installed (`pip install 'mozo[onnx]'`): the same
+detections, 1.8–3.3× faster than torch. Name a runtime to choose another:
 
 ```python
 from mozo import ModelManager
 
-model = ModelManager().get_model("deim", "small", runtime="onnx-fp32")
+model = ModelManager().get_model("deim", "small", runtime="tensorrt-fp32")
 ```
 
 Measured on an RTX 3090 with torch 2.13, ONNX Runtime 1.21 (CPU) and TensorRT 11.5, on 500
@@ -91,9 +92,11 @@ detections in about 3,000 and moved AP by at most 0.12. `nano` gets the fp32 eng
 `runtime="tensorrt-fp32"` gives any variant torch's exact detections. Without TensorRT, `auto`
 stays on torch.
 
-On the CPU, torch took 67 ms (`nano`) to 570 ms (`xlarge-obj365`) and `onnx-fp32` 1.2–1.8× less
-for nano to large, with no detection changed; those CPU timings were taken while other jobs loaded
-the machine, so treat the ratio as indicative.
+On the CPU, `onnx-fp32` changed no detection. On an Apple M1 Max (eight threads, one runtime per
+process, idle machine) it took 49 ms (`nano`) to 676 ms (`xlarge-obj365`) against torch's 161 to
+1,228 ms, 1.8–3.3× faster for every variant. On an i9-10900X it was 1.2–1.8× faster for nano to
+large, but those timings were taken while other jobs loaded the machine, and there
+`xlarge-obj365` came out slower (645 against 568 ms); treat them as indicative.
 
 ## Inputs and outputs
 

@@ -116,6 +116,14 @@ def test_the_readme_repeats_that_count_consistently():
             )
 
 
+def test_the_allow_list_page_states_the_same_total():
+    """``docs/deployment/configuration.md`` says what an unset ``MOZO_ENABLE`` offers."""
+    page = (ROOT / "docs" / "deployment" / "configuration.md").read_text()
+    stated = re.search(r"the server offers all (\d+) models", page)
+    assert stated, "configuration.md no longer states the total -- update this test"
+    assert int(stated.group(1)) == published_variants()
+
+
 def test_the_registry_and_the_manifest_agree_on_the_families():
     """A family in the catalogue that publishes nothing is fine -- it takes your own checkpoint.
     A family in the manifest that the catalogue does not know is not reachable at all."""

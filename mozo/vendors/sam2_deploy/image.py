@@ -53,21 +53,26 @@ def preprocess(image: np.ndarray, size: int) -> torch.Tensor:
     return batch.sub_(mean).div_(std)
 
 
-def to_model_coords(coords: np.ndarray, shape: tuple[int, int], size: int) -> torch.Tensor:
+def to_model_coords(coords: np.ndarray, shape: tuple[int, int], size: int,
+                    device: str | torch.device = "cpu") -> torch.Tensor:
     """Scale x, y prompt coordinates from source pixels into the encoder's square.
 
     Args:
         coords: ``(..., 2)`` x, y in the source image's pixels.
         shape: The source image's ``(height, width)``.
         size: Square side the encoder runs at.
+        device: Where the model runs. The arithmetic happens there, as in upstream's
+            ``SAM2ImagePredictor``: on CUDA torch divides by a Python number as a multiply by its
+            reciprocal, which differs from the host's divide in the last bit (210 / 960 does), and
+            that moves the decoder's logits.
 
     Returns:
-        The same shape, as a float tensor in ``[0, size]``.
+        The same shape, as a float tensor in ``[0, size]`` on *device*.
     """
     height, width = shape
     # ``torch.tensor`` copies, which is what keeps the in-place divides below off the caller's
     # array -- ``as_tensor`` would share memory with a float32 input and scale it under them.
-    scaled = torch.tensor(np.asarray(coords, dtype=np.float32))
+    scaled = torch.tensor(np.asarray(coords, dtype=np.float32), device=device)
     # Normalise then scale, rather than multiplying by the combined ratio. The two differ in the
     # last bits of a float, which is enough to move a box corner across a pixel boundary and put
     # one pixel of the mask on the other side of the threshold.

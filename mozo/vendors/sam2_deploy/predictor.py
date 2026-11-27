@@ -202,7 +202,7 @@ class Segmenter:
         groups, marks = [], []
         if boxes is not None:
             corners = np.asarray(boxes, dtype=np.float32).reshape(-1, 2, 2)
-            groups.append(to_model_coords(corners, shape, self.image_size))
+            groups.append(to_model_coords(corners, shape, self.image_size, self.device))
             corner_labels = torch.tensor([[BOX_TOP_LEFT, BOX_BOTTOM_RIGHT]], dtype=torch.int32)
             marks.append(corner_labels.repeat(len(corners), 1))
         if points is not None:
@@ -212,7 +212,7 @@ class Segmenter:
                 clicks, flags = clicks[None], flags[None]
             if clicks.shape[:2] != flags.shape[:2]:
                 raise ValueError(f"{clicks.shape[1]} points but {flags.shape[1]} labels")
-            groups.append(to_model_coords(clicks, shape, self.image_size))
+            groups.append(to_model_coords(clicks, shape, self.image_size, self.device))
             marks.append(torch.as_tensor(flags, dtype=torch.int32))
 
         if len(groups) == 2 and groups[0].shape[0] != groups[1].shape[0]:

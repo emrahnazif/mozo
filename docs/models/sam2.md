@@ -230,8 +230,10 @@ In a workflow, the `sam2_track` node takes a detector's boxes on the first frame
 follows those objects through the video, each keeping the class of the detection that started it.
 Over HTTP, that workflow runs on an uploaded video through `/workflow/process`.
 
-**What it matches.** The tracker is Meta's `SAM2VideoPredictor` frame by frame, bit for bit on CPU,
-fed the same frames. Two differences are Meta's own: it preprocesses a frame slightly differently
+**What it matches.** The tracker is Meta's `SAM2VideoPredictor` frame by frame, fed the same
+frames: bit-identical on CUDA (RTX 3060, torch 2.13, CUDA 12.6) in fp32, every variant, and also on
+CPU. The same gate checks `predict` against Meta's `SAM2ImagePredictor` (a click, single-mask
+clicks and a box), bit-identical on both too. Two differences are Meta's own: it preprocesses a frame slightly differently
 from its image predictor, so the first mask can differ from `predict`'s by a few pixels; and on a
 clip shorter than 16 frames its answer depends on the clip's length, which a stream does not have
 (the tracker behaves as a video of 16 frames or more). Meta's predictor fills small holes in masks

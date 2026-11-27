@@ -315,6 +315,12 @@ found traps it had not predicted, and the predicted ones were mostly real.
 - **Batched and unbatched forwards are not bit-identical.** 2.5e-07 for OWLv2; **1.4e-05** for
   EasyOCR's recogniser, enough to flip a character. Batch exactly as upstream does — which may mean
   *not* batching.
+- **On CUDA, dividing a tensor by a Python number multiplies by its reciprocal.** torch's CUDA
+  kernel computes `1 / b` once and multiplies; the CPU divides. `np.float32(210) / 960` and
+  `210 * (1 / 960)` differ in the last bit. SAM 2's image predictor scales prompt coordinates on
+  the device (`coords / w * 1024`); mozo did it on the host, which was exact on CPU and moved the
+  decoder's logits by up to 1.7e-03 on CUDA. Do arithmetic on the device upstream does it on,
+  even when it looks like plain bookkeeping. Only a GPU gate can catch this.
 
 ### Checkpoint and geometry
 

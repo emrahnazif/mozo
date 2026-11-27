@@ -105,8 +105,8 @@ obvious:
 with its defaults (dynamic multimask fallback, `binarize_mask_from_pts_for_mem_enc=True`,
 `fill_hole_area=8`), fed a folder of frames.
 
-**Guarantee:** for the same RGB frames and prompts, `Tracker.update` returns, on CPU, logits at
-the video's size equal (`torch.equal`) to what upstream yields from `add_new_points_or_box` and
+**Guarantee:** for the same RGB frames and prompts, `Tracker.update` returns, on CUDA and on CPU,
+logits at the video's size equal (`torch.equal`) to what upstream yields from `add_new_points_or_box` and
 `propagate_in_video`. An object prompted on frame *t* equals upstream's predictor given that
 prompt at frame *t* part way through tracking. Measured by `tools/verify/sam2_video.py`:
 every stage per frame and object -- the preprocessed frame, the image features, memory
@@ -114,7 +114,24 @@ attention's output, the stored low-res logits, object pointer, object score and 
 memory, and the logits at the video's size -- over 20 bedroom frames with three objects (a click,
 a box, a click pair); an object started on frame 8; a 10-frame clip with its length given;
 frames fed backwards against `reverse=True`; single- and three-mask image calls against
-`SAM2ImagePredictor`; and mozo end to end (`get_model` -> `tracker()` -> PixelFlow). **`tiny`: 706
+`SAM2ImagePredictor`; and mozo end to end (`get_model` -> `tracker()` -> PixelFlow).
+
+**On CUDA (the primary gate, 2026-11-27):** RTX 3060 (vision-002), torch 2.13.0+cu126, CUDA 12.6,
+cuDNN 9.10.2, driver 550.144.03, fp32 (mozo's only torch precision for SAM 2: `auto` is
+`torch-fp32` on CUDA too), torch's default switches, as mozo's runtime leaves them (TF32 matmul
+off, TF32 cuDNN on, `cudnn.benchmark` off, SDPA free to choose). Both sides in one process; each
+side repeated itself byte for byte (11,392 of 11,392 repeat comparisons, three runs per side).
+**All four variants: 2,848 of 2,848 comparisons bit-identical** (712 each; the same on a first
+pass with two runs per side). This needed one
+vendor fix: the image path scaled prompt coordinates on the host, upstream on the device, where
+torch divides by a Python number as a multiply by its reciprocal (`210 / 960` and
+`210 * (1 / 960)` differ in the last bit). The low-res logits moved by up to 1.7e-03 and the IoU
+by 4.6e-07 on CUDA; on CPU the two were the same. `to_model_coords` now runs on the model's
+device. The video path needed nothing: its prompts are scaled on the host by upstream too.
+
+**On CPU (secondary):** after the fix and with the two new stages (image-path low-res logits,
+`requires_grad`), `tiny` 712 of 712 (torch 2.11.0+cpu, 4 threads, `MKL_CBWR=AVX2,STRICT`), and the
+7 perturbations a CPU can catch are caught. Before them, **`tiny`: 706
 of 706 comparisons bit-identical** (torch 2.11.0+cpu, 4 threads, `MKL_CBWR=AVX2,STRICT`).
 **`small`, `base_plus`, `large`: 2,118 of 2,118 bit-identical** (706 each; a second machine, torch
 2.13.0, 6 threads, `MKL_CBWR=AVX2,STRICT`).
@@ -127,6 +144,15 @@ encoding normalised by 16 not 15 (memory attention, frame 1); frames older than 
 click-pair object). A seventh candidate, dividing by 255 in float32 rather than float64, is not a
 perturbation at all: the two agree for every byte value.
 
+On CUDA (`tiny`, the same stack as the gate) all 13 perturbations are caught: the six above,
+each at the first stage it touches (the gate now records each frame's stored outputs as they are
+returned, so three are caught on frame 0); every parameter frozen, caught only by the recorded
+`requires_grad` stage, because on this GPU freezing moved no arithmetic (unlike HQ-SAM); and six
+that only a GPU can show: TF32 matmuls on (image features, 4.9e-04), TF32 cuDNN convolutions off
+(image features, 2.4e-04), channels-last frames (image features, 3.9e-03), SDPA pinned to the math
+kernel (image features, 8.8e-05), memory attention on the host (its first call, 1.1e-05), and
+image-path prompts scaled on the host (the unstable click's IoU, 4.6e-07).
+
 Why a session can be exact: tracking frame *t* reads, per object, its prompted frame, the outputs
 of frames *t-1*…*t-6* (memories) and *t-1*…*t-15* (object pointers), and nothing later. Driving
 upstream's own predictor one frame at a time, with later frames unreadable, gives the same logits
@@ -137,7 +163,7 @@ size one each), which is what makes adding an object on a later frame exact.
 
 - **Holes.** Upstream fills mask holes of up to 8 low-res pixels only if its optional CUDA
   extension `sam2._C` was built; otherwise it catches the ImportError and skips. This package
-  reproduces the skip. Upstream installs that built the extension fill holes and differ from it.
+  reproduces the skip, and the CUDA gate imports upstream from source, without the extension. Upstream installs that built the extension fill holes and differ from it.
 - **Clips shorter than 16 frames.** Upstream normalises the object-pointer temporal encoding by
   `min(num_frames, 16) - 1`, so its offline answer on a short clip depends on the clip's length.
   A stream has none: the session behaves as a video of 16 frames or more. `Segmenter.tracker`

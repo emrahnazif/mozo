@@ -6,7 +6,8 @@
   Each frame returns PixelFlow detections, one per object in view, with a `tracker_id` that stays
   with the object, its mask at the frame's size, and SAM 2's probability that it is visible. The
   tracker keeps only the last 15 frames, so a long video or a camera runs in constant memory. It is
-  Meta's video predictor frame by frame, bit for bit on CPU. Nothing new to download: the published
+  Meta's video predictor frame by frame, bit-identical on CUDA (RTX 3060, torch 2.13, CUDA 12.6)
+  in fp32 for every size, and also on CPU. Nothing new to download: the published
   SAM 2 files already held the tracker's weights. A new workflow node, `sam2_track`, follows the
   objects a detector finds on the first frame. Tracking on CPU is slow (about 2 s a frame for
   `tiny` with one object); every object costs a pass of SAM 2's memory attention per frame.
@@ -15,6 +16,10 @@
   single mask is unstable, take the best of the three candidates instead. It fires often for a
   single click (21 of 40 random clicks on one test frame, changing those masks); a box or several
   clicks are usually stable. Calls with three candidates (the default) are unchanged.
+- **SAM 2's `predict` on CUDA now matches Meta's predictor bit for bit.** mozo scaled prompt
+  coordinates on the CPU and Meta scales them on the GPU, where the last bit of a division can
+  come out differently. That moved the mask logits slightly (up to 0.002) on some prompts. The
+  scaling now happens on the GPU too. On CPU nothing changes.
 
 - **RF-DETR runs 1.7 to 2.6 times faster on CUDA by default, with the same detections**, when
   TensorRT 11 or later is installed (`pip install tensorrt-cu12` or `-cu13`). `auto` then builds a

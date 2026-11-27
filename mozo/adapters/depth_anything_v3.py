@@ -35,7 +35,7 @@ import numpy as np
 import torch
 
 from ..image import load_image
-from ..registry import DERIVES, EXECUTES
+from ..registry import DERIVES, EXECUTES, PREFERS
 from ..runtimes import TensorRTRunner, get_default_device, make_runner, select_runtime
 from ..vendors.depth_anything_v3_deploy import (MODEL_SPECS, Predictor, postprocess, preprocess,
                                                 resize, shape_inputs)
@@ -82,7 +82,8 @@ class DepthAnythingV3Predictor:
         self._spec = MODEL_SPECS[variant]
         self.runtime = select_runtime(
             self.device, artifacts(self.FAMILY, variant, revision=revision), runtime,
-            executes=EXECUTES.get(self.FAMILY), derives=DERIVES.get(self.FAMILY))
+            executes=EXECUTES.get(self.FAMILY), derives=DERIVES.get(self.FAMILY),
+            prefers=PREFERS.get(self.FAMILY))
 
         self._predictor = self._runner = None
         framework = framework_of(self.runtime)

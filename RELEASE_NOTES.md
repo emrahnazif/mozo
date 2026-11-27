@@ -53,9 +53,9 @@
   arbitrary scale, larger meaning nearer, `unit=None` -- so the two families are interchangeable in
   code and in workflows (a `depth_anything_v3` node). Bit-identical to the authors' code on every
   intermediate, on CUDA (RTX 3060, torch 2.13, CUDA 12.6) in fp32 and under upstream's own bf16
-  and fp16 autocast, and on the CPU. On CUDA with TensorRT 11 installed, `auto` runs an fp32
-  TensorRT engine built from the published ONNX graph, with the same accuracy;
-  `runtime="tensorrt-fp16"` is faster still for `small` and `base`. See the family's page for
+  and fp16 autocast, and on the CPU. On CUDA with TensorRT 11 installed, `auto` runs an fp16
+  TensorRT engine built from a published fp16 graph, 2.2 to 3.1 times torch with AbsRel unchanged
+  on NYUv2 (`runtime="tensorrt-fp32"` matches torch's map to 1e-6, 1.2 to 1.4 times torch). See the family's page for
   speeds. The non-commercial sizes, and the metric model (which needs the camera's focal length),
   are not offered.
 

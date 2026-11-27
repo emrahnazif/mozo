@@ -15,7 +15,8 @@ from conftest import FIXTURE, published, require_weights
 from mozo.vendors.depth_anything_v3_deploy import (MODEL_SPECS, DepthAnything3Net, fill_sky,
                                                    get_spec, processed_size, shape_inputs)
 from mozo.vendors.depth_anything_v3_deploy.graph import input_names, output_names, profile
-from mozo.weights import WeightsError
+from mozo.runtimes import select_runtime
+from mozo.weights import WeightsError, artifacts
 
 FAMILY = "depth_anything_v3"
 ALL = ("small", "base", "mono-large")
@@ -205,6 +206,33 @@ class TestDepthMaps:
         want = predictor_for(variant).predict(image)
         got = predictor_for(variant, "onnx-fp32").predict(image)
         assert np.abs(got - want).max() / np.abs(want).max() < 1e-3
+
+
+def _choose(device, variant, runtime="auto"):
+    """What ``auto`` (or *runtime*) resolves to for *variant* with the family's own tables."""
+    from mozo.registry import DERIVES, PREFERS
+
+    return select_runtime(device, artifacts(FAMILY, variant), runtime,
+                          derives=DERIVES[FAMILY], prefers=PREFERS[FAMILY])
+
+
+class TestAuto:
+    """On CUDA ``auto`` takes the fp16 engine (``registry.PREFERS``); the CPU stays on torch."""
+
+    @pytest.mark.parametrize("variant", ALL)
+    def test_cuda_takes_the_fp16_engine_when_tensorrt_is_usable(self, monkeypatch, variant):
+        import mozo.runtimes as runtimes
+
+        require_weights(FAMILY, variant, "onnx-fp16")
+        monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: True)
+        assert _choose("cuda", variant) == "tensorrt-fp16"
+        assert _choose("cuda", variant, "tensorrt-fp32") == "tensorrt-fp32"
+        monkeypatch.setattr(runtimes, "_tensorrt_usable", lambda: False)
+        assert _choose("cuda", variant) == "torch-fp32"
+
+    def test_the_cpu_stays_on_torch(self):
+        require_weights(FAMILY, "small", "onnx-fp32")
+        assert _choose("cpu", "small") == "torch-fp32"
 
 
 class TestAdapter:

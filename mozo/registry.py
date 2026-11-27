@@ -143,8 +143,8 @@ DERIVES: dict[str, dict[str, str]] = {
     "deim": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
     # The same shape of decision for Depth Anything 3, on 654 NYUv2 test images (RTX 3090):
     # tensorrt-fp32 changes the inverse depth by 3e-7 to 8e-7 on average and AbsRel not at all,
-    # at 1.2x (mono-large) to 1.4x (small) torch fp32 end to end; tensorrt-fp16 is 3.1x, moves
-    # AbsRel by at most 1e-4, and is on request only.
+    # at 1.2x (mono-large) to 1.4x (small) torch fp32 end to end; tensorrt-fp16 is 2.2-3.1x and
+    # moves AbsRel by at most 1e-4 (:data:`PREFERS`).
     "depth_anything_v3": {"tensorrt-fp32": "onnx-fp32", "tensorrt-fp16": "onnx-fp16"},
 }
 
@@ -170,6 +170,11 @@ PREFERS: dict[str, dict[str, tuple[str, ...]]] = {
     # ONNX Runtime runs the same exact graph 1.8-3.3x faster than torch on an M1 Max for every
     # variant (49 against 161 ms for nano), and 1.2-1.8x on an i9 for nano to large.
     "deim": {"cuda": ("tensorrt-fp16",), "cpu": ("onnx-fp32",)},
+    # RTX 3090, 654 NYUv2 test images: the fp16 engine left AbsRel and delta1 within 1e-4 of fp32
+    # for every variant, at 1.7-2.5x the fp32 engine end to end. The CPU stays on torch: ONNX
+    # Runtime was slower on an M1 Max for every variant (249 against 183 ms for small, 2,148
+    # against 910 ms for mono-large) and no faster on an i9.
+    "depth_anything_v3": {"cuda": ("tensorrt-fp16",)},
 }
 
 #: Artifacts a load fetches beside its runtime, by the framework that runtime belongs to; ``"*"``

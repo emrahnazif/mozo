@@ -107,25 +107,32 @@ runtimes, not to restate the authors' benchmark.
 | Variant | Runtime | ms | vs torch | AbsRel | δ1 | GPU memory |
 |---|---|---|---|---|---|---|
 | `small` | `torch-fp32` | 26.8 | 1.00× | 0.0941 | 0.9042 | 336 MiB |
-| | `tensorrt-fp32` (auto) | 18.9 | 1.42× | 0.0941 | 0.9042 | 452 MiB |
-| | `tensorrt-fp16` | 8.6 | 3.1× | 0.0941 | 0.9042 | 250 MiB |
+| | `tensorrt-fp32` | 18.9 | 1.42× | 0.0941 | 0.9042 | 452 MiB |
+| | `tensorrt-fp16` (auto) | 8.6 | 3.1× | 0.0941 | 0.9042 | 250 MiB |
 | `base` | `torch-fp32` | 29.1 | 1.00× | 0.0732 | 0.9356 | 724 MiB |
-| | `tensorrt-fp32` (auto) | 23.3 | 1.25× | 0.0732 | 0.9356 | 907 MiB |
-| | `tensorrt-fp16` | 13.4 | 2.2× | 0.0732 | 0.9356 | 640 MiB |
+| | `tensorrt-fp32` | 23.3 | 1.25× | 0.0732 | 0.9356 | 907 MiB |
+| | `tensorrt-fp16` (auto) | 13.4 | 2.2× | 0.0732 | 0.9356 | 640 MiB |
 | `mono-large` | `torch-fp32` | 68.4 | 1.00× | 0.0689 | 0.9412 | 1,662 MiB |
-| | `tensorrt-fp32` (auto) | 56.3 | 1.21× | 0.0689 | 0.9412 | 1,700 MiB |
-| | `tensorrt-fp16` | 22.3 | 3.1× | 0.0690 | 0.9413 | 992 MiB |
+| | `tensorrt-fp32` | 56.3 | 1.21× | 0.0689 | 0.9412 | 1,700 MiB |
+| | `tensorrt-fp16` (auto) | 22.3 | 3.1× | 0.0690 | 0.9413 | 992 MiB |
 
-- **On CUDA with TensorRT 11 installed, `auto` picks `tensorrt-fp32`**: the inverse depth moves by
-  3e-7 to 8e-7 on average and AbsRel not at all. The first load builds the engine from the
-  published ONNX graph (21-26 s) and keeps it; every image shape (3 to 36 patches a side) runs
-  on that one engine. Without TensorRT, `auto` stays on torch.
-- **`tensorrt-fp16` is on request** (`runtime="tensorrt-fp16"`): 2.2 to 3.1 times torch, AbsRel
-  within 1e-4. Per pixel it is not fp32: the mean relative difference is 0.08-0.11%, and single
-  pixels move by up to a few tens of percent at depth edges. Its engine builds in 37-44 s.
+- **On CUDA with TensorRT 11 installed, `auto` picks `tensorrt-fp16`**: 2.2 to 3.1 times torch,
+  AbsRel and δ1 within 1e-4 of fp32. Per pixel it is not fp32: the mean relative difference is
+  0.08-0.11%, and single pixels move by up to a few tens of percent at depth edges. The first load
+  builds the engine from the published fp16 graph (37-44 s) and keeps it; every image shape (3 to
+  36 patches a side) runs on that one engine. Without TensorRT, `auto` stays on torch.
+- **`tensorrt-fp32`** (`runtime="tensorrt-fp32"`) is the engine to ask for when the map must match
+  torch: the inverse depth moves by 3e-7 to 8e-7 on average, at 1.2 to 1.4 times torch. Its
+  engine builds in 21-26 s.
 - **`onnx-fp32`** runs on ONNX Runtime anywhere. On the CPU it was about as fast as torch for
-  `small` and `base` and half as fast for `mono-large` (a loaded 20-thread machine, so indicative);
-  on CUDA it was slower than torch for `small` and `base`. `auto` does not pick it.
+  `small` and `base` and half as fast for `mono-large` on an i9 (a loaded 20-thread machine, so
+  indicative), and slower for every variant on an Apple M1 Max (249 against 183 ms for `small`,
+  689 against 408 for `base`, 2,148 against 910 for `mono-large`, a whole `predict`); on CUDA it was
+  slower than torch for `small` and `base`. `auto` does not pick it.
+- **No Core ML package.** The graph takes images of any shape from 3 to 36 patches a side, and
+  coremltools 9 converts neither the dynamic-shape graph (its symbolic shapes fail on an in-place
+  update) nor, at a fixed shape, the rotary position embedding (`cartesian_prod`). On Apple
+  silicon `auto` runs torch on MPS.
 - `mono-large`'s sky is chosen by a threshold, so a pixel at the sky's edge can fall on either
   side in different runtimes and come out with a very different value. That is the large
   per-pixel maxima between runtimes; the map as a whole agrees.

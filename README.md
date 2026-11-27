@@ -283,7 +283,7 @@ tolerance.** Exact equality, because a tolerance hides precisely the drift a che
 
 The gates in `tools/verify/` compare every intermediate stage against the original implementation,
 not just the final answer: 1,275 comparisons for EasyOCR, 226 for OWLv2, 138 for Grounding DINO,
-every one identical. Seventeen of the twenty-one families ship one; all twenty-one have their parity measured
+every one identical. Eighteen of the twenty-one families ship one; all twenty-one have their parity measured
 and recorded in
 `mozo/vendors/<family>_deploy/PROVENANCE.md`, with the upstream commit it was built from.
 

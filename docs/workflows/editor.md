@@ -30,7 +30,7 @@ its source produces, such as every frame of a video. **Tidy up** lays out every 
 bottom along the connections. **Export** saves the workflow as a JSON file, and **Import** opens
 one.
 
-[Nodes](/docs/workflows/nodes.md) lists all 52 nodes with their inputs, outputs and parameters.
+[Nodes](/docs/workflows/nodes.md) lists all 53 nodes with their inputs, outputs and parameters.
 
 ## What a workflow is
 
